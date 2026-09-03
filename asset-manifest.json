@@ -1,0 +1,13 @@
+{
+  "files": {
+    "main.css": "/bayview-boarding/static/css/main.045b5c32.css",
+    "main.js": "/bayview-boarding/static/js/main.89d9063b.js",
+    "index.html": "/bayview-boarding/index.html",
+    "main.045b5c32.css.map": "/bayview-boarding/static/css/main.045b5c32.css.map",
+    "main.89d9063b.js.map": "/bayview-boarding/static/js/main.89d9063b.js.map"
+  },
+  "entrypoints": [
+    "static/css/main.045b5c32.css",
+    "static/js/main.89d9063b.js"
+  ]
+}
