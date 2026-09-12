@@ -20,5 +20,11 @@
   ],
   "[typescript]": {
     "editor.defaultFormatter": "denoland.vscode-deno"
+  },
+  "jest.jestCommandLine": "npm test --",
+  "jest.autoRun": {
+    "watch": false,
+    "onSave": "test-src-file",
+    "onStartup": ["all-tests"]
   }
 }

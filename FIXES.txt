@@ -17,8 +17,9 @@ NEXT CHANGE LIST (v1.5)
 
 4. Persist admin rate setting to Supabase settings table.
 
-5. Lookup not working yet — confirm phone-based lookup returns
-   correct data for returning clients.
+5. Lookup — rebuilt on the lookup-client Edge Function (v1.5) and
+   confirmed working via direct testing; still worth a click-through
+   in the actual app to double check the autofill UX end to end.
 
 6. Signature timestamp — add client timezone to Supabase record
    for legal clarity.
@@ -27,12 +28,21 @@ TWILIO STATUS
 -------------
 - A2P 10DLC registration submitted September 12, 2026
 - Under carrier review — expect approval in a few days to weeks
-- Twilio account: (650) 252-2433
+- Twilio account: see src/settings.js PHONE
 - Confirmation SMS wired up and tested (pending A2P approval)
 - Reminder and billing SMS templates ready in settings.js
 
 COMPLETED
 ---------
+- v1.5: Fixed live PII exposure — stays table had a public "Allow all" RLS
+  policy, meaning anyone with the public anon key (shipped in the JS bundle)
+  could read/edit/delete every client's name, phone, email, signature, and
+  health/aggression notes with an unauthenticated request. Locked to
+  anon-INSERT-only; admin reads and returning-client lookup now go through
+  Edge Functions (admin-data, lookup-client) using the service role key.
+  Admin password moved from a hardcoded App.js constant to a Supabase
+  secret, checked server-side. Old password rotated (was public in git
+  history).
 - v1.4: Settings file (src/settings.js) for rates, vets, messages, packing list
 - v1.4: Packing list in SMS reminder template
 - v1.4: Privacy policy page (privacy.html)

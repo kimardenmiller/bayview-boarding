@@ -4,7 +4,6 @@ import { supabase } from './supabase';
 import { SETTINGS } from './settings';
 import './App.css';
 
-const ADMIN_PASSWORD = 'bayview2024';
 const DEFAULT_RATE = SETTINGS.DEFAULT_DAY_RATE;
 
 const SAN_RAFAEL_VETS = SETTINGS.SAN_RAFAEL_VETS;
@@ -85,14 +84,11 @@ function StepOwner({ data, onChange, onNext }) {
   async function lookupPhone() {
     if (!data.ownerPhone.trim()) return;
     setLooking(true);
-    const { data: rows } = await supabase
-      .from('stays')
-      .select('*')
-      .eq('owner_phone', data.ownerPhone.trim())
-      .order('submitted_at', { ascending: false })
-      .limit(1);
-    if (rows && rows.length > 0) {
-      const r = rows[0];
+    const { data: result } = await supabase.functions.invoke('lookup-client', {
+      body: { phone: data.ownerPhone.trim() },
+    });
+    if (result?.found) {
+      const r = result.client;
       onChange('ownerName', r.owner_name || '');
       onChange('ownerEmail', r.owner_email || '');
       setFound(true);
@@ -141,14 +137,11 @@ function StepDog({ data, onChange, onNext, onBack }) {
 
   async function lookupDog(phone) {
     if (!phone) return;
-    const { data: rows } = await supabase
-      .from('stays')
-      .select('*')
-      .eq('owner_phone', data.ownerPhone.trim())
-      .order('submitted_at', { ascending: false })
-      .limit(1);
-    if (rows && rows.length > 0) {
-      const r = rows[0];
+    const { data: result } = await supabase.functions.invoke('lookup-client', {
+      body: { phone: data.ownerPhone.trim() },
+    });
+    if (result?.found) {
+      const r = result.client;
       onChange('dogName', r.dog_name || '');
       onChange('dogBreed', r.dog_breed || '');
       onChange('dogDob', r.dog_dob || '');
@@ -387,15 +380,18 @@ function AdminView({ onClose, rate, setRate }) {
   const [editRate, setEditRate] = useState(rate);
 
   async function login() {
-    if (pw === ADMIN_PASSWORD) {
-      setAuthed(true);
-      setLoading(true);
-      const { data } = await supabase.from('stays').select('*').order('submitted_at', { ascending: false });
-      setStays(data || []);
-      setLoading(false);
-    } else {
+    setError('');
+    setLoading(true);
+    const { data: result, error: fnError } = await supabase.functions.invoke('admin-data', {
+      body: { password: pw },
+    });
+    setLoading(false);
+    if (fnError || !result?.stays) {
       setError('Incorrect password');
+      return;
     }
+    setAuthed(true);
+    setStays(result.stays);
   }
 
   if (!authed) {

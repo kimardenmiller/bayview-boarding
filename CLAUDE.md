@@ -18,8 +18,8 @@ Kim Miller and Estee Fletter at 210 Bayview Drive, San Rafael, CA.
 - Supabase (database + Edge Functions)
 - Twilio (SMS via send-confirmation Edge Function)
 - GitHub Pages hosting (kimardenmiller.github.io/bayview-boarding)
-- Admin password: bayview2024
-- Twilio phone: (650) 252-2433
+- Admin password: set as the `ADMIN_PASSWORD` Supabase secret (`supabase secrets set ADMIN_PASSWORD=...`) — never in source, checked server-side by the admin-data function
+- Twilio phone: see src/settings.js PHONE (business's own public contact number)
 
 ## Key files
 - src/App.js — main app
@@ -27,7 +27,20 @@ Kim Miller and Estee Fletter at 210 Bayview Drive, San Rafael, CA.
 - src/waiver.js — full waiver text
 - src/App.test.js — 7 passing tests (TDD)
 - supabase/functions/send-confirmation/index.ts — Twilio SMS function
+- supabase/functions/admin-data/index.ts — server-side admin password check + full stay data (service role key, never exposed to client)
+- supabase/functions/lookup-client/index.ts — returning-client autofill by phone (returns only safe fields, not full record)
+- supabase/migrations/ — RLS policy history for the `stays` table
 - FIXES.txt — current fix list and backlog
+
+## Security notes
+- This is a static, client-side-only app (GitHub Pages, no server) — anything
+  in the JS bundle is public. Never put secrets (passwords, API keys) directly
+  in App.js/settings.js again; they must live server-side as Supabase secrets
+  and be checked from an Edge Function.
+- `stays` RLS only allows anon `INSERT` (the booking form). All reads go
+  through Edge Functions using the service role key. Do not re-add a public
+  SELECT/UPDATE/DELETE policy on `stays` without a real reason — this table
+  holds client PII (names, phone, email, signatures, health/aggression notes).
 
 ## Current priorities (v1.5)
 1. Stay reminder SMS — cron job 24hrs before drop-off
