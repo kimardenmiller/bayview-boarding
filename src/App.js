@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { WAIVER_SECTIONS } from './waiver';
 import { supabase } from './supabase';
 import { SETTINGS } from './settings';
+import heroDog from './img/hero-dog.jpg';
 import './App.css';
 
 const DEFAULT_RATE = SETTINGS.DEFAULT_DAY_RATE;
@@ -592,6 +593,11 @@ export default function App() {
   return (
     <div className="app">
       <Header onAdmin={() => setShowAdmin(true)} />
+      {step === 0 && !submitted && (
+        <div className="hero-banner">
+          <img src={heroDog} alt="A happy dog boarding with Bayview Boarding on a Marin hillside trail" />
+        </div>
+      )}
       <main className="main">
         {!submitted ? (
           <>
