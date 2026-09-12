@@ -92,21 +92,19 @@ function StepOwner({ data, onChange, onNext }) {
   const [looking, setLooking] = useState(false);
   const [found, setFound] = useState(false);
 
-  async function lookupEmail() {
-    if (!data.ownerEmail.trim()) return;
+  async function lookupPhone() {
+    if (!data.ownerPhone.trim()) return;
     setLooking(true);
     const { data: rows } = await supabase
       .from('stays')
       .select('*')
-      .eq('owner_email', data.ownerEmail.trim().toLowerCase())
+      .eq('owner_phone', data.ownerPhone.trim())
       .order('submitted_at', { ascending: false })
       .limit(1);
     if (rows && rows.length > 0) {
       const r = rows[0];
       onChange('ownerName', r.owner_name || '');
-      onChange('ownerPhone', r.owner_phone || '');
-      onChange('emergencyName', r.emergency_name || '');
-      onChange('emergencyPhone', r.emergency_phone || '');
+      onChange('ownerEmail', r.owner_email || '');
       setFound(true);
     } else {
       setFound(false);
@@ -116,11 +114,9 @@ function StepOwner({ data, onChange, onNext }) {
 
   function validate() {
     const e = {};
-    if (!data.ownerName.trim()) e.ownerName = 'Required';
     if (!data.ownerPhone.trim()) e.ownerPhone = 'Required';
+    if (!data.ownerName.trim()) e.ownerName = 'Required';
     if (!data.ownerEmail.trim()) e.ownerEmail = 'Required';
-    if (!data.emergencyName.trim()) e.emergencyName = 'Required';
-    if (!data.emergencyPhone.trim()) e.emergencyPhone = 'Required';
     setErrors(e);
     return Object.keys(e).length === 0;
   }
@@ -128,10 +124,10 @@ function StepOwner({ data, onChange, onNext }) {
   return (
     <div className="step">
       <h2 className="step-title">Owner Information</h2>
-      <Field label="Email Address" hint="Returning client? Enter your email and click Look up to auto-fill." error={errors.ownerEmail}>
-        <div style={{ display: 'flex', gap: 8 }}>
-          <input value={data.ownerEmail} onChange={e => onChange('ownerEmail', e.target.value)} placeholder="jane@email.com" type="email" style={{ flex: 1 }} onBlur={lookupEmail} />
-          <button className="btn-secondary" onClick={lookupEmail} style={{ whiteSpace: 'nowrap', padding: '10px 14px' }}>
+      <Field label="Phone Number" hint="Returning client? Enter your number and click Look up to auto-fill." error={errors.ownerPhone}>
+        <div className="email-row">
+          <input value={data.ownerPhone} onChange={e => onChange('ownerPhone', e.target.value)} placeholder="(415) 555-0100" type="tel" />
+          <button className="btn-secondary" onClick={lookupPhone} style={{ whiteSpace: 'nowrap', padding: '10px 14px' }}>
             {looking ? '...' : 'Look up'}
           </button>
         </div>
@@ -140,14 +136,8 @@ function StepOwner({ data, onChange, onNext }) {
       <Field label="Your Full Name" error={errors.ownerName}>
         <input value={data.ownerName} onChange={e => onChange('ownerName', e.target.value)} placeholder="Jane Smith" />
       </Field>
-      <Field label="Phone Number" error={errors.ownerPhone}>
-        <input value={data.ownerPhone} onChange={e => onChange('ownerPhone', e.target.value)} placeholder="(415) 555-0100" type="tel" />
-      </Field>
-      <Field label="Emergency Contact Name" error={errors.emergencyName}>
-        <input value={data.emergencyName} onChange={e => onChange('emergencyName', e.target.value)} placeholder="Contact name" />
-      </Field>
-      <Field label="Emergency Contact Phone" error={errors.emergencyPhone}>
-        <input value={data.emergencyPhone} onChange={e => onChange('emergencyPhone', e.target.value)} placeholder="(415) 555-0101" type="tel" />
+      <Field label="Email Address" error={errors.ownerEmail}>
+        <input value={data.ownerEmail} onChange={e => onChange('ownerEmail', e.target.value)} placeholder="jane@email.com" type="email" />
       </Field>
       <div className="step-actions">
         <button className="btn-primary" onClick={() => validate() && onNext()}>Continue</button>
@@ -159,12 +149,12 @@ function StepOwner({ data, onChange, onNext }) {
 function StepDog({ data, onChange, onNext, onBack }) {
   const [errors, setErrors] = useState({});
 
-  async function lookupDog(email) {
-    if (!email) return;
+  async function lookupDog(phone) {
+    if (!phone) return;
     const { data: rows } = await supabase
       .from('stays')
       .select('*')
-      .eq('owner_email', email.toLowerCase())
+      .eq('owner_phone', data.ownerPhone.trim())
       .order('submitted_at', { ascending: false })
       .limit(1);
     if (rows && rows.length > 0) {
@@ -177,7 +167,7 @@ function StepDog({ data, onChange, onNext, onBack }) {
     }
   }
 
-  useState(() => { lookupDog(data.ownerEmail); }, []);
+  useState(() => { lookupDog(data.ownerPhone); }, []);
 
   function validate() {
     const e = {};
@@ -186,6 +176,8 @@ function StepDog({ data, onChange, onNext, onBack }) {
     if (!data.dogDob) e.dogDob = 'Required';
     if (!data.vetName || data.vetName === 'Select a veterinarian') e.vetName = 'Required';
     if (!data.spayNeuter) e.spayNeuter = 'Required';
+    if (!data.aggressionHistory) e.aggressionHistory = 'Required';
+    if (!data.healthConcerns) e.healthConcerns = 'Required';
     setErrors(e);
     return Object.keys(e).length === 0;
   }
@@ -220,6 +212,7 @@ function StepDog({ data, onChange, onNext, onBack }) {
       </Field>
       <Field label="Any aggression history toward people or dogs?">
         <select value={data.aggressionHistory} onChange={e => onChange('aggressionHistory', e.target.value)}>
+          <option value="">Select one</option>
           <option value="no">No</option>
           <option value="yes">Yes — I'll describe below</option>
         </select>
@@ -231,6 +224,7 @@ function StepDog({ data, onChange, onNext, onBack }) {
       )}
       <Field label="Any health conditions or heat sensitivity?">
         <select value={data.healthConcerns} onChange={e => onChange('healthConcerns', e.target.value)}>
+          <option value="">Select one</option>
           <option value="no">No</option>
           <option value="yes">Yes — I'll describe below</option>
         </select>
@@ -366,11 +360,26 @@ function Confirmation({ stay, onNewBooking }) {
       <div className="confirm-icon">✓</div>
       <h2>You're all set, {stay.owner_name?.split(' ')[0]}!</h2>
       <p>We've received your signed agreement for <strong>{stay.dog_name}</strong>.</p>
-      <div className="confirm-detail">
-        <span>Drop-off</span><strong>{formatDate(stay.check_in)} {stay.drop_time?.slice(0,5)}</strong>
-        <span>Pick-up</span><strong>{formatDate(stay.check_out)} {stay.pickup_time?.slice(0,5)}</strong>
+      <div className="confirm-blocks">
+        <div className="confirm-block">
+          <div className="confirm-block-label">Drop-off</div>
+          <div className="confirm-block-date">{formatDate(stay.check_in)}</div>
+          <div className="confirm-block-time">{stay.drop_time?.slice(0,5)}</div>
+        </div>
+        <div className="confirm-arrow">→</div>
+        <div className="confirm-block">
+          <div className="confirm-block-label">Pick-up</div>
+          <div className="confirm-block-date">{formatDate(stay.check_out)}</div>
+          <div className="confirm-block-time">{stay.pickup_time?.slice(0,5)}</div>
+        </div>
       </div>
-      {stay.estimated_cost && <div className="cost-estimate"><span>Estimated cost</span><strong>${stay.estimated_cost}</strong></div>}
+      {stay.estimated_cost && (
+        <div className="cost-estimate">
+          <span>Estimated cost</span>
+          <strong>${stay.estimated_cost}</strong>
+          <div className="cost-note">Final invoice at pickup</div>
+        </div>
+      )}
       <p className="confirm-sub">We'll be in touch if we have any questions. See you soon!</p>
       <button className="btn-secondary" onClick={onNewBooking}>Book Another Stay</button>
     </div>
@@ -513,8 +522,8 @@ export default function App() {
     emergencyName: '', emergencyPhone: '',
     dogName: '', dogBreed: '', dogDob: '',
     vetName: 'Select a veterinarian', spayNeuter: '',
-    aggressionHistory: 'no', aggressionDetail: '',
-    healthConcerns: 'no', healthDetail: '',
+    aggressionHistory: '', aggressionDetail: '',
+    healthConcerns: '', healthDetail: '',
     checkIn: '', checkOut: '', dropTime: '', pickupTime: '', notes: '',
     agreed: false, signature: '',
   });
@@ -560,8 +569,8 @@ export default function App() {
       emergencyName: '', emergencyPhone: '',
       dogName: '', dogBreed: '', dogDob: '',
       vetName: 'Select a veterinarian', spayNeuter: '',
-      aggressionHistory: 'no', aggressionDetail: '',
-      healthConcerns: 'no', healthDetail: '',
+      aggressionHistory: '', aggressionDetail: '',
+      healthConcerns: '', healthDetail: '',
       checkIn: '', checkOut: '', dropTime: '', pickupTime: '', notes: '',
       agreed: false, signature: '',
     });

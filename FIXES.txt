@@ -1,0 +1,34 @@
+BAYVIEW BOARDING — FIX LIST
+============================
+Last updated: September 3, 2026
+
+NEXT CHANGE LIST (v1.3)
+-----------------------
+1. Do not default Spayed/Neutered, Aggression History, or Health Concerns
+   to any value — leave blank and require explicit selection before proceeding.
+
+2. Signature timestamp — currently saved as submitted_at (UTC) in Supabase.
+   Add client timezone to the record so timestamp is legally unambiguous.
+   Consider displaying full timestamp on confirmation screen.
+
+3. Confirmation screen — fix drop-off/pick-up layout (date and time
+   wrapping onto separate lines, misaligned grid).
+
+4. Confirmation screen — colors not matching app palette
+   (showing dark/black instead of sand/slate theme).
+
+KNOWN ISSUES
+------------
+- Rate setting in Admin resets to $105 on page refresh (not yet persisted to DB)
+
+COMPLETED
+---------
+- v1.2: DOB replaces free-text age
+- v1.2: San Rafael vet dropdown
+- v1.2: Aggression/health questions no longer auto-fill on return visit
+- v1.2: Admin day rate setting
+- v1.2: Cost estimate on Stay Dates page
+- v1.2: Drop-off and pick-up time fields
+- v1.1: Supabase database integration
+- v1.1: Returning client auto-fill by email
+- v1.0: Initial app build

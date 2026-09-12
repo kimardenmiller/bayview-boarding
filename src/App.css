@@ -16,3 +16,101 @@
 .stay-cost { font-size: 0.85rem; font-weight: 600; color: #7D9B76; margin-bottom: 4px; }
 .rate-setting { background: #F5F0E8; border-radius: 8px; padding: 14px 16px; margin-bottom: 18px; }
 .field-hint { font-size: 0.75rem; color: #6B7A8A; margin-bottom: 5px; }
+
+/* ── Confirmation blocks (v1.3 fix) ─────────────────────────────────────── */
+.confirmation {
+  background: var(--white) !important;
+  color: var(--ink) !important;
+}
+.confirmation h2 { color: var(--slate) !important; }
+.confirmation p { color: var(--muted) !important; }
+
+.confirm-blocks {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  background: var(--sand);
+  border-radius: 10px;
+  padding: 18px 16px;
+  margin-bottom: 18px;
+}
+.confirm-block { text-align: center; }
+.confirm-block-label { font-size: 0.75rem; color: var(--muted); margin-bottom: 4px; }
+.confirm-block-date { font-size: 1rem; font-weight: 600; color: var(--slate); }
+.confirm-block-time { font-size: 0.88rem; color: var(--muted); margin-top: 2px; }
+.confirm-arrow { font-size: 1.3rem; color: var(--sage); }
+
+/* ── Mobile email input fix ──────────────────────────────────────────────── */
+@media (max-width: 480px) {
+  .field input[type="email"] {
+    min-width: 0;
+    width: 100%;
+    font-size: 16px;
+  }
+  .field input[type="email"] + button {
+    flex-shrink: 0;
+  }
+}
+
+/* ── Force email input full width on mobile ─────────────────────────────── */
+.email-row {
+  display: flex;
+  gap: 8px;
+  width: 100%;
+}
+.email-row input {
+  flex: 1 1 0;
+  min-width: 0;
+  width: 0;
+}
+.email-row button {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+/* ── Force email input full width on mobile ─────────────────────────────── */
+.email-row {
+  display: flex;
+  gap: 8px;
+  width: 100%;
+}
+.email-row input {
+  flex: 1 1 0;
+  min-width: 0;
+  width: 0;
+}
+.email-row button {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+/* ── Email row fix ───────────────────────────────────────────────────────── */
+.email-row {
+  display: flex;
+  gap: 8px;
+  width: 100%;
+}
+.email-row input {
+  flex: 1 1 0;
+  min-width: 0;
+  width: 100%;
+  font-size: 16px;
+}
+.email-row button {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+/* ── Email row mobile stack ──────────────────────────────────────────────── */
+@media (max-width: 480px) {
+  .email-row {
+    flex-direction: column;
+  }
+  .email-row input {
+    width: 100%;
+  }
+  .email-row button {
+    width: 100%;
+  }
+}
