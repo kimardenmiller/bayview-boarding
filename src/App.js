@@ -501,7 +501,24 @@ function AdminView({ onClose, rate, setRate }) {
   );
 }
 
+function Landing({ onStart, onAdmin }) {
+  return (
+    <div className="landing">
+      <img className="landing-img" src={heroDog} alt="A happy dog boarding with Bayview Boarding on a Marin hillside trail" />
+      <div className="landing-overlay">
+        <button className="landing-admin" onClick={onAdmin}>Admin</button>
+        <div className="landing-content">
+          <h1 className="landing-title">Bayview Boarding</h1>
+          <p className="landing-sub">San Rafael, California</p>
+          <button className="landing-cta" onClick={onStart}>Book My Stay</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
+  const [showLanding, setShowLanding] = useState(true);
   const [step, setStep] = useState(0);
   const [showAdmin, setShowAdmin] = useState(false);
   const [submitted, setSubmitted] = useState(false);
@@ -590,14 +607,18 @@ export default function App() {
     setStep(0); setSubmitted(false); setCurrentStay(null);
   }
 
+  if (showLanding) {
+    return (
+      <div className="app">
+        <Landing onStart={() => setShowLanding(false)} onAdmin={() => setShowAdmin(true)} />
+        {showAdmin && <AdminView onClose={() => setShowAdmin(false)} rate={rate} setRate={setRate} />}
+      </div>
+    );
+  }
+
   return (
     <div className="app">
       <Header onAdmin={() => setShowAdmin(true)} />
-      {step === 0 && !submitted && (
-        <div className="hero-banner">
-          <img src={heroDog} alt="A happy dog boarding with Bayview Boarding on a Marin hillside trail" />
-        </div>
-      )}
       <main className="main">
         {!submitted ? (
           <>

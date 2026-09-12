@@ -23,6 +23,7 @@ function isoMonthsAgo(months, day = 15) {
 
 async function fillStep1(phone = '4155550100', name = 'Kim Miller', email = 'kim@test.com') {
   render(<App />);
+  fireEvent.click(screen.getByText('Book My Stay'));
   await userEvent.type(screen.getByPlaceholderText('(415) 555-0100'), phone);
   await userEvent.type(screen.getByPlaceholderText('Jane Smith'), name);
   await userEvent.type(screen.getByPlaceholderText('jane@email.com'), email);
@@ -162,6 +163,7 @@ describe('calcCost', () => {
 describe('Step 1 — Owner Info', () => {
   test('shows required errors when submitting empty form', async () => {
     render(<App />);
+    fireEvent.click(screen.getByText('Book My Stay'));
     fireEvent.click(screen.getByText('Continue'));
     expect(await screen.findAllByText('Required')).toHaveLength(3);
   });
@@ -177,6 +179,7 @@ describe('Step 1 — Owner Info', () => {
       error: null,
     });
     render(<App />);
+    fireEvent.click(screen.getByText('Book My Stay'));
     await userEvent.type(screen.getByPlaceholderText('(415) 555-0100'), '4155550100');
     fireEvent.click(screen.getByText('Look up'));
     expect(await screen.findByText(/Info found/)).toBeInTheDocument();
@@ -187,6 +190,7 @@ describe('Step 1 — Owner Info', () => {
 
   test('does not autofill or show the banner when phone is not found', async () => {
     render(<App />); // default mock: { found: false }
+    fireEvent.click(screen.getByText('Book My Stay'));
     await userEvent.type(screen.getByPlaceholderText('(415) 555-0100'), '4155559999');
     fireEvent.click(screen.getByText('Look up'));
     await waitFor(() => expect(supabase.functions.invoke).toHaveBeenCalled());
@@ -196,6 +200,7 @@ describe('Step 1 — Owner Info', () => {
 
   test('look up does nothing when phone field is empty', async () => {
     render(<App />);
+    fireEvent.click(screen.getByText('Book My Stay'));
     fireEvent.click(screen.getByText('Look up'));
     expect(supabase.functions.invoke).not.toHaveBeenCalled();
   });
@@ -206,6 +211,7 @@ describe('Step 1 — Owner Info', () => {
     // controlled inputs never receive null/undefined
     supabase.functions.invoke.mockResolvedValueOnce({ data: { found: true, client: {} }, error: null });
     render(<App />);
+    fireEvent.click(screen.getByText('Book My Stay'));
     await userEvent.type(screen.getByPlaceholderText('(415) 555-0100'), '4155550100');
     fireEvent.click(screen.getByText('Look up'));
     await screen.findByText(/Info found/);
@@ -461,6 +467,15 @@ describe('Admin login', () => {
     render(<App />);
     fireEvent.click(screen.getByText('Admin'));
     await userEvent.type(screen.getByPlaceholderText('Password'), 'correct-password{Enter}');
+    expect(await screen.findByText('Bayview Boarding — Admin')).toBeInTheDocument();
+  });
+
+  test('is also reachable from the header once past the landing screen', async () => {
+    await fillStep1(); // clicks "Book My Stay" and lands on the booking form (consumes the default auto-lookup mock)
+    supabase.functions.invoke.mockResolvedValueOnce({ data: { stays: SAMPLE_STAYS }, error: null });
+    fireEvent.click(screen.getByText('Admin'));
+    await userEvent.type(screen.getByPlaceholderText('Password'), 'correct-password');
+    fireEvent.click(screen.getByText('Sign In'));
     expect(await screen.findByText('Bayview Boarding — Admin')).toBeInTheDocument();
   });
 });
