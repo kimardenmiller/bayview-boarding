@@ -44,6 +44,17 @@ TWILIO STATUS
 
 COMPLETED
 ---------
+- v1.5.3: Test coverage 66% -> 99%+ on App.js (7 -> 48 tests). Supabase
+  is now mocked in tests (src/__mocks__/supabase.js) instead of hitting
+  live production on every test run. Added coverage for admin-data and
+  lookup-client (previously untested), and a regression test for the
+  exact v1.5.1 bug (insert().select() breaking under RLS). Run via
+  npm run test:coverage.
+- v1.5.2: npm audit fix (non-breaking), 31 -> 26 vulnerabilities, all
+  confirmed to be inside react-scripts' own dev/build tooling.
+- v1.5.1: Fixed booking submission broken by the v1.5 RLS lockdown —
+  insert().select() requires a SELECT policy for the RETURNING clause
+  that anon no longer had. See git commit c77e87b.
 - v1.5: Fixed live PII exposure — stays table had a public "Allow all" RLS
   policy, meaning anyone with the public anon key (shipped in the JS bundle)
   could read/edit/delete every client's name, phone, email, signature, and
