@@ -33,13 +33,41 @@ DEFERRED (revisit only if it actually blocks something)
 TWILIO STATUS
 -------------
 - A2P 10DLC registration submitted September 12, 2026
-- Under carrier review — expect approval in a few days to weeks
+- Rejected twice (error 30908 — privacy policy / message_flow couldn't
+  be verified as compliant); both times traced to real gaps, not just
+  wording: (1) the required "no mobile info shared with third parties"
+  statement was missing from message_flow itself, (2) the site's actual
+  intake form is a JS-rendered SPA, so Twilio's vetting crawler saw
+  nothing at the site root and asked for opt-in evidence it could
+  verify. Fixed both (see COMPLETED) and confirmed via Twilio's own API
+  that the resubmission is now genuinely in progress (campaign_status:
+  IN_PROGRESS, errors: [] as of last check September 12, 2026) — not
+  just a Console click that may not have registered.
 - Twilio account: see src/settings.js PHONE
 - Confirmation SMS wired up and tested (pending A2P approval)
 - Reminder and billing SMS templates ready in settings.js
 
 COMPLETED
 ---------
+- Fixed 2nd A2P rejection (error 30908, field: message_flow): the
+  Console "save" on message_flow/help_message had persisted correctly,
+  but the campaign had never actually been resubmitted for re-vetting
+  (date_updated was identical to the original failed submission).
+  Confirmed via Twilio's Messaging Compliance API and resubmitted
+  directly via the same API (POST to
+  /v1/Services/{sid}/Compliance/Usa2p/{sid}) — verified campaign_status
+  flipped from FAILED to IN_PROGRESS with errors: [].
+- Added SMS consent language to the actual signed waiver
+  (src/waiver.js, new "SMS Communications Consent" section) — this had
+  been cited as fact in privacy.html/message_flow/sms-consent.html
+  before it was actually true; now the agreement genuinely contains it.
+- Added public/sms-consent.html — a plain static (non-JS-dependent)
+  evidence page with real screenshots of the actual phone-collection
+  and consent/signature steps, since the live site's root HTML is just
+  an empty <div id="root"> to any crawler that doesn't execute JS.
+- Fixed 1st A2P rejection (error 30908): added the specific required
+  "no mobile information shared with third parties for marketing"
+  statement to public/privacy.html and the Twilio message_flow field.
 - Phone lookup confirmed working end to end in the actual running app —
   both via a headless-browser click-through and a real submission on
   the live production site (see the lookup-client work under v1.5).
@@ -91,5 +119,5 @@ TECH STACK
 - Twilio (SMS via send-confirmation Edge Function)
 - GitHub: github.com/kimardenmiller/bayview-boarding
 - Hosting: GitHub Pages (kimardenmiller.github.io/bayview-boarding)
-- Admin password: bayview2024
-- Twilio phone: (650) 252-2433
+- Admin password: set as the ADMIN_PASSWORD Supabase secret — never in this file or source (see CLAUDE.md Security notes)
+- Twilio phone: see src/settings.js PHONE
