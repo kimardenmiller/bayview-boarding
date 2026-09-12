@@ -25,7 +25,7 @@ Kim Miller and Estee Fletter at 210 Bayview Drive, San Rafael, CA.
 - src/App.js — main app
 - src/settings.js — all configurable values (rates, vets, messages, packing list)
 - src/waiver.js — full waiver text
-- src/App.test.js — 7 passing tests (TDD)
+- src/App.test.js — 48 passing tests (TDD), Supabase mocked via src/__mocks__/supabase.js
 - supabase/functions/send-confirmation/index.ts — Twilio SMS function
 - supabase/functions/admin-data/index.ts — server-side admin password check + full stay data (service role key, never exposed to client)
 - supabase/functions/lookup-client/index.ts — returning-client autofill by phone (returns only safe fields, not full record)
