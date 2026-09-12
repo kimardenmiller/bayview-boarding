@@ -17,11 +17,7 @@ NEXT CHANGE LIST (v1.5)
 
 4. Persist admin rate setting to Supabase settings table.
 
-5. Lookup — rebuilt on the lookup-client Edge Function (v1.5) and
-   confirmed working via direct testing; still worth a click-through
-   in the actual app to double check the autofill UX end to end.
-
-6. Signature timestamp — add client timezone to Supabase record
+5. Signature timestamp — add client timezone to Supabase record
    for legal clarity.
 
 DEFERRED (revisit only if it actually blocks something)
@@ -44,6 +40,9 @@ TWILIO STATUS
 
 COMPLETED
 ---------
+- Phone lookup confirmed working end to end in the actual running app —
+  both via a headless-browser click-through and a real submission on
+  the live production site (see the lookup-client work under v1.5).
 - v1.5.3: Test coverage 66% -> 99%+ on App.js (7 -> 48 tests). Supabase
   is now mocked in tests (src/__mocks__/supabase.js) instead of hitting
   live production on every test run. Added coverage for admin-data and
