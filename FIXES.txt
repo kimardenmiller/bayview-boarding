@@ -1,34 +1,65 @@
 BAYVIEW BOARDING — FIX LIST
 ============================
-Last updated: September 3, 2026
+Last updated: September 12, 2026
 
-NEXT CHANGE LIST (v1.3)
+NEXT CHANGE LIST (v1.5)
 -----------------------
-1. Do not default Spayed/Neutered, Aggression History, or Health Concerns
-   to any value — leave blank and require explicit selection before proceeding.
+1. Stay reminder SMS — send automatically 24 hours before drop-off.
+   Needs a Supabase scheduled function (cron job) that checks for
+   upcoming stays and triggers send-confirmation with type="reminder".
 
-2. Signature timestamp — currently saved as submitted_at (UTC) in Supabase.
-   Add client timezone to the record so timestamp is legally unambiguous.
-   Consider displaying full timestamp on confirmation screen.
+2. Billing SMS — send at pickup time with final cost.
+   Admin triggers this manually from the stay detail view, or
+   auto-sends at scheduled pickup time.
 
-3. Confirmation screen — fix drop-off/pick-up layout (date and time
-   wrapping onto separate lines, misaligned grid).
+3. Rate persistence — save day rate to Supabase so it survives
+   page refresh (currently resets to $105 on reload).
 
-4. Confirmation screen — colors not matching app palette
-   (showing dark/black instead of sand/slate theme).
+4. Persist admin rate setting to Supabase settings table.
 
-KNOWN ISSUES
-------------
-- Rate setting in Admin resets to $105 on page refresh (not yet persisted to DB)
+5. Lookup not working yet — confirm phone-based lookup returns
+   correct data for returning clients.
+
+6. Signature timestamp — add client timezone to Supabase record
+   for legal clarity.
+
+TWILIO STATUS
+-------------
+- A2P 10DLC registration submitted September 12, 2026
+- Under carrier review — expect approval in a few days to weeks
+- Twilio account: (650) 252-2433
+- Confirmation SMS wired up and tested (pending A2P approval)
+- Reminder and billing SMS templates ready in settings.js
 
 COMPLETED
 ---------
+- v1.4: Settings file (src/settings.js) for rates, vets, messages, packing list
+- v1.4: Packing list in SMS reminder template
+- v1.4: Privacy policy page (privacy.html)
+- v1.4: Terms & conditions page (terms.html)
+- v1.4: Twilio Edge Function supports confirmation, reminder, billing types
+- v1.3: TDD setup, 7 passing tests
+- v1.3: Phone-based identity and lookup
+- v1.3: Email required but not used for lookup
+- v1.3: Emergency contact removed
+- v1.3: Blank select defaults for spay/neuter, aggression, health
+- v1.3: Mobile email input stacks vertically
+- v1.3: Confirmation screen layout and color fix
 - v1.2: DOB replaces free-text age
 - v1.2: San Rafael vet dropdown
-- v1.2: Aggression/health questions no longer auto-fill on return visit
 - v1.2: Admin day rate setting
 - v1.2: Cost estimate on Stay Dates page
 - v1.2: Drop-off and pick-up time fields
 - v1.1: Supabase database integration
 - v1.1: Returning client auto-fill by email
 - v1.0: Initial app build
+
+TECH STACK
+==========
+- React (Create React App)
+- Supabase (database + Edge Functions)
+- Twilio (SMS via send-confirmation Edge Function)
+- GitHub: github.com/kimardenmiller/bayview-boarding
+- Hosting: GitHub Pages (kimardenmiller.github.io/bayview-boarding)
+- Admin password: bayview2024
+- Twilio phone: (650) 252-2433
