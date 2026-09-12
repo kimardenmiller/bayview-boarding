@@ -46,5 +46,9 @@ export const WAIVER_SECTIONS = [
   {
     title: "Right to Refuse or Suspend Service",
     body: `We reserve the right to decline or discontinue boarding for any dog that poses a safety risk to other dogs, people, or property, or for any owner who does not comply with these policies.`
+  },
+  {
+    title: "SMS Communications Consent",
+    body: `By providing your phone number and signing this agreement, you consent to receive SMS text messages from Bayview Boarding related to your booking, including confirmations, stay reminders, and billing summaries. Message frequency varies based on your bookings. Message and data rates may apply. No mobile information will be shared with third parties or affiliates for marketing or promotional purposes. Reply STOP to opt out at any time, or HELP for help.`
   }
 ];
