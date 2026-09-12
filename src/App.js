@@ -543,10 +543,10 @@ export default function App() {
       signature: form.signature,
       submitted_at: new Date().toISOString(),
     };
-    const { data, error } = await supabase.from('stays').insert([record]).select().single();
+    const { error } = await supabase.from('stays').insert([record]);
     setSubmitting(false);
     if (!error) {
-      setCurrentStay(data);
+      setCurrentStay(record);
       setSubmitted(true);
       // Send confirmation text
       try {
