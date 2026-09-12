@@ -24,6 +24,16 @@ NEXT CHANGE LIST (v1.5)
 6. Signature timestamp — add client timezone to Supabase record
    for legal clarity.
 
+DEFERRED (revisit only if it actually blocks something)
+---------------------------------------------------------
+- Migrate off Create React App (react-scripts) to Vite. CRA was
+  deprecated by the React team Feb 2025; npm audit shows ~26 findings,
+  all inside react-scripts' own build/test tooling (jest,
+  webpack-dev-server, svgo/postcss) — none reach the production
+  bundle. Explicitly decided September 12, 2026 not to migrate
+  preemptively. Revisit if a Node/dependency upgrade actually breaks,
+  not before.
+
 TWILIO STATUS
 -------------
 - A2P 10DLC registration submitted September 12, 2026
