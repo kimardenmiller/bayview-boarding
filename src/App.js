@@ -1,23 +1,13 @@
 import React, { useState } from 'react';
 import { WAIVER_SECTIONS } from './waiver';
 import { supabase } from './supabase';
+import { SETTINGS } from './settings';
 import './App.css';
 
 const ADMIN_PASSWORD = 'bayview2024';
-const DEFAULT_RATE = 105;
+const DEFAULT_RATE = SETTINGS.DEFAULT_DAY_RATE;
 
-const SAN_RAFAEL_VETS = [
-  'Select a veterinarian',
-  'Marin Pet Hospital — (415) 479-8387',
-  'VCA Marin Animal Hospital — (415) 454-5225',
-  'Bel Marin Animal Hospital — (415) 883-1700',
-  'Lucas Valley Animal Hospital — (415) 472-4552',
-  'Northgate Animal Hospital — (415) 472-1000',
-  'San Rafael Animal Hospital — (415) 456-1411',
-  'Canal Animal Hospital — (415) 455-9855',
-  'Marin Humane Veterinary Services — (415) 506-6225',
-  'Other — see notes',
-];
+const SAN_RAFAEL_VETS = SETTINGS.SAN_RAFAEL_VETS;
 
 function formatDate(iso) {
   if (!iso) return '';
