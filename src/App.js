@@ -41,6 +41,11 @@ function calcCost(checkIn, checkOut, dropTime, pickupTime, rate) {
   return (days * rate).toFixed(2);
 }
 
+// Named exports alongside the default App export, purely so pure helper
+// functions can be unit-tested directly instead of only through full
+// multi-step form flows. No behavior change.
+export { formatDate, calcAge, calcCost };
+
 function Header({ onAdmin }) {
   return (
     <header className="header">

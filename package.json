@@ -15,7 +15,8 @@
     "build": "react-scripts build",
     "predeploy": "npm run build",
     "deploy": "gh-pages -d build",
-    "test": "react-scripts test"
+    "test": "react-scripts test",
+    "test:coverage": "react-scripts test --watchAll=false --coverage --collectCoverageFrom=\"src/**/*.js\" --collectCoverageFrom=\"!src/index.js\" --collectCoverageFrom=\"!src/reportWebVitals.js\""
   },
   "browserslist": {
     "production": [
