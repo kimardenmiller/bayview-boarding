@@ -559,8 +559,29 @@ export default function App() {
     };
     const { data, error } = await supabase.from('stays').insert([record]).select().single();
     setSubmitting(false);
-    if (!error) { setCurrentStay(data); setSubmitted(true); }
-    else alert('There was an error saving. Please try again.');
+    if (!error) {
+      setCurrentStay(data);
+      setSubmitted(true);
+      // Send confirmation text
+      try {
+        await supabase.functions.invoke('send-confirmation', {
+          body: {
+            owner_name: record.owner_name,
+            owner_phone: record.owner_phone,
+            dog_name: record.dog_name,
+            check_in: record.check_in,
+            check_out: record.check_out,
+            drop_time: record.drop_time,
+            pickup_time: record.pickup_time,
+            estimated_cost: record.estimated_cost,
+          }
+        });
+      } catch (textErr) {
+        console.error('Text send failed:', textErr);
+      }
+    } else {
+      alert('There was an error saving. Please try again.');
+    }
   }
 
   function reset() {
