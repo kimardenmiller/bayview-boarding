@@ -3,6 +3,7 @@
     "supabase/functions"
   ],
   "deno.lint": true,
+  "deno.testing.enable": true,
   "deno.unstable": [
     "bare-node-builtins",
     "byonm",
@@ -23,8 +24,7 @@
   },
   "jest.jestCommandLine": "npm test --",
   "jest.autoRun": {
-    "watch": false,
-    "onSave": "test-src-file",
+    "watch": true,
     "onStartup": ["all-tests"]
   }
 }
