@@ -1,6 +1,6 @@
 BAYVIEW BOARDING — FIX LIST
 ============================
-Last updated: September 13, 2026
+Last updated: September 13, 2026 (v1.5.14 — multi-dog + holiday pricing)
 
 NEXT CHANGE LIST (v1.5)
 -----------------------
@@ -19,30 +19,6 @@ NEXT CHANGE LIST (v1.5)
 
 5. Signature timestamp — add client timezone to Supabase record
    for legal clarity.
-
-6. Multi-dog support — 10% discount per additional dog (uncapped),
-   calculated as 10% of the 1st dog's per-night rate, applying to
-   each additional dog per night (including holiday-adjusted nights).
-   Scope decision Sept 13, 2026: v1 collects full intake details
-   (breed/DOB/vet/etc.) for the primary dog only, plus a simple
-   "Number of Dogs" count for pricing. Full per-dog data collection
-   for dogs 2+ is a larger follow-up, not in this pass.
-
-7. Holiday upcharge — +30% on any night that falls within a holiday
-   window. Holidays: New Year's Day, MLK Day, Presidents'/Ski Week
-   (the week containing Presidents' Day, Sat-Sun surrounding it),
-   Memorial Day, July 4th, Labor Day, Thanksgiving, day after
-   Thanksgiving, Christmas, New Year's Eve. Computed algorithmically
-   per year (not hardcoded dates) so it doesn't need yearly updates.
-
-8. Landing page refinement — full-screen landscape treatment (was
-   portrait-cropped), bigger/more colorful "Book My Stay" button
-   directly below the "Bayview Boarding" title.
-
-9. Remove "San Rafael, California" from the landing page tagline.
-
-10. Remove the visible Admin button/link (landing page + header) —
-    admin access via a direct bookmarked URL instead.
 
 DEFERRED (revisit only if it actually blocks something)
 ---------------------------------------------------------
@@ -83,6 +59,33 @@ TWILIO STATUS
 
 COMPLETED
 ---------
+- v1.5.14: Multi-dog pricing + holiday upcharge (FIXES.txt items 6 & 7).
+  calcCost (src/App.js) now computes cost night-by-night: each night is
+  checked against getHolidayWindows(year) (algorithmic, not hardcoded —
+  New Year's Day, MLK Day, Presidents'/Ski Week [the week containing
+  Presidents' Day plus the Sat-Sun surrounding it], Memorial Day, July
+  4th, Labor Day, Thanksgiving + day after, Christmas, New Year's Eve)
+  and upcharged 30% if so; each additional dog beyond the first is then
+  charged at 90% of that night's (possibly holiday-adjusted) rate, per
+  MULTI_DOG_DISCOUNT in settings.js, uncapped. New "Number of Dogs"
+  field on Step 2 (About Your Dog) feeds this — v1 scope only collects
+  full intake (breed/DOB/vet/etc.) for the primary dog; a
+  "number_of_dogs" column (new migration
+  20260913000000_add_number_of_dogs.sql, applied live) records the
+  count for pricing and shows on the admin stay-history view. 26 new
+  tests (calcCost multi-dog/holiday cases, isHolidayNight/
+  getHolidayWindows unit tests including a different-year check to
+  confirm dates are computed not hardcoded, and UI tests for the new
+  field) — 74/74 passing. Verified live via Playwright against the dev
+  server (3-dog stay over New Year's Day: $382.20, matches hand
+  calculation) before deploying.
+- v1.5.13: Removed the visible Admin button/link (landing page +
+  header) — reached only via a bookmarked URL (?admin) now. Removed
+  "San Rafael, California" from the landing page tagline. Landing page
+  redesigned full-screen landscape (was portrait-cropped), with a
+  bigger, terracotta "Book My Stay" button directly below the title.
+  Verified live at both mobile (390×844) and wide (1280×800)
+  viewports.
 - v1.5.10: Inbound SMS handling. Clients texting (650) 252-2433 were going
   into a void - no webhook configured, nobody would see it. New receive-sms
   Edge Function auto-replies telling clients replies aren't monitored and to

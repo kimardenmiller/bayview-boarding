@@ -1,6 +1,6 @@
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import App, { formatDate, calcAge, calcCost } from './App';
+import App, { formatDate, calcAge, calcCost, isHolidayNight, getHolidayWindows } from './App';
 import { supabase } from './supabase';
 
 jest.mock('./supabase');
@@ -147,24 +147,144 @@ describe('calcAge', () => {
   });
 });
 
+// 2026-03-10/11 are plain weekdays with no holiday window nearby - used
+// throughout as neutral dates so these base-case tests aren't coupled to
+// the holiday-upcharge logic covered separately below.
 describe('calcCost', () => {
   test('returns null when any required field is missing', () => {
-    expect(calcCost('', '2026-01-02', '09:00', '09:00', 100)).toBeNull();
-    expect(calcCost('2026-01-01', '', '09:00', '09:00', 100)).toBeNull();
-    expect(calcCost('2026-01-01', '2026-01-02', '', '09:00', 100)).toBeNull();
-    expect(calcCost('2026-01-01', '2026-01-02', '09:00', '', 100)).toBeNull();
+    expect(calcCost('', '2026-03-11', '09:00', '09:00', 100)).toBeNull();
+    expect(calcCost('2026-03-10', '', '09:00', '09:00', 100)).toBeNull();
+    expect(calcCost('2026-03-10', '2026-03-11', '', '09:00', 100)).toBeNull();
+    expect(calcCost('2026-03-10', '2026-03-11', '09:00', '', 100)).toBeNull();
   });
 
   test('returns null when pickup is before drop-off', () => {
-    expect(calcCost('2026-01-05', '2026-01-01', '09:00', '09:00', 100)).toBeNull();
+    expect(calcCost('2026-03-11', '2026-03-10', '09:00', '09:00', 100)).toBeNull();
   });
 
   test('charges a 1-day minimum for a short same-day stay', () => {
-    expect(calcCost('2026-01-01', '2026-01-01', '09:00', '15:00', 100)).toBe('100.00');
+    expect(calcCost('2026-03-10', '2026-03-10', '09:00', '15:00', 100)).toBe('100.00');
   });
 
   test('rounds up partial days', () => {
-    expect(calcCost('2026-01-01', '2026-01-02', '09:00', '10:00', 100)).toBe('200.00'); // 25 hrs -> 2 days
+    expect(calcCost('2026-03-10', '2026-03-11', '09:00', '10:00', 100)).toBe('200.00'); // 25 hrs -> 2 days
+  });
+
+  test('defaults to 1 dog when numberOfDogs is omitted', () => {
+    expect(calcCost('2026-03-10', '2026-03-10', '09:00', '15:00', 100)).toBe('100.00');
+  });
+});
+
+describe('calcCost — multi-dog discount', () => {
+  test('charges the 2nd dog at 90% of the nightly rate (10% discount)', () => {
+    // 1 night @ $100: dog 1 = $100, dog 2 = $100 * 0.9 = $90 -> $190
+    expect(calcCost('2026-03-10', '2026-03-10', '09:00', '15:00', 100, 2)).toBe('190.00');
+  });
+
+  test('discount is uncapped - applies to every additional dog', () => {
+    // dog 1 = $100, dogs 2 & 3 = $90 each -> $280
+    expect(calcCost('2026-03-10', '2026-03-10', '09:00', '15:00', 100, 3)).toBe('280.00');
+  });
+
+  test('treats 0 or invalid dog counts as 1 dog', () => {
+    expect(calcCost('2026-03-10', '2026-03-10', '09:00', '15:00', 100, 0)).toBe('100.00');
+    expect(calcCost('2026-03-10', '2026-03-10', '09:00', '15:00', 100, null)).toBe('100.00');
+  });
+
+  test('applies across multiple nights', () => {
+    // 2 nights, 2 dogs @ $100/night -> ($100 + $90) * 2 = $380
+    expect(calcCost('2026-03-10', '2026-03-11', '09:00', '10:00', 100, 2)).toBe('380.00');
+  });
+});
+
+describe('calcCost — holiday upcharge', () => {
+  test('adds 30% on New Year\'s Day', () => {
+    expect(calcCost('2026-01-01', '2026-01-01', '09:00', '15:00', 100)).toBe('130.00');
+  });
+
+  test('does not upcharge the day right after a holiday', () => {
+    expect(calcCost('2026-01-02', '2026-01-02', '09:00', '15:00', 100)).toBe('100.00');
+  });
+
+  test('combines the holiday upcharge with the multi-dog discount', () => {
+    // nightly rate = $100 * 1.3 = $130; dog 2 = $130 * 0.9 = $117 -> $247
+    expect(calcCost('2026-01-01', '2026-01-01', '09:00', '15:00', 100, 2)).toBe('247.00');
+  });
+
+  test('only upcharges the holiday night within a multi-night stay', () => {
+    // check-in Jan 1 (holiday, $130) -> check-out Jan 2 (ordinary night, $100)
+    // = 2 nights total, only the first is upcharged -> $230
+    expect(calcCost('2026-01-01', '2026-01-02', '09:00', '10:00', 100)).toBe('230.00');
+  });
+});
+
+describe('isHolidayNight', () => {
+  test('New Year\'s Day', () => {
+    expect(isHolidayNight('2026-01-01')).toBe(true);
+  });
+
+  test('MLK Day (3rd Monday of January)', () => {
+    expect(isHolidayNight('2026-01-19')).toBe(true);
+    expect(isHolidayNight('2026-01-18')).toBe(false);
+    expect(isHolidayNight('2026-01-20')).toBe(false);
+  });
+
+  test('Ski Week surrounding Presidents\' Day', () => {
+    expect(isHolidayNight('2026-02-16')).toBe(true); // Presidents' Day itself
+    expect(isHolidayNight('2026-02-14')).toBe(true); // Saturday before
+    expect(isHolidayNight('2026-02-22')).toBe(true); // Sunday after
+    expect(isHolidayNight('2026-02-13')).toBe(false);
+    expect(isHolidayNight('2026-02-23')).toBe(false);
+  });
+
+  test('Memorial Day (last Monday of May)', () => {
+    expect(isHolidayNight('2026-05-25')).toBe(true);
+    expect(isHolidayNight('2026-05-18')).toBe(false);
+  });
+
+  test('July 4th', () => {
+    expect(isHolidayNight('2026-07-04')).toBe(true);
+    expect(isHolidayNight('2026-07-03')).toBe(false);
+  });
+
+  test('Labor Day (1st Monday of September)', () => {
+    expect(isHolidayNight('2026-09-07')).toBe(true);
+    expect(isHolidayNight('2026-09-14')).toBe(false);
+  });
+
+  test('Thanksgiving and the day after', () => {
+    expect(isHolidayNight('2026-11-26')).toBe(true);
+    expect(isHolidayNight('2026-11-27')).toBe(true);
+    expect(isHolidayNight('2026-11-25')).toBe(false);
+    expect(isHolidayNight('2026-11-28')).toBe(false);
+  });
+
+  test('Christmas and New Year\'s Eve', () => {
+    expect(isHolidayNight('2026-12-25')).toBe(true);
+    expect(isHolidayNight('2026-12-31')).toBe(true);
+    expect(isHolidayNight('2026-12-24')).toBe(false);
+  });
+
+  test('an ordinary weekday is not a holiday', () => {
+    expect(isHolidayNight('2026-03-10')).toBe(false);
+  });
+
+  test('recomputes for a different year rather than using hardcoded dates', () => {
+    // MLK Day 2027 is the 3rd Monday of January 2027 (Jan 18), not Jan 19
+    expect(isHolidayNight('2027-01-19')).toBe(false);
+    expect(isHolidayNight('2027-01-18')).toBe(true);
+  });
+});
+
+describe('getHolidayWindows', () => {
+  test('returns 9 windows per year (one per holiday, Ski Week + Thanksgiving as ranges)', () => {
+    expect(getHolidayWindows(2026)).toHaveLength(9);
+  });
+
+  test('every window is a valid [start, end] ISO pair with start <= end', () => {
+    getHolidayWindows(2026).forEach(([start, end]) => {
+      expect(start <= end).toBe(true);
+    });
   });
 });
 
@@ -294,6 +414,24 @@ describe('Step 2 — Dog Info', () => {
     expect(await screen.findByText('Owner Information')).toBeInTheDocument();
     expect(screen.getByPlaceholderText('Jane Smith')).toHaveValue('Kim Miller');
   });
+
+  test('Number of Dogs defaults to 1 and does not show a discount note', async () => {
+    await fillStep1();
+    expect(screen.getByRole('spinbutton')).toHaveValue(1);
+    expect(screen.queryByText(/off each additional dog/)).not.toBeInTheDocument();
+  });
+
+  test('shows the multi-dog discount note once more than 1 dog is entered', async () => {
+    await fillStep1();
+    fireEvent.change(screen.getByRole('spinbutton'), { target: { value: '2' } });
+    expect(await screen.findByText(/10% off each additional dog/)).toBeInTheDocument();
+  });
+
+  test('treats a cleared/invalid Number of Dogs input as 1', async () => {
+    await fillStep1();
+    fireEvent.change(screen.getByRole('spinbutton'), { target: { value: '' } });
+    expect(screen.getByRole('spinbutton')).toHaveValue(1);
+  });
 });
 
 // ── Step 3: Stay Dates ───────────────────────────────────────────────────────
@@ -336,6 +474,32 @@ describe('Step 3 — Stay Dates', () => {
     const notes = screen.getByPlaceholderText(/Any instructions/);
     await userEvent.type(notes, 'Please give 1 cup of food twice a day.');
     expect(notes).toHaveValue('Please give 1 cup of food twice a day.');
+  });
+
+  test('estimated cost factors in the multi-dog discount set on Step 2', async () => {
+    await fillStep1();
+    await userEvent.type(screen.getByPlaceholderText('Buddy'), 'Rex');
+    await userEvent.type(screen.getByPlaceholderText('Golden Retriever'), 'Labrador');
+    const dobInput = document.querySelector('input[type="date"]');
+    fireEvent.change(dobInput, { target: { value: '2020-01-01' } });
+    fireEvent.change(screen.getByDisplayValue('Select a veterinarian'), { target: { value: 'Marin Pet Hospital — (415) 479-8387' } });
+    const selects = document.querySelectorAll('select');
+    fireEvent.change(selects[1], { target: { value: 'yes' } });
+    fireEvent.change(selects[2], { target: { value: 'no' } });
+    fireEvent.change(selects[3], { target: { value: 'no' } });
+    fireEvent.change(screen.getByRole('spinbutton'), { target: { value: '2' } });
+    fireEvent.click(screen.getByText('Continue'));
+    await screen.findByText('Stay Dates');
+
+    const dateInputs = document.querySelectorAll('input[type="date"]');
+    fireEvent.change(dateInputs[0], { target: { value: '2026-10-01' } });
+    fireEvent.change(dateInputs[1], { target: { value: '2026-10-02' } });
+    const timeInputs = document.querySelectorAll('input[type="time"]');
+    fireEvent.change(timeInputs[0], { target: { value: '09:00' } });
+    fireEvent.change(timeInputs[1], { target: { value: '09:00' } });
+    // 1 night @ $105: dog 1 = $105, dog 2 = $105 * 0.9 = $94.50 -> $199.50
+    expect(await screen.findByText('$199.50')).toBeInTheDocument();
+    expect(screen.getByText(/10% off each additional dog/)).toBeInTheDocument();
   });
 
   test('Back returns to Step 2', async () => {

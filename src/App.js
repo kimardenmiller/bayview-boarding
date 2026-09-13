@@ -6,6 +6,8 @@ import heroDog from './img/hero-dog.jpg';
 import './App.css';
 
 const DEFAULT_RATE = SETTINGS.DEFAULT_DAY_RATE;
+const MULTI_DOG_DISCOUNT = SETTINGS.MULTI_DOG_DISCOUNT;
+const HOLIDAY_UPCHARGE = SETTINGS.HOLIDAY_UPCHARGE;
 
 const SAN_RAFAEL_VETS = SETTINGS.SAN_RAFAEL_VETS;
 
@@ -32,20 +34,104 @@ function calcAge(dob) {
   return m > 0 ? `${y} yr ${m} mo` : `${y} year${y !== 1 ? 's' : ''}`;
 }
 
-function calcCost(checkIn, checkOut, dropTime, pickupTime, rate) {
+function isoFromLocalDate(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+function addDays(date, n) {
+  const d = new Date(date);
+  d.setDate(d.getDate() + n);
+  return d;
+}
+
+// nth weekday of a given month (weekday: 0=Sun..6=Sat, n: 1st/2nd/3rd/4th...)
+function nthWeekdayOfMonth(year, month, weekday, n) {
+  const d = new Date(year, month, 1);
+  let count = 0;
+  while (true) {
+    if (d.getDay() === weekday) {
+      count++;
+      if (count === n) return new Date(d);
+    }
+    d.setDate(d.getDate() + 1);
+  }
+}
+
+function lastWeekdayOfMonth(year, month, weekday) {
+  const d = new Date(year, month + 1, 0); // last day of month
+  while (d.getDay() !== weekday) d.setDate(d.getDate() - 1);
+  return d;
+}
+
+// Computes every holiday-upcharge date window for a given year, as
+// [startISO, endISO] pairs (inclusive). Algorithmic (not hardcoded dates)
+// so it doesn't need yearly maintenance. See FIXES.txt item 7 for the list.
+function getHolidayWindows(year) {
+  const windows = [];
+  const single = (date) => windows.push([isoFromLocalDate(date), isoFromLocalDate(date)]);
+
+  single(new Date(year, 0, 1));                       // New Year's Day
+  single(nthWeekdayOfMonth(year, 0, 1, 3));            // MLK Day - 3rd Monday of January
+
+  // Presidents' Day / Ski Week - the week containing the 3rd Monday of
+  // February, plus the Sat-Sun weekends immediately surrounding it.
+  const presidentsDay = nthWeekdayOfMonth(year, 1, 1, 3);
+  windows.push([
+    isoFromLocalDate(addDays(presidentsDay, -2)), // Saturday before
+    isoFromLocalDate(addDays(presidentsDay, 6)),  // Sunday after
+  ]);
+
+  single(lastWeekdayOfMonth(year, 4, 1));              // Memorial Day - last Monday of May
+  single(new Date(year, 6, 4));                        // July 4th
+  single(nthWeekdayOfMonth(year, 8, 1, 1));            // Labor Day - 1st Monday of September
+
+  const thanksgiving = nthWeekdayOfMonth(year, 10, 4, 4); // 4th Thursday of November
+  windows.push([isoFromLocalDate(thanksgiving), isoFromLocalDate(addDays(thanksgiving, 1))]); // + day after
+
+  single(new Date(year, 11, 25));                      // Christmas
+  single(new Date(year, 11, 31));                      // New Year's Eve
+
+  return windows;
+}
+
+// Whether a given calendar night (YYYY-MM-DD) falls inside a holiday window.
+function isHolidayNight(dateISO) {
+  const year = Number(dateISO.slice(0, 4));
+  return getHolidayWindows(year).some(([start, end]) => dateISO >= start && dateISO <= end);
+}
+
+// numberOfDogs: additional dogs beyond the first are each charged at
+// (1 - MULTI_DOG_DISCOUNT) of that night's per-dog rate, uncapped.
+// Holiday nights (see getHolidayWindows) upcharge the base rate by
+// HOLIDAY_UPCHARGE before the multi-dog discount is applied, so the
+// discount always tracks the actual (possibly holiday) nightly rate.
+function calcCost(checkIn, checkOut, dropTime, pickupTime, rate, numberOfDogs = 1) {
   if (!checkIn || !checkOut || !dropTime || !pickupTime) return null;
   const drop = new Date(`${checkIn}T${dropTime}`);
   const pickup = new Date(`${checkOut}T${pickupTime}`);
   const hours = (pickup - drop) / 3600000;
   if (hours <= 0) return null;
   const days = Math.max(1, Math.ceil(hours / 24));
-  return (days * rate).toFixed(2);
+  const dogs = Math.max(1, Number(numberOfDogs) || 1);
+  const perNightDogMultiplier = 1 + (dogs - 1) * (1 - MULTI_DOG_DISCOUNT);
+
+  const [y, m, d] = checkIn.split('-').map(Number);
+  let total = 0;
+  for (let i = 0; i < days; i++) {
+    const nightISO = isoFromLocalDate(new Date(y, m - 1, d + i));
+    const nightlyRate = isHolidayNight(nightISO) ? rate * (1 + HOLIDAY_UPCHARGE) : rate;
+    total += nightlyRate * perNightDogMultiplier;
+  }
+  return total.toFixed(2);
 }
 
 // Named exports alongside the default App export, purely so pure helper
 // functions can be unit-tested directly instead of only through full
 // multi-step form flows. No behavior change.
-export { formatDate, calcAge, calcCost };
+export { formatDate, calcAge, calcCost, isHolidayNight, getHolidayWindows };
 
 function Header() {
   return (
@@ -222,6 +308,20 @@ function StepDog({ data, onChange, onNext, onBack }) {
           <textarea value={data.healthDetail} onChange={e => onChange('healthDetail', e.target.value)} rows={3} placeholder="Describe any conditions, limitations, or sensitivities" />
         </Field>
       )}
+      <Field label="Number of Dogs">
+        <input
+          type="number"
+          min="1"
+          step="1"
+          value={data.numberOfDogs}
+          onChange={e => onChange('numberOfDogs', Math.max(1, parseInt(e.target.value, 10) || 1))}
+        />
+        {data.numberOfDogs > 1 && (
+          <div style={{ fontSize: '0.78rem', color: '#7D9B76', marginTop: 4 }}>
+            {MULTI_DOG_DISCOUNT * 100}% off each additional dog's nightly rate. Full intake for dogs 2+ is collected at drop-off.
+          </div>
+        )}
+      </Field>
       <div className="step-actions">
         <button className="btn-secondary" onClick={onBack}>Back</button>
         <button className="btn-primary" onClick={() => validate() && onNext()}>Continue</button>
@@ -244,7 +344,7 @@ function StepDates({ data, onChange, onNext, onBack, rate }) {
     return Object.keys(e).length === 0;
   }
 
-  const cost = calcCost(data.checkIn, data.checkOut, data.dropTime, data.pickupTime, rate);
+  const cost = calcCost(data.checkIn, data.checkOut, data.dropTime, data.pickupTime, rate, data.numberOfDogs);
 
   return (
     <div className="step">
@@ -269,7 +369,11 @@ function StepDates({ data, onChange, onNext, onBack, rate }) {
         <div className="cost-estimate">
           <span>Estimated cost</span>
           <strong>${cost}</strong>
-          <div className="cost-note">Based on ${rate}/day · 24-hour minimum · Final invoice at pickup</div>
+          <div className="cost-note">
+            Based on ${rate}/day · 24-hour minimum · +{HOLIDAY_UPCHARGE * 100}% on holidays
+            {data.numberOfDogs > 1 && ` · ${MULTI_DOG_DISCOUNT * 100}% off each additional dog`}
+            {' '}· Final invoice at pickup
+          </div>
         </div>
       )}
       <Field label="Notes (medications, feeding schedule, special instructions)">
@@ -449,6 +553,7 @@ function AdminView({ onClose, rate, setRate }) {
                   <span>{formatDate(s.check_out)} {s.pickup_time?.slice(0,5)}</span>
                 </div>
                 {s.estimated_cost && <div className="stay-cost">Est. ${s.estimated_cost}</div>}
+                {s.number_of_dogs > 1 && <div className="stay-meta">{s.number_of_dogs} dogs</div>}
                 <div className="stay-meta">Signed {formatDate(s.submitted_at?.slice(0,10))} · {s.owner_email} · {s.owner_phone}</div>
                 {s.dog_dob && <div className="stay-meta">DOB: {formatDate(s.dog_dob)} · Age at stay: {calcAge(s.dog_dob)}</div>}
                 {s.notes && <div className="stay-notes">"{s.notes}"</div>}
@@ -532,6 +637,7 @@ export default function App() {
     vetName: 'Select a veterinarian', spayNeuter: '',
     aggressionHistory: '', aggressionDetail: '',
     healthConcerns: '', healthDetail: '',
+    numberOfDogs: 1,
     checkIn: '', checkOut: '', dropTime: '', pickupTime: '', notes: '',
     agreed: false, signature: '',
   });
@@ -540,7 +646,7 @@ export default function App() {
 
   async function handleSubmit() {
     setSubmitting(true);
-    const cost = calcCost(form.checkIn, form.checkOut, form.dropTime, form.pickupTime, rate);
+    const cost = calcCost(form.checkIn, form.checkOut, form.dropTime, form.pickupTime, rate, form.numberOfDogs);
     const record = {
       owner_name: form.ownerName,
       owner_phone: form.ownerPhone,
@@ -556,6 +662,7 @@ export default function App() {
       aggression_detail: form.aggressionDetail,
       health_concerns: form.healthConcerns,
       health_detail: form.healthDetail,
+      number_of_dogs: form.numberOfDogs,
       check_in: form.checkIn,
       check_out: form.checkOut,
       drop_time: form.dropTime || null,

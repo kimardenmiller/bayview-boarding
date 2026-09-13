@@ -9,9 +9,14 @@ Kim Miller and Estee Fletter at 210 Bayview Drive, San Rafael, CA.
 - Electronic waiver with e-signature (legally binding under E-SIGN / UETA)
 - Supabase database saves all submissions
 - Phone-number-based returning client lookup
-- Cost estimate based on drop-off/pick-up times at $105/day
+- Cost estimate based on drop-off/pick-up times at $105/day, +30% on holiday
+  nights (computed algorithmically, see calcCost/getHolidayWindows in
+  src/App.js), 10% off each additional dog's nightly rate (uncapped) via a
+  "Number of Dogs" field on Step 2 — full intake is still collected for the
+  primary dog only
 - Twilio SMS confirmation texts (pending A2P carrier approval)
-- Admin panel with stay history per dog
+- Admin panel with stay history per dog, reached only via a bookmarked URL
+  (?admin) — no visible Admin button in the UI
 
 ## Tech stack
 - React (Create React App)
@@ -25,7 +30,7 @@ Kim Miller and Estee Fletter at 210 Bayview Drive, San Rafael, CA.
 - src/App.js — main app
 - src/settings.js — all configurable values (rates, vets, messages, packing list)
 - src/waiver.js — full waiver text
-- src/App.test.js — 49 passing tests (TDD), Supabase mocked via src/__mocks__/supabase.js
+- src/App.test.js — 74 passing tests (TDD), Supabase mocked via src/__mocks__/supabase.js
 - supabase/functions/send-confirmation/index.ts — Twilio SMS function (outbound)
 - supabase/functions/receive-sms/index.ts — inbound SMS webhook: auto-reply + relay to Kim/Estee. Deploy with `--no-verify-jwt` (see comment at top of file) or Twilio's webhook calls silently fail
 - supabase/functions/_shared/contact.ts — pure text builders + Twilio signature validator, shared by send-confirmation and receive-sms, unit-tested via `deno test`
@@ -48,7 +53,7 @@ Kim Miller and Estee Fletter at 210 Bayview Drive, San Rafael, CA.
 1. Stay reminder SMS — cron job 24hrs before drop-off
 2. Billing SMS — admin triggers from stay detail view
 3. Rate persistence — save to Supabase so it survives page refresh
-4. Phone lookup — confirm working end to end
+4. Persist admin rate setting to Supabase settings table
 5. Signature timestamp — add client timezone
 
 ## Rules

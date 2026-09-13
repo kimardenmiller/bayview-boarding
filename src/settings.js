@@ -6,6 +6,8 @@ export const SETTINGS = {
   // ── Pricing ───────────────────────────────────────────────────────────────
   DEFAULT_DAY_RATE: 105,         // $ per 24 hours
   MIN_HOURS: 24,                 // minimum billable hours
+  MULTI_DOG_DISCOUNT: 0.10,      // 10% off the per-night rate for each additional dog (uncapped)
+  HOLIDAY_UPCHARGE: 0.30,        // +30% on any night inside a holiday window (see calcHolidayWindows)
 
   // ── Business Info ─────────────────────────────────────────────────────────
   BUSINESS_NAME: 'Bayview Boarding',
