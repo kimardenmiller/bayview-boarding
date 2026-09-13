@@ -26,14 +26,25 @@ export const SETTINGS = {
   ],
 
   // ── SMS Message Templates ─────────────────────────────────────────────────
+  // Reference copies only — the actual send logic lives in
+  // supabase/functions/send-confirmation/index.ts (Deno, can't import this
+  // client-bundled file) and supabase/functions/_shared/contact.ts. Keep
+  // these in sync by hand when that logic changes.
+  //
   // Variables: {firstName}, {dogName}, {dropDate}, {dropTime}, {pickDate},
-  //            {pickTime}, {estimatedCost}, {packingList}
+  //            {pickTime}, {estimatedCost}, {packingList}, {kimPhone},
+  //            {esteePhone}
+  //
+  // {kimPhone}/{esteePhone} are placeholders, not real numbers — the actual
+  // values live only as the KIM_PHONE/ESTEE_PHONE Supabase secrets, read
+  // server-side. This file ships in the public client JS bundle, so real
+  // personal phone numbers must never be filled in here directly.
 
-  SMS_CONFIRMATION: `Hi {firstName}! {dogName}'s stay at Bayview Boarding is confirmed. Drop-off: {dropDate} at {dropTime}. Pick-up: {pickDate} at {pickTime}. Estimated cost: ${'{estimatedCost}'}. Questions? Reply to this text. — Kim & Estee`,
+  SMS_CONFIRMATION: `Hi {firstName}! {dogName}'s stay at Bayview Boarding is confirmed. Drop-off: {dropDate} at {dropTime}. Pick-up: {pickDate} at {pickTime}. Estimated cost: ${'{estimatedCost}'}. — Kim & Estee Replies to this number aren't monitored. For questions, please group-text Kim {kimPhone} & Estee {esteePhone}.`,
 
-  SMS_REMINDER: `Hi {firstName}! Just a reminder that {dogName}'s stay at Bayview Boarding starts tomorrow at {dropTime}. Here's what to bring: {packingList}. See you then! Reply STOP to opt out. — Kim & Estee`,
+  SMS_REMINDER: `Hi {firstName}! Just a reminder that {dogName}'s stay at Bayview Boarding starts tomorrow at {dropTime}. Here's what to bring: {packingList}. See you then! Reply STOP to opt out. — Kim & Estee Replies to this number aren't monitored. For questions, please group-text Kim {kimPhone} & Estee {esteePhone}.`,
 
-  SMS_BILLING: `Hi {firstName}! {dogName} is ready for pickup. Your total for this stay is ${'{finalCost}'}. Thanks for choosing Bayview Boarding! Reply STOP to opt out. — Kim & Estee`,
+  SMS_BILLING: `Hi {firstName}! {dogName} is ready for pickup. Your total for this stay is ${'{finalCost}'}. Thanks for choosing Bayview Boarding! Reply STOP to opt out. — Kim & Estee Replies to this number aren't monitored. For questions, please group-text Kim {kimPhone} & Estee {esteePhone}.`,
 
   // ── Vet Dropdown ──────────────────────────────────────────────────────────
   SAN_RAFAEL_VETS: [

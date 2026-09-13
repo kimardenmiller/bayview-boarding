@@ -1,8 +1,11 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { appendContactNote } from "../_shared/contact.ts";
 
 const TWILIO_ACCOUNT_SID = Deno.env.get("TWILIO_ACCOUNT_SID")!;
 const TWILIO_AUTH_TOKEN = Deno.env.get("TWILIO_AUTH_TOKEN")!;
 const TWILIO_FROM = Deno.env.get("TWILIO_PHONE")!;
+const KIM_PHONE = Deno.env.get("KIM_PHONE")!;
+const ESTEE_PHONE = Deno.env.get("ESTEE_PHONE")!;
 
 const PACKING_LIST = [
   "Food",
@@ -44,8 +47,12 @@ serve(async (req) => {
       message = `Hi ${firstName}! ${dog_name} is ready for pickup. Your total for this stay is $${final_cost}. Thanks for choosing Bayview Boarding! Reply STOP to opt out. — Kim & Estee`;
     } else {
       // Default: confirmation
-      message = `Hi ${firstName}! ${dog_name}'s stay at Bayview Boarding is confirmed. Drop-off: ${dropDate} at ${dropTimeStr}. Pick-up: ${pickDate} at ${pickTimeStr}. Estimated cost: $${estimated_cost}. Questions? Reply to this text. — Kim & Estee`;
+      message = `Hi ${firstName}! ${dog_name}'s stay at Bayview Boarding is confirmed. Drop-off: ${dropDate} at ${dropTimeStr}. Pick-up: ${pickDate} at ${pickTimeStr}. Estimated cost: $${estimated_cost}. — Kim & Estee`;
     }
+
+    // Every outbound message ends with how to actually reach us, since
+    // replies to this number aren't monitored (see receive-sms).
+    message = appendContactNote(message, KIM_PHONE, ESTEE_PHONE);
 
     const toNumber = owner_phone.replace(/\D/g, "");
     const formattedTo = toNumber.startsWith("1") ? `+${toNumber}` : `+1${toNumber}`;
