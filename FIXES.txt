@@ -59,6 +59,37 @@ TWILIO STATUS
 
 COMPLETED
 ---------
+- v1.5.10: Inbound SMS handling. Clients texting (650) 252-2433 were going
+  into a void - no webhook configured, nobody would see it. New receive-sms
+  Edge Function auto-replies telling clients replies aren't monitored and to
+  group-text Kim & Estee directly, and relays the message to both of them
+  anyway (flagged as a direct reply) so nothing is silently dropped if they
+  reply despite the instruction. Verifies the Twilio request signature
+  (HMAC-SHA1) before doing anything. Every outbound message from
+  send-confirmation now ends with the same note. Kim/Estee's personal
+  numbers live only as Supabase secrets (KIM_PHONE, ESTEE_PHONE) - never in
+  src/settings.js, which ships in the public client bundle.
+  Debugging the live deploy found two real issues, both fixed:
+    1. Supabase's default JWT verification was rejecting Twilio's webhook
+       calls before our own code ever ran (error 11200 wrapping a 401,
+       visible in Twilio's Messages log + Monitor/Alerts) - fixed by
+       deploying with --no-verify-jwt (our own Twilio-signature check is
+       the real auth gate for this endpoint). This is now documented
+       directly in receive-sms/index.ts since no test can catch a missing
+       deploy flag.
+    2. Once that was fixed, relay/auto-reply sends still failed with error
+       30034 - confirmed via Twilio's API this is simply the A2P 10DLC
+       campaign still being IN_PROGRESS (not yet carrier-approved), not a
+       bug - every outbound message from this number is blocked until
+       that clears, which is the whole point of A2P registration. Nothing
+       further to fix here; just waiting on carrier review.
+  Diagnosed by reading Twilio's Messages + Monitor/Alerts APIs directly
+  rather than guessing - found the exact httpResponse/error code for each
+  issue before attempting a fix.
+  Tests: 5 new Deno tests for the actual HTTP handler (receive-sms/
+  index.test.ts) - valid/invalid/missing signature, correct relay
+  recipients and content, auto-reply content - using a mocked fetch so
+  no test sends a real SMS. 15/15 Deno, 49/49 React.
 - v1.5.9: Fixed 3rd A2P rejection (error 30908, field: message_flow) —
   confirmed via API as a genuine new failure, not a stale duplicate
   email. sms-consent.html had no incoming links from anywhere

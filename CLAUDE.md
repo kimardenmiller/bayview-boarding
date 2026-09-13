@@ -25,8 +25,10 @@ Kim Miller and Estee Fletter at 210 Bayview Drive, San Rafael, CA.
 - src/App.js — main app
 - src/settings.js — all configurable values (rates, vets, messages, packing list)
 - src/waiver.js — full waiver text
-- src/App.test.js — 48 passing tests (TDD), Supabase mocked via src/__mocks__/supabase.js
-- supabase/functions/send-confirmation/index.ts — Twilio SMS function
+- src/App.test.js — 49 passing tests (TDD), Supabase mocked via src/__mocks__/supabase.js
+- supabase/functions/send-confirmation/index.ts — Twilio SMS function (outbound)
+- supabase/functions/receive-sms/index.ts — inbound SMS webhook: auto-reply + relay to Kim/Estee. Deploy with `--no-verify-jwt` (see comment at top of file) or Twilio's webhook calls silently fail
+- supabase/functions/_shared/contact.ts — pure text builders + Twilio signature validator, shared by send-confirmation and receive-sms, unit-tested via `deno test`
 - supabase/functions/admin-data/index.ts — server-side admin password check + full stay data (service role key, never exposed to client)
 - supabase/functions/lookup-client/index.ts — returning-client autofill by phone (returns only safe fields, not full record)
 - supabase/migrations/ — RLS policy history for the `stays` table

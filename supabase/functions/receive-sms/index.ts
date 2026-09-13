@@ -7,6 +7,17 @@ import { buildAutoReply, buildRelayWarning, validateTwilioSignature, escapeXml }
 // to group-text Kim & Estee directly instead. If someone replies anyway, we
 // still relay it - clearly flagged as a direct reply - so nothing gets
 // silently dropped.
+//
+// DEPLOY WITH: supabase functions deploy receive-sms --no-verify-jwt
+// Twilio's webhook POST has no Supabase auth header (it sends its own
+// X-Twilio-Signature instead, verified below) - without --no-verify-jwt,
+// Supabase's own platform gate rejects the request with a 401 before this
+// code ever runs. This bit us for real on 2026-09-13: the function looked
+// fine and tests passed, but Twilio's real webhook calls failed with error
+// 11200 (HTTP retrieval failure, wrapping a 401) until this flag was added.
+// No test can catch a missing deploy flag - this comment is the actual
+// guard. (Separately, error 30034 on outbound sends means A2P campaign
+// approval is still pending - unrelated to this flag.)
 
 const TWILIO_ACCOUNT_SID = Deno.env.get('TWILIO_ACCOUNT_SID')!;
 const TWILIO_AUTH_TOKEN = Deno.env.get('TWILIO_AUTH_TOKEN')!;
@@ -39,7 +50,9 @@ async function sendSms(to: string, body: string) {
   return result;
 }
 
-serve(async (req) => {
+// Exported (rather than only passed inline to serve()) so it can be unit
+// tested directly with a constructed Request - no live server needed.
+export async function handleRequest(req: Request): Promise<Response> {
   try {
     if (req.method !== 'POST') {
       return new Response('Method not allowed', { status: 405 });
@@ -74,4 +87,10 @@ serve(async (req) => {
     // failure in Twilio - a caught error here shouldn't alarm anyone further.
     return new Response(EMPTY_TWIML, { status: 200, headers: { 'Content-Type': 'text/xml' } });
   }
-});
+}
+
+// Only actually start listening when run directly (as Supabase does in
+// deployment) - not when imported by a test file.
+if (import.meta.main) {
+  serve(handleRequest);
+}
