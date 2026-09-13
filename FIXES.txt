@@ -1,6 +1,6 @@
 BAYVIEW BOARDING — FIX LIST
 ============================
-Last updated: September 12, 2026
+Last updated: September 13, 2026
 
 NEXT CHANGE LIST (v1.5)
 -----------------------
@@ -33,22 +33,42 @@ DEFERRED (revisit only if it actually blocks something)
 TWILIO STATUS
 -------------
 - A2P 10DLC registration submitted September 12, 2026
-- Rejected twice (error 30908 — privacy policy / message_flow couldn't
-  be verified as compliant); both times traced to real gaps, not just
-  wording: (1) the required "no mobile info shared with third parties"
-  statement was missing from message_flow itself, (2) the site's actual
-  intake form is a JS-rendered SPA, so Twilio's vetting crawler saw
-  nothing at the site root and asked for opt-in evidence it could
-  verify. Fixed both (see COMPLETED) and confirmed via Twilio's own API
-  that the resubmission is now genuinely in progress (campaign_status:
-  IN_PROGRESS, errors: [] as of last check September 12, 2026) — not
-  just a Console click that may not have registered.
+- Rejected three times, all error 30908 (privacy policy / message_flow
+  couldn't be verified), each traced to a real gap rather than just
+  wording — see COMPLETED for the full history. Root cause across all
+  three: the site is a JS-rendered SPA (empty <div id="root"> to any
+  non-JS crawler), so Twilio's vetting repeatedly couldn't verify
+  claims made in message_flow by visiting the live site, even when the
+  text itself was correct.
+- 3rd fix (September 13, 2026): the evidence page (sms-consent.html)
+  had zero incoming links from anywhere crawlable — not the homepage,
+  not privacy.html. Added real links in the raw (non-JS) HTML via
+  public/index.html's <noscript> block, cross-linked privacy.html /
+  terms.html / sms-consent.html to each other, fixed terms.html's SMS
+  section (had a looser paraphrase instead of the exact required
+  statement — Twilio has that URL registered too), and made
+  message_flow itself directly cite the evidence page URL as text, so
+  it doesn't depend on any link-following at all. Confirmed via
+  Twilio's API: this 3rd rejection was a genuine new failure (errors
+  populated, not just a stale duplicate email) from vetting that ran
+  before these fixes were live. Resubmitted after — confirmed
+  campaign_status: IN_PROGRESS, errors: [] as of September 13, 2026.
 - Twilio account: see src/settings.js PHONE
 - Confirmation SMS wired up and tested (pending A2P approval)
 - Reminder and billing SMS templates ready in settings.js
 
 COMPLETED
 ---------
+- v1.5.9: Fixed 3rd A2P rejection (error 30908, field: message_flow) —
+  confirmed via API as a genuine new failure, not a stale duplicate
+  email. sms-consent.html had no incoming links from anywhere
+  crawlable; fixed via public/index.html's <noscript> block (real
+  links in the raw HTML) plus cross-linking privacy.html/terms.html/
+  sms-consent.html to each other. Also fixed terms.html's SMS section,
+  which had a looser paraphrase instead of the exact required
+  statement. message_flow now directly cites the evidence page URL as
+  plain text. Resubmitted via API, confirmed campaign_status:
+  IN_PROGRESS, errors: [].
 - Fixed 2nd A2P rejection (error 30908, field: message_flow): the
   Console "save" on message_flow/help_message had persisted correctly,
   but the campaign had never actually been resubmitted for re-vetting
