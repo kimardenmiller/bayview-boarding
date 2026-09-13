@@ -24,7 +24,8 @@
   },
   "jest.jestCommandLine": "npm test --",
   "jest.autoRun": {
-    "watch": true,
+    "watch": false,
+    "onSave": "test-src-file",
     "onStartup": ["all-tests"]
   }
 }
