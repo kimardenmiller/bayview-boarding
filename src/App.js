@@ -47,14 +47,13 @@ function calcCost(checkIn, checkOut, dropTime, pickupTime, rate) {
 // multi-step form flows. No behavior change.
 export { formatDate, calcAge, calcCost };
 
-function Header({ onAdmin }) {
+function Header() {
   return (
     <header className="header">
       <div className="header-inner">
         <div className="wordmark">Bayview Boarding</div>
         <div className="header-sub">San Rafael, California</div>
       </div>
-      <button className="admin-link" onClick={onAdmin}>Admin</button>
     </header>
   );
 }
@@ -501,15 +500,13 @@ function AdminView({ onClose, rate, setRate }) {
   );
 }
 
-function Landing({ onStart, onAdmin }) {
+function Landing({ onStart }) {
   return (
     <div className="landing">
       <img className="landing-img" src={heroDog} alt="A happy dog boarding with Bayview Boarding on a Marin hillside trail" />
       <div className="landing-overlay">
-        <button className="landing-admin" onClick={onAdmin}>Admin</button>
         <div className="landing-content">
           <h1 className="landing-title">Bayview Boarding</h1>
-          <p className="landing-sub">San Rafael, California</p>
           <button className="landing-cta" onClick={onStart}>Book My Stay</button>
         </div>
       </div>
@@ -520,7 +517,9 @@ function Landing({ onStart, onAdmin }) {
 export default function App() {
   const [showLanding, setShowLanding] = useState(true);
   const [step, setStep] = useState(0);
-  const [showAdmin, setShowAdmin] = useState(false);
+  // Admin has no visible entry point in the UI anymore - reached only via a
+  // bookmarked URL (?admin), e.g. https://.../bayview-boarding/?admin
+  const [showAdmin, setShowAdmin] = useState(() => new URLSearchParams(window.location.search).has('admin'));
   const [submitted, setSubmitted] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [currentStay, setCurrentStay] = useState(null);
@@ -610,7 +609,7 @@ export default function App() {
   if (showLanding) {
     return (
       <div className="app">
-        <Landing onStart={() => setShowLanding(false)} onAdmin={() => setShowAdmin(true)} />
+        <Landing onStart={() => setShowLanding(false)} />
         {showAdmin && <AdminView onClose={() => setShowAdmin(false)} rate={rate} setRate={setRate} />}
       </div>
     );
@@ -618,7 +617,7 @@ export default function App() {
 
   return (
     <div className="app">
-      <Header onAdmin={() => setShowAdmin(true)} />
+      <Header />
       <main className="main">
         {!submitted ? (
           <>

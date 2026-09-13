@@ -11,6 +11,9 @@ jest.mock('./supabase');
 beforeEach(() => {
   supabase.from.mockReturnValue({ insert: jest.fn().mockResolvedValue({ error: null }) });
   supabase.functions.invoke.mockResolvedValue({ data: { found: false }, error: null });
+  // Reset the URL before every test - admin tests opt in via goToAdminUrl(),
+  // everything else should start from a plain, non-admin URL.
+  window.history.pushState({}, '', '/');
 });
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -92,10 +95,16 @@ const SAMPLE_STAYS = [
   },
 ];
 
+// Admin has no visible button in the UI - reached only via a bookmarked
+// ?admin URL. Tests navigate there the same way a real bookmark would.
+function goToAdminUrl() {
+  window.history.pushState({}, '', '/?admin');
+}
+
 async function loginAsAdmin(stays = SAMPLE_STAYS) {
   supabase.functions.invoke.mockResolvedValueOnce({ data: { stays }, error: null });
+  goToAdminUrl();
   render(<App />);
-  fireEvent.click(screen.getByText('Admin'));
   await userEvent.type(screen.getByPlaceholderText('Password'), 'correct-password');
   fireEvent.click(screen.getByText('Sign In'));
   await screen.findByText('Bayview Boarding — Admin');
@@ -430,8 +439,8 @@ describe('Step 5 — Signature', () => {
 // ── Admin: login ─────────────────────────────────────────────────────────────
 describe('Admin login', () => {
   test('rejects wrong password', async () => {
+    goToAdminUrl();
     render(<App />);
-    fireEvent.click(screen.getByText('Admin'));
     await userEvent.type(screen.getByPlaceholderText('Password'), 'wrongpassword');
     fireEvent.click(screen.getByText('Sign In'));
     expect(await screen.findByText('Incorrect password')).toBeInTheDocument();
@@ -456,27 +465,26 @@ describe('Admin login', () => {
   });
 
   test('cancel button on the login screen closes the admin overlay', async () => {
+    goToAdminUrl();
     render(<App />);
-    fireEvent.click(screen.getByText('Admin'));
     fireEvent.click(screen.getByText('Cancel'));
     expect(screen.queryByText('Admin Access')).not.toBeInTheDocument();
   });
 
   test('pressing Enter in the password field submits it', async () => {
     supabase.functions.invoke.mockResolvedValueOnce({ data: { stays: SAMPLE_STAYS }, error: null });
+    goToAdminUrl();
     render(<App />);
-    fireEvent.click(screen.getByText('Admin'));
     await userEvent.type(screen.getByPlaceholderText('Password'), 'correct-password{Enter}');
     expect(await screen.findByText('Bayview Boarding — Admin')).toBeInTheDocument();
   });
 
-  test('is also reachable from the header once past the landing screen', async () => {
-    await fillStep1(); // clicks "Book My Stay" and lands on the booking form (consumes the default auto-lookup mock)
-    supabase.functions.invoke.mockResolvedValueOnce({ data: { stays: SAMPLE_STAYS }, error: null });
-    fireEvent.click(screen.getByText('Admin'));
-    await userEvent.type(screen.getByPlaceholderText('Password'), 'correct-password');
-    fireEvent.click(screen.getByText('Sign In'));
-    expect(await screen.findByText('Bayview Boarding — Admin')).toBeInTheDocument();
+  test('has no visible Admin button anywhere in the normal booking flow', async () => {
+    render(<App />);
+    expect(screen.queryByText('Admin')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByText('Book My Stay'));
+    expect(await screen.findByText('Owner Information')).toBeInTheDocument();
+    expect(screen.queryByText('Admin')).not.toBeInTheDocument();
   });
 });
 
