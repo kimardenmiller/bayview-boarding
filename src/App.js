@@ -17,8 +17,31 @@ function formatDate(iso) {
   return `${m}/${d}/${y}`;
 }
 
+// Adds thousands separators without otherwise changing the number's
+// existing textual form - "199.50" stays "199.50", a bare 1420 becomes
+// "1,420", "1199.50" becomes "1,199.50". Deliberately string-based
+// (rather than always normalizing to 2 decimals) so it stays a drop-in
+// wrapper around each call site's own already-correct formatting instead
+// of also changing how many decimal places show up there.
+function formatMoney(amount) {
+  if (amount === null || amount === undefined || amount === '') return amount;
+  const str = String(amount);
+  const n = Number(str);
+  if (Number.isNaN(n)) return amount;
+  const [whole, decimal] = str.split('.');
+  const withCommas = whole.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  return decimal !== undefined ? `${withCommas}.${decimal}` : withCommas;
+}
+
+// NOT `new Date().toISOString().slice(0,10)` - toISOString() is always
+// UTC. In the evening Pacific time (after ~5pm PDT / 4pm PST), UTC has
+// already rolled to tomorrow, so that would compute "today" as tomorrow -
+// making the actual local today (and the date-picker's min) reject a
+// check-in of today, and make an already-chosen near date look like it's
+// "in the past" when you go back to edit it. Use local calendar fields
+// instead (see isoFromLocalDate).
 function todayISO() {
-  return new Date().toISOString().slice(0, 10);
+  return isoFromLocalDate(new Date());
 }
 
 function calcAge(dob) {
@@ -131,7 +154,7 @@ function calcCost(checkIn, checkOut, dropTime, pickupTime, rate, numberOfDogs = 
 // Named exports alongside the default App export, purely so pure helper
 // functions can be unit-tested directly instead of only through full
 // multi-step form flows. No behavior change.
-export { formatDate, calcAge, calcCost, isHolidayNight, getHolidayWindows };
+export { formatDate, calcAge, calcCost, isHolidayNight, getHolidayWindows, todayISO, formatMoney };
 
 function Header() {
   return (
@@ -266,16 +289,25 @@ function StepOwner({ data, onChange, onNext }) {
     if (Number.isNaN(n) || n < 0) setDogCountText(String(data.dogs.length));
   }
 
-  function validate() {
+  // Pure - no state writes - so it can also drive the Continue button's
+  // disabled state on every render, not just report errors after a click.
+  function getErrors() {
     const e = {};
     if (!data.ownerPhone.trim()) e.ownerPhone = 'Required';
     if (!data.ownerName.trim()) e.ownerName = 'Required';
     if (!data.ownerEmail.trim()) e.ownerEmail = 'Required';
     if (!data.vetName || data.vetName === 'Select a Vet') e.vetName = 'Required';
     if (data.dogs.length === 0) e.dogCount = 'Must be at least 1';
+    return e;
+  }
+
+  function validate() {
+    const e = getErrors();
     setErrors(e);
     return Object.keys(e).length === 0;
   }
+
+  const canContinue = Object.keys(getErrors()).length === 0;
 
   return (
     <div className="step">
@@ -316,7 +348,7 @@ function StepOwner({ data, onChange, onNext }) {
         )}
       </Field>
       <div className="step-actions">
-        <button className="btn-primary" onClick={() => validate() && onNext()}>Continue</button>
+        <button className="btn-primary" onClick={() => validate() && onNext()} disabled={!canContinue}>Continue</button>
       </div>
     </div>
   );
@@ -334,7 +366,7 @@ function StepDogPage({ data, onChange, index, onNext, onBack }) {
     onChange('dogs', data.dogs.map((d, i) => i === index ? { ...d, [field]: value } : d));
   }
 
-  function validate() {
+  function getErrors() {
     const e = {};
     if (!dog.name.trim()) e.name = 'Required';
     if (!dog.breed.trim()) e.breed = 'Required';
@@ -342,9 +374,16 @@ function StepDogPage({ data, onChange, index, onNext, onBack }) {
     if (!dog.spayNeuter) e.spayNeuter = 'Required';
     if (!dog.aggressionHistory) e.aggressionHistory = 'Please select an answer';
     if (!dog.healthConcerns) e.healthConcerns = 'Please select an answer';
+    return e;
+  }
+
+  function validate() {
+    const e = getErrors();
     setErrors(e);
     return Object.keys(e).length === 0;
   }
+
+  const canContinue = Object.keys(getErrors()).length === 0;
 
   return (
     <div className="step">
@@ -393,7 +432,7 @@ function StepDogPage({ data, onChange, index, onNext, onBack }) {
       )}
       <div className="step-actions">
         <button className="btn-secondary" onClick={onBack}>Back</button>
-        <button className="btn-primary" onClick={() => validate() && onNext()}>Continue</button>
+        <button className="btn-primary" onClick={() => validate() && onNext()} disabled={!canContinue}>Continue</button>
       </div>
     </div>
   );
@@ -402,7 +441,7 @@ function StepDogPage({ data, onChange, index, onNext, onBack }) {
 function StepDates({ data, onChange, onNext, onBack, rate }) {
   const [errors, setErrors] = useState({});
 
-  function validate() {
+  function getErrors() {
     const e = {};
     if (!data.checkIn) e.checkIn = 'Required';
     if (!data.checkOut) e.checkOut = 'Required';
@@ -413,9 +452,21 @@ function StepDates({ data, onChange, onNext, onBack, rate }) {
     // set some other way than the picker).
     if (data.checkIn && data.checkIn < todayISO()) e.checkIn = 'Check-in cannot be in the past';
     if (data.checkIn && data.checkOut && data.checkOut < data.checkIn) e.checkOut = 'Check-out must be after check-in';
+    return e;
+  }
+
+  function validate() {
+    const e = getErrors();
     setErrors(e);
     return Object.keys(e).length === 0;
   }
+
+  // Continue is greyed out only while a field is genuinely empty - a
+  // filled-in but semantically invalid date (past check-in, check-out
+  // before check-in) stays clickable, so the specific error message from
+  // getErrors() above can actually be seen instead of leaving an
+  // unexplained grey button once every field has *something* in it.
+  const isComplete = !!(data.checkIn && data.checkOut && data.dropTime && data.pickupTime);
 
   const cost = calcCost(data.checkIn, data.checkOut, data.dropTime, data.pickupTime, rate, data.dogs.length);
 
@@ -441,9 +492,9 @@ function StepDates({ data, onChange, onNext, onBack, rate }) {
       {cost && (
         <div className="cost-estimate">
           <span>Estimated cost</span>
-          <strong>${cost}</strong>
+          <strong>${formatMoney(cost)}</strong>
           <div className="cost-note">
-            Based on ${rate}/day · 24-hour minimum · +{HOLIDAY_UPCHARGE * 100}% on holidays
+            Based on ${formatMoney(rate)}/day · 24-hour minimum · +{HOLIDAY_UPCHARGE * 100}% on holidays
             {data.dogs.length > 1 && ` · ${MULTI_DOG_DISCOUNT * 100}% off each additional dog`}
             {' '}· Final invoice at pickup
           </div>
@@ -454,7 +505,7 @@ function StepDates({ data, onChange, onNext, onBack, rate }) {
       </Field>
       <div className="step-actions">
         <button className="btn-secondary" onClick={onBack}>Back</button>
-        <button className="btn-primary" onClick={() => validate() && onNext()}>Continue</button>
+        <button className="btn-primary" onClick={() => validate() && onNext()} disabled={!isComplete}>Continue</button>
       </div>
     </div>
   );
@@ -483,16 +534,24 @@ function StepWaiver({ onNext, onBack }) {
 
 function StepSign({ data, onChange, onSubmit, onBack, ownerName, submitting }) {
   const [errors, setErrors] = useState({});
-  function validate() {
+  function getErrors() {
     const e = {};
     if (!data.agreed) e.agreed = 'You must check this box to proceed';
     if (!data.signature.trim()) e.signature = 'Please type your full legal name';
-    if (data.signature.trim().toLowerCase() !== ownerName.trim().toLowerCase()) {
+    else if (data.signature.trim().toLowerCase() !== ownerName.trim().toLowerCase()) {
       e.signature = 'Signature must match the name you entered on step 1';
     }
+    return e;
+  }
+  function validate() {
+    const e = getErrors();
     setErrors(e);
     return Object.keys(e).length === 0;
   }
+  // Greyed out only while genuinely incomplete (box unchecked, signature
+  // blank) - a filled-in but mismatched signature stays clickable so the
+  // "must match" message can actually be seen.
+  const isComplete = data.agreed && !!data.signature.trim();
   return (
     <div className="step">
       <h2 className="step-title">Sign & Submit</h2>
@@ -511,7 +570,7 @@ function StepSign({ data, onChange, onSubmit, onBack, ownerName, submitting }) {
       </p>
       <div className="step-actions">
         <button className="btn-secondary" onClick={onBack}>Back</button>
-        <button className="btn-primary btn-submit" onClick={() => validate() && onSubmit()} disabled={submitting}>
+        <button className="btn-primary btn-submit" onClick={() => validate() && onSubmit()} disabled={submitting || !isComplete}>
           {submitting ? 'Saving...' : 'Submit Agreement'}
         </button>
       </div>
@@ -541,7 +600,7 @@ function Confirmation({ stay, onNewBooking }) {
       {stay.estimated_cost && (
         <div className="cost-estimate">
           <span>Estimated cost</span>
-          <strong>${stay.estimated_cost}</strong>
+          <strong>${formatMoney(stay.estimated_cost)}</strong>
           <div className="cost-note">Final invoice at pickup</div>
         </div>
       )}
@@ -625,7 +684,7 @@ function AdminView({ onClose, rate, setRate }) {
                   <span className="stay-arrow">→</span>
                   <span>{formatDate(s.check_out)} {s.pickup_time?.slice(0,5)}</span>
                 </div>
-                {s.estimated_cost && <div className="stay-cost">Est. ${s.estimated_cost}</div>}
+                {s.estimated_cost && <div className="stay-cost">Est. ${formatMoney(s.estimated_cost)}</div>}
                 {s.number_of_dogs > 1 && <div className="stay-meta">{s.number_of_dogs} dogs</div>}
                 <div className="stay-meta">Signed {formatDate(s.submitted_at?.slice(0,10))} · {selected.owner?.email} · {selected.owner?.phone}</div>
                 {s.dob && <div className="stay-meta">DOB: {formatDate(s.dob)} · Age at stay: {calcAge(s.dob)}</div>}
@@ -654,7 +713,7 @@ function AdminView({ onClose, rate, setRate }) {
             <input type="number" value={editRate} onChange={e => setEditRate(e.target.value)} style={{ width: 80, padding: '6px 10px', border: '1.5px solid #D5D9DE', borderRadius: 6, fontSize: '0.95rem' }} />
             <button className="btn-primary" style={{ padding: '6px 14px' }} onClick={() => setRate(Number(editRate))}>Save</button>
           </div>
-          <div style={{ fontSize: '0.75rem', color: '#6B7A8A', marginTop: 4 }}>24-hour minimum · Current rate: ${rate}/day</div>
+          <div style={{ fontSize: '0.75rem', color: '#6B7A8A', marginTop: 4 }}>24-hour minimum · Current rate: ${formatMoney(rate)}/day</div>
         </div>
         <input className="search-input" placeholder="Search by dog or owner name..." value={search} onChange={e => setSearch(e.target.value)} />
         <div className="admin-count">{loading ? 'Loading...' : `${totalStays} signed agreement${totalStays !== 1 ? 's' : ''} on file`}</div>

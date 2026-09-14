@@ -28,7 +28,23 @@ function json(body: unknown, status = 200): Response {
 // form already validates this client-side, but that's only a UI
 // convenience; this is the actual boundary since submit-booking is now
 // the sole write path (anon has no direct table access at all).
-function todayISO(): string {
+//
+// The server has no timezone of its own that matters here, so this uses
+// the client's own timezone (sent as clientTimezone) to compute "today"
+// the same way the client did, rather than defaulting to UTC - a plain
+// UTC "today" would itself have exactly the bug this guards against on
+// the client (see todayISO in src/App.js): in the evening Pacific time,
+// UTC has already rolled to tomorrow, so a same-day booking made after
+// ~5pm PDT would be wrongly rejected as "in the past".
+function todayISO(clientTimezone?: string | null): string {
+  if (clientTimezone) {
+    try {
+      // en-CA formats as YYYY-MM-DD, conveniently matching our ISO dates.
+      return new Intl.DateTimeFormat("en-CA", { timeZone: clientTimezone }).format(new Date());
+    } catch (_err) {
+      // Unknown/invalid IANA timezone string - fall through to UTC.
+    }
+  }
   return new Date().toISOString().slice(0, 10);
 }
 
@@ -71,7 +87,7 @@ function validate(body: BookingInput): string[] {
   }
   if (!body.checkIn) errors.push("checkIn");
   if (!body.checkOut) errors.push("checkOut");
-  if (body.checkIn && body.checkIn < todayISO()) errors.push("checkIn (cannot be in the past)");
+  if (body.checkIn && body.checkIn < todayISO(body.clientTimezone)) errors.push("checkIn (cannot be in the past)");
   if (!body.signature?.trim()) errors.push("signature");
   return errors;
 }

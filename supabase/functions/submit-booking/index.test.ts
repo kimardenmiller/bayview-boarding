@@ -1,4 +1,5 @@
 import { assertEquals, assert } from 'https://deno.land/std@0.168.0/testing/asserts.ts';
+import { FakeTime } from 'https://deno.land/std@0.168.0/testing/time.ts';
 
 // See receive-sms/index.test.ts for why this needs a dynamic import: the
 // module reads SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY from env at import
@@ -163,6 +164,51 @@ Deno.test('rejects a check-in date in the past, without touching the database', 
     const data = await res.json();
     assert(data.error.includes('checkIn'));
     assertEquals(stub.calls.length, 0);
+  } finally {
+    stub.restore();
+  }
+});
+
+Deno.test('computes "today" from clientTimezone, not UTC - accepts a same-day Pacific booking made in the evening', async () => {
+  // 06:00 UTC = 11pm PDT the previous evening. A plain UTC "today" would
+  // be one calendar day ahead of Pacific's actual today, and would wrongly
+  // reject a checkIn of that Pacific today as "in the past" - exactly the
+  // bug this guards against (see todayISO's comment).
+  const time = new FakeTime('2026-03-16T06:00:00Z');
+  const stub = stubSupabase();
+  try {
+    const res = await handleRequest(postRequest(validBooking({
+      checkIn: '2026-03-15', checkOut: '2026-03-16', clientTimezone: 'America/Los_Angeles',
+    })));
+    assertEquals(res.status, 200);
+  } finally {
+    time.restore();
+    stub.restore();
+  }
+});
+
+Deno.test('still rejects a date genuinely before the client\'s local today', async () => {
+  const time = new FakeTime('2026-03-16T06:00:00Z'); // Pacific "today" is Mar 15
+  const stub = stubSupabase();
+  try {
+    const res = await handleRequest(postRequest(validBooking({
+      checkIn: '2026-03-14', checkOut: '2026-03-15', clientTimezone: 'America/Los_Angeles',
+    })));
+    assertEquals(res.status, 400);
+    assertEquals(stub.calls.length, 0);
+  } finally {
+    time.restore();
+    stub.restore();
+  }
+});
+
+Deno.test('falls back to UTC "today" when clientTimezone is missing or invalid', async () => {
+  const stub = stubSupabase();
+  try {
+    const res = await handleRequest(postRequest(validBooking({
+      checkIn: '2020-01-01', checkOut: '2020-01-02', clientTimezone: 'Not/ARealZone',
+    })));
+    assertEquals(res.status, 400); // still rejected as past, just via the UTC fallback
   } finally {
     stub.restore();
   }

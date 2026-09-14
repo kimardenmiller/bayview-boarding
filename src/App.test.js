@@ -1,6 +1,6 @@
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import App, { formatDate, calcAge, calcCost, isHolidayNight, getHolidayWindows } from './App';
+import App, { formatDate, calcAge, calcCost, isHolidayNight, getHolidayWindows, todayISO, formatMoney } from './App';
 import { supabase } from './supabase';
 
 jest.mock('./supabase');
@@ -360,15 +360,82 @@ describe('getHolidayWindows', () => {
   });
 });
 
+describe('formatMoney', () => {
+  test('leaves amounts under 1,000 unchanged', () => {
+    expect(formatMoney('199.50')).toBe('199.50');
+    expect(formatMoney(420)).toBe('420');
+  });
+
+  test('adds a thousands comma above 999, preserving the existing decimal form', () => {
+    expect(formatMoney('1199.50')).toBe('1,199.50');
+    expect(formatMoney(1420)).toBe('1,420');
+    expect(formatMoney('999.99')).toBe('999.99'); // right at the boundary, no comma yet
+    expect(formatMoney('1000.00')).toBe('1,000.00');
+  });
+
+  test('adds multiple commas for larger amounts', () => {
+    expect(formatMoney(1234567)).toBe('1,234,567');
+  });
+
+  test('passes through null/undefined/empty/non-numeric values unchanged', () => {
+    expect(formatMoney(null)).toBeNull();
+    expect(formatMoney(undefined)).toBeUndefined();
+    expect(formatMoney('')).toBe('');
+    expect(formatMoney('not a number')).toBe('not a number');
+  });
+});
+
+describe('todayISO', () => {
+  const realTZ = process.env.TZ;
+  afterEach(() => {
+    process.env.TZ = realTZ;
+    jest.useRealTimers();
+  });
+
+  test('uses the local calendar date, not UTC (the evening-Pacific-time bug)', () => {
+    // 2026-03-16 06:00 UTC = 2026-03-15 23:00 PDT - a different calendar
+    // date in each. A UTC-based implementation would wrongly say "today"
+    // is the 16th while it's still the evening of the 15th in Pacific
+    // time, causing the Stay Dates page's min/"cannot be in the past"
+    // check to reject that same Pacific evening's actual today.
+    process.env.TZ = 'America/Los_Angeles';
+    jest.useFakeTimers().setSystemTime(new Date('2026-03-16T06:00:00Z'));
+    expect(todayISO()).toBe('2026-03-15');
+  });
+
+  test('matches the UTC date when local time and UTC agree', () => {
+    process.env.TZ = 'America/Los_Angeles';
+    jest.useFakeTimers().setSystemTime(new Date('2026-03-16T18:00:00Z')); // 11am PDT
+    expect(todayISO()).toBe('2026-03-16');
+  });
+});
+
 // ── Step 1: Owner Info (now also vet + Number of Dogs) ──────────────────────
 describe('Step 1 — Owner Info', () => {
-  test('shows required errors when submitting empty form, including the vet and dog count', async () => {
+  test('Continue is disabled (greyed out) on an empty form, and does nothing if clicked anyway', async () => {
     await goToOwnerStep();
-    fireEvent.click(screen.getByText('Continue'));
-    // phone, name, email, vet
-    expect(await screen.findAllByText('Required')).toHaveLength(4);
-    // Number of Dogs defaults to 0 - its own, differently-worded error
-    expect(screen.getByText('Must be at least 1')).toBeInTheDocument();
+    const button = screen.getByText('Continue');
+    expect(button).toBeDisabled();
+    fireEvent.click(button);
+    // a disabled button never fires its click handler - no error text,
+    // no navigation to Dog 1
+    expect(screen.queryByText('Required')).not.toBeInTheDocument();
+    expect(screen.queryByText('Dog 1')).not.toBeInTheDocument();
+  });
+
+  test('Continue enables once every required field (name/phone/email/vet/dog count) is filled', async () => {
+    await goToOwnerStep();
+    const button = screen.getByText('Continue');
+    await userEvent.type(screen.getByPlaceholderText('(415) 555-0100'), '4155550100');
+    expect(button).toBeDisabled();
+    await userEvent.type(screen.getByPlaceholderText('Jane Smith'), 'Kim Miller');
+    expect(button).toBeDisabled();
+    await userEvent.type(screen.getByPlaceholderText('jane@email.com'), 'kim@test.com');
+    expect(button).toBeDisabled();
+    fireEvent.change(screen.getByDisplayValue('Select a Vet'), { target: { value: 'Marin Pet Hospital — (415) 479-8387' } });
+    expect(button).toBeDisabled(); // still 0 dogs
+    fireEvent.change(screen.getByRole('spinbutton'), { target: { value: '1' } });
+    expect(button).not.toBeDisabled();
   });
 
   test('advances to Dog 1 when all required fields filled', async () => {
@@ -387,14 +454,13 @@ describe('Step 1 — Owner Info', () => {
     expect(screen.queryByText(/off each additional dog/)).not.toBeInTheDocument();
   });
 
-  test('blocks Continue with "Must be at least 1" while Number of Dogs is still 0', async () => {
+  test('Continue stays disabled while Number of Dogs is still 0, everything else filled', async () => {
     await goToOwnerStep();
     await userEvent.type(screen.getByPlaceholderText('(415) 555-0100'), '4155550100');
     await userEvent.type(screen.getByPlaceholderText('Jane Smith'), 'Kim Miller');
     await userEvent.type(screen.getByPlaceholderText('jane@email.com'), 'kim@test.com');
     fireEvent.change(screen.getByDisplayValue('Select a Vet'), { target: { value: 'Marin Pet Hospital — (415) 479-8387' } });
-    fireEvent.click(screen.getByText('Continue'));
-    expect(await screen.findByText('Must be at least 1')).toBeInTheDocument();
+    expect(screen.getByText('Continue')).toBeDisabled();
     expect(screen.queryByText('Dog 1')).not.toBeInTheDocument();
   });
 
@@ -539,26 +605,27 @@ describe('Step 1 — Owner Info', () => {
 
 // ── Dog pages ────────────────────────────────────────────────────────────────
 describe('Dog pages', () => {
-  test('shows required errors (including the aggression/health warning) when submitting an empty dog form', async () => {
+  test('Continue is disabled on an empty dog page, and does nothing if clicked anyway', async () => {
     await fillStep1();
-    fireEvent.click(screen.getByText('Continue'));
-    // name, breed, dob, spayNeuter
-    expect(await screen.findAllByText('Required')).toHaveLength(4);
-    // aggressionHistory, healthConcerns - previously silent even though
-    // required; now warn the user so they know to fill them in
-    expect(screen.getAllByText('Please select an answer')).toHaveLength(2);
+    const button = screen.getByText('Continue');
+    expect(button).toBeDisabled();
+    fireEvent.click(button);
+    expect(screen.queryByText('Stay Dates')).not.toBeInTheDocument();
   });
 
-  test('warns independently - answering one still warns about the other', async () => {
+  test('Continue only enables once every field - including aggression and health - is answered', async () => {
     await fillStep1();
+    const button = screen.getByText('Continue');
     await userEvent.type(screen.getByPlaceholderText('Buddy'), 'Rex');
     await userEvent.type(screen.getByPlaceholderText('Golden Retriever'), 'Labrador');
     fireEvent.change(document.querySelector('input[type="date"]'), { target: { value: '2020-01-01' } });
     const selects = document.querySelectorAll('select');
     fireEvent.change(selects[0], { target: { value: 'yes' } }); // spayNeuter
-    fireEvent.change(selects[2], { target: { value: 'no' } });  // health answered, aggression left blank
-    fireEvent.click(screen.getByText('Continue'));
-    expect(await screen.findAllByText('Please select an answer')).toHaveLength(1);
+    expect(button).toBeDisabled();
+    fireEvent.change(selects[1], { target: { value: 'no' } }); // aggression
+    expect(button).toBeDisabled(); // health still unanswered
+    fireEvent.change(selects[2], { target: { value: 'no' } }); // health
+    expect(button).not.toBeDisabled();
   });
 
   test('calculates age from DOB', async () => {
@@ -633,11 +700,28 @@ describe('Dog pages', () => {
 
 // ── Step 3: Stay Dates ───────────────────────────────────────────────────────
 describe('Step 3 — Stay Dates', () => {
-  test('shows required errors when submitting empty dates form', async () => {
+  test('Continue is disabled on an empty dates form, and does nothing if clicked anyway', async () => {
     await fillStep1();
     await fillStep2();
-    fireEvent.click(screen.getByText('Continue'));
-    expect(await screen.findAllByText('Required')).toHaveLength(4);
+    const button = screen.getByText('Continue');
+    expect(button).toBeDisabled();
+    fireEvent.click(button);
+    expect(screen.queryByText('Boarding Agreement')).not.toBeInTheDocument();
+  });
+
+  test('Continue enables once dates/times are filled, even before they\'re checked for validity', async () => {
+    // Deliberately an invalid combination (check-out before check-in) -
+    // Continue should still be clickable so the specific error message
+    // can be seen, rather than an unexplained grey button.
+    await fillStep1();
+    await fillStep2();
+    const dateInputs = document.querySelectorAll('input[type="date"]');
+    fireEvent.change(dateInputs[0], { target: { value: '2026-10-05' } });
+    fireEvent.change(dateInputs[1], { target: { value: '2026-10-01' } });
+    const timeInputs = document.querySelectorAll('input[type="time"]');
+    fireEvent.change(timeInputs[0], { target: { value: '09:00' } });
+    fireEvent.change(timeInputs[1], { target: { value: '09:00' } });
+    expect(screen.getByText('Continue')).not.toBeDisabled();
   });
 
   test('shows an error when check-out is before check-in', async () => {
@@ -666,6 +750,36 @@ describe('Step 3 — Stay Dates', () => {
     expect(await screen.findByText('Check-in cannot be in the past')).toBeInTheDocument();
   });
 
+  test('accepts today as check-in even in the evening, Pacific time (regression for the UTC "today" bug)', async () => {
+    // Fill the form first, under real timers - userEvent's internal
+    // scheduling doesn't play well with fake timers. Only the moment of
+    // picking the date and clicking Continue needs the clock frozen.
+    await fillStep1();
+    await fillStep2();
+
+    const realTZ = process.env.TZ;
+    process.env.TZ = 'America/Los_Angeles';
+    // 06:00 UTC = 11pm PDT the previous evening - a UTC-based "today"
+    // would be one calendar day ahead of Pacific's actual today, making
+    // that real today (and any check-in date near it) look "in the
+    // past" and impossible to (re-)select - this is what broke it.
+    jest.useFakeTimers().setSystemTime(new Date('2026-03-16T06:00:00Z'));
+    try {
+      const dateInputs = document.querySelectorAll('input[type="date"]');
+      fireEvent.change(dateInputs[0], { target: { value: '2026-03-15' } }); // Pacific's actual "today"
+      fireEvent.change(dateInputs[1], { target: { value: '2026-03-16' } });
+      const timeInputs = document.querySelectorAll('input[type="time"]');
+      fireEvent.change(timeInputs[0], { target: { value: '09:00' } });
+      fireEvent.change(timeInputs[1], { target: { value: '09:00' } });
+      fireEvent.click(screen.getByText('Continue'));
+      expect(screen.getByText('Boarding Agreement')).toBeInTheDocument();
+      expect(screen.queryByText('Check-in cannot be in the past')).not.toBeInTheDocument();
+    } finally {
+      process.env.TZ = realTZ;
+      jest.useRealTimers();
+    }
+  });
+
   test('accepts a check-in of today', async () => {
     await fillStep1();
     await fillStep2();
@@ -689,6 +803,19 @@ describe('Step 3 — Stay Dates', () => {
     fireEvent.change(timeInputs[0], { target: { value: '09:00' } });
     fireEvent.change(timeInputs[1], { target: { value: '09:00' } });
     expect(await screen.findByText('$210.00')).toBeInTheDocument();
+  });
+
+  test('formats the estimate with a thousands comma once it crosses $999', async () => {
+    await fillStep1();
+    await fillStep2();
+    const dateInputs = document.querySelectorAll('input[type="date"]');
+    // 10 nights @ $105/night = $1,050.00
+    fireEvent.change(dateInputs[0], { target: { value: '2026-10-01' } });
+    fireEvent.change(dateInputs[1], { target: { value: '2026-10-11' } });
+    const timeInputs = document.querySelectorAll('input[type="time"]');
+    fireEvent.change(timeInputs[0], { target: { value: '09:00' } });
+    fireEvent.change(timeInputs[1], { target: { value: '09:00' } });
+    expect(await screen.findByText('$1,050.00')).toBeInTheDocument();
   });
 
   test('accepts free-text notes', async () => {
@@ -736,10 +863,14 @@ describe('Step 3 — Stay Dates', () => {
 
 // ── Step 5: Signature & Submission ──────────────────────────────────────────
 describe('Step 5 — Signature', () => {
-  test('requires checkbox before submitting', async () => {
+  test('Submit Agreement is disabled until the checkbox is checked and a signature is typed', async () => {
     await fillThrough();
-    fireEvent.click(screen.getByText('Submit Agreement'));
-    expect(await screen.findByText(/must check this box/i)).toBeInTheDocument();
+    const button = screen.getByText('Submit Agreement');
+    expect(button).toBeDisabled();
+    fireEvent.click(screen.getByRole('checkbox'));
+    expect(button).toBeDisabled(); // signature still blank
+    await userEvent.type(screen.getByPlaceholderText('Kim Miller'), 'Wrong Name');
+    expect(button).not.toBeDisabled(); // filled in, even though it won't match on click
   });
 
   test('signature must match name from step 1', async () => {

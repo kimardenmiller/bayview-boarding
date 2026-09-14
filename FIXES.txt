@@ -1,6 +1,6 @@
 BAYVIEW BOARDING — FIX LIST
 ============================
-Last updated: September 15, 2026 (landing title size, Number of Dogs typing bug)
+Last updated: September 15, 2026 (2) (greyed Continue buttons, timezone bug, money commas)
 
 NEXT CHANGE LIST (v1.5)
 -----------------------
@@ -56,6 +56,64 @@ TWILIO STATUS
 
 COMPLETED
 ---------
+- Sept 15, 2026 (3): Landing page: title bumped again (3rem -> 3.3rem)
+  and "Book My Stay" shrunk a little (padding 20px/48px -> 16px/40px,
+  font-size 1.25rem -> 1.1rem).
+
+  Continue/Submit buttons across the booking form now grey out
+  (disabled) until their step's required fields are actually filled in,
+  rather than being clickable the whole time and only showing per-field
+  "Required" errors after a click. Deliberately scoped to presence only,
+  not full validity: a check-out-before-check-in or a mismatched
+  signature still leaves the button clickable, since those need the
+  specific error message (which a disabled button can never show) rather
+  than just a generic grey state - genuinely blank fields are the only
+  thing that disables. Applies to Owner Info, each Dog page, Stay Dates,
+  and Sign & Submit.
+
+  Fixed a real, reported bug: "can't go back and edit check-in date."
+  Root cause: todayISO() computed "today" via
+  `new Date().toISOString().slice(0,10)`, which is always UTC. In the
+  evening Pacific time (after ~5pm PDT / 4pm PST), UTC has already
+  rolled to tomorrow, so the app's own idea of "today" would be a full
+  calendar day ahead of the user's actual local today - making today's
+  real date (and the date input's min) reject it as "in the past",
+  exactly when someone would go back to fix a date in the evening.
+  Fixed by reusing the already-correct isoFromLocalDate helper (local
+  calendar fields, not UTC) instead. Applied the same fix server-side in
+  submit-booking's own todayISO, going one step further there: since the
+  server has no timezone of its own, it now derives "today" from the
+  client's own timezone (already captured as clientTimezone on every
+  booking) via Intl.DateTimeFormat, falling back to UTC only if that's
+  missing or invalid - otherwise the server-side backstop would have had
+  the exact same bug, just moved from the browser to the server.
+
+  Dollar amounts now get a thousands comma above $999 (cost estimate,
+  confirmation screen, admin stay history, admin day-rate display) via a
+  new formatMoney helper - deliberately string-based so it only adds
+  commas without changing how many decimal places each site already
+  shows (e.g. "199.50" stays "199.50", "1199.50" becomes "1,199.50").
+  Editable number inputs (the day-rate input itself) are deliberately
+  left unformatted - the Number of Dogs bug earlier this session was a
+  direct lesson in what happens when you reformat a value out from under
+  someone while they're typing into it.
+
+  Tests: formatMoney and todayISO get their own pure-function test
+  suites (todayISO's using Jest fake timers + process.env.TZ to
+  reproduce the actual evening-Pacific scenario deterministically);
+  every "click with missing fields, see error text" test that the
+  now-disabled buttons made unreachable was rewritten to assert the
+  disabled state instead, plus new progressive-fill tests confirming
+  each button enables at exactly the right field; a full-flow regression
+  test reproduces the exact reported check-in bug under a real frozen
+  clock and confirms it's fixed; a UI-level test confirms a $1,050
+  estimate actually renders with its comma. submit-booking gained 3 Deno
+  tests for the server-side timezone fix (accepts the Pacific evening's
+  real today, still rejects a genuinely past date, falls back to UTC for
+  a missing/invalid timezone) using Deno's FakeTime. 93 React + 38 Deno
+  = 131/131 passing. Verified live: real Playwright clock-mocking
+  (page.context().clock, not a stub) confirmed the check-in fix and the
+  greyed-button behavior against the actual dev server.
 - Sept 15, 2026 (2): Landing title bumped 2.7rem -> 3rem ("a little
   larger"). Fixed a real bug: "Number of Dogs" wouldn't let you type a 2 -
   the field was bound directly to data.dogs.length and clamped to a
