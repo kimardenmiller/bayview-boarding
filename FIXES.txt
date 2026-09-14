@@ -16,13 +16,15 @@ NEXT CHANGE LIST (v1.5)
    of the page (currently anchored near the bottom, just above "Book
    My Stay"). Requested Sept 15, 2026, not yet started.
 
-4. SECURITY: revoke the Twilio API key Kim shared in chat earlier this
-   session for debugging (SK... SID, kept live "until we're done
-   debugging"). It's still active as of Sept 15, 2026 - go to Twilio
-   Console > Account > API keys & tokens and delete it once we're done
-   using it for the current campaign-status check. It has full account
-   access via the API and shouldn't be left live indefinitely just
-   because it happened to be useful once.
+4. SECURITY: revoke the Twilio API key Kim shared in chat for
+   debugging (SK... SID). Still active as of Sept 15, 2026 - used
+   successfully that day to check A2P campaign status via the API
+   (IN_PROGRESS, no errors, brand APPROVED - just still queued at TCR).
+   Kim explicitly said to keep it live for now rather than revoke it
+   after that check. Go to Twilio Console > Account > API keys & tokens
+   to delete it whenever we're actually done needing API debugging
+   access - it has full account access and shouldn't stay live
+   indefinitely once that's no longer true.
 
 DEFERRED (revisit only if it actually blocks something)
 ---------------------------------------------------------
