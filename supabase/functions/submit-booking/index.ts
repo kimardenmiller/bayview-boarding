@@ -88,6 +88,16 @@ function validate(body: BookingInput): string[] {
   if (!body.checkIn) errors.push("checkIn");
   if (!body.checkOut) errors.push("checkOut");
   if (body.checkIn && body.checkIn < todayISO(body.clientTimezone)) errors.push("checkIn (cannot be in the past)");
+  if (body.checkIn && body.checkOut && body.checkOut < body.checkIn) errors.push("checkOut (must be on or after checkIn)");
+  // A same-day stay has drop-off and pick-up on the same calendar date, so
+  // pick-up must actually be later in the day - see the matching check in
+  // StepDates (src/App.js) for why a multi-day stay has no such constraint.
+  if (
+    body.checkIn && body.checkOut && body.checkIn === body.checkOut &&
+    body.dropTime && body.pickupTime && body.pickupTime <= body.dropTime
+  ) {
+    errors.push("pickupTime (must be after dropTime for a same-day stay)");
+  }
   if (!body.signature?.trim()) errors.push("signature");
   return errors;
 }

@@ -5,11 +5,21 @@ import { SETTINGS } from './settings';
 import heroDog from './img/hero-dog.jpg';
 import './App.css';
 
+// Fallback defaults, used until the `settings` Edge Function's response
+// loads (App's useEffect below) and as calcCost's own parameter defaults
+// for direct/pure-function callers (e.g. existing tests). The live,
+// admin-configurable values come from Supabase - see the settings table
+// migration and supabase/functions/settings/index.ts.
 const DEFAULT_RATE = SETTINGS.DEFAULT_DAY_RATE;
-const MULTI_DOG_DISCOUNT = SETTINGS.MULTI_DOG_DISCOUNT;
-const HOLIDAY_UPCHARGE = SETTINGS.HOLIDAY_UPCHARGE;
+const DEFAULT_MULTI_DOG_DISCOUNT = SETTINGS.MULTI_DOG_DISCOUNT;
+const DEFAULT_HOLIDAY_UPCHARGE = SETTINGS.HOLIDAY_UPCHARGE;
+// The editable vet clinic list, without the structural placeholder/"Other"
+// entries the app always adds itself (see vetDropdownOptions).
+const DEFAULT_VETS = SETTINGS.SAN_RAFAEL_VETS.slice(1, -1);
 
-const SAN_RAFAEL_VETS = SETTINGS.SAN_RAFAEL_VETS;
+function vetDropdownOptions(vets) {
+  return ['Select a Vet', ...vets, 'Other — see notes'];
+}
 
 function formatDate(iso) {
   if (!iso) return '';
@@ -127,11 +137,16 @@ function isHolidayNight(dateISO) {
 }
 
 // numberOfDogs: additional dogs beyond the first are each charged at
-// (1 - MULTI_DOG_DISCOUNT) of that night's per-dog rate, uncapped.
-// Holiday nights (see getHolidayWindows) upcharge the base rate by
-// HOLIDAY_UPCHARGE before the multi-dog discount is applied, so the
+// (1 - multiDogDiscount) of that night's per-dog rate, uncapped. Holiday
+// nights (see getHolidayWindows) upcharge the base rate by
+// holidayUpcharge before the multi-dog discount is applied, so the
 // discount always tracks the actual (possibly holiday) nightly rate.
-function calcCost(checkIn, checkOut, dropTime, pickupTime, rate, numberOfDogs = 1) {
+// Both are admin-configurable (see the settings table) - the parameter
+// defaults here are only a fallback for direct/pure-function callers.
+function calcCost(
+  checkIn, checkOut, dropTime, pickupTime, rate, numberOfDogs = 1,
+  multiDogDiscount = DEFAULT_MULTI_DOG_DISCOUNT, holidayUpcharge = DEFAULT_HOLIDAY_UPCHARGE
+) {
   if (!checkIn || !checkOut || !dropTime || !pickupTime) return null;
   const drop = new Date(`${checkIn}T${dropTime}`);
   const pickup = new Date(`${checkOut}T${pickupTime}`);
@@ -139,13 +154,13 @@ function calcCost(checkIn, checkOut, dropTime, pickupTime, rate, numberOfDogs = 
   if (hours <= 0) return null;
   const days = Math.max(1, Math.ceil(hours / 24));
   const dogs = Math.max(1, Number(numberOfDogs) || 1);
-  const perNightDogMultiplier = 1 + (dogs - 1) * (1 - MULTI_DOG_DISCOUNT);
+  const perNightDogMultiplier = 1 + (dogs - 1) * (1 - multiDogDiscount);
 
   const [y, m, d] = checkIn.split('-').map(Number);
   let total = 0;
   for (let i = 0; i < days; i++) {
     const nightISO = isoFromLocalDate(new Date(y, m - 1, d + i));
-    const nightlyRate = isHolidayNight(nightISO) ? rate * (1 + HOLIDAY_UPCHARGE) : rate;
+    const nightlyRate = isHolidayNight(nightISO) ? rate * (1 + holidayUpcharge) : rate;
     total += nightlyRate * perNightDogMultiplier;
   }
   return total.toFixed(2);
@@ -154,7 +169,7 @@ function calcCost(checkIn, checkOut, dropTime, pickupTime, rate, numberOfDogs = 
 // Named exports alongside the default App export, purely so pure helper
 // functions can be unit-tested directly instead of only through full
 // multi-step form flows. No behavior change.
-export { formatDate, calcAge, calcCost, isHolidayNight, getHolidayWindows, todayISO, formatMoney };
+export { formatDate, calcAge, calcCost, isHolidayNight, getHolidayWindows, todayISO, formatMoney, vetDropdownOptions };
 
 function Header() {
   return (
@@ -210,7 +225,7 @@ function emptyDog() {
 // booking here (Sept 14 scope decision, moved off the dog page Sept 15)
 // - a returning-client lookup on this page autofills all of it, plus
 // every known dog's own profile, growing the dog-page count to match.
-function StepOwner({ data, onChange, onNext }) {
+function StepOwner({ data, onChange, onNext, vetOptions, multiDogDiscount }) {
   const [errors, setErrors] = useState({});
   const [looking, setLooking] = useState(false);
   const [found, setFound] = useState(false);
@@ -329,7 +344,7 @@ function StepOwner({ data, onChange, onNext }) {
       </Field>
       <Field label="Veterinarian" error={errors.vetName}>
         <select value={data.vetName} onChange={e => onChange('vetName', e.target.value)}>
-          {SAN_RAFAEL_VETS.map((v, i) => <option key={i} value={v}>{v}</option>)}
+          {vetOptions.map((v, i) => <option key={i} value={v}>{v}</option>)}
         </select>
       </Field>
       <Field label="Number of Dogs" error={errors.dogCount}>
@@ -343,7 +358,7 @@ function StepOwner({ data, onChange, onNext }) {
         />
         {data.dogs.length > 1 && (
           <div style={{ fontSize: '0.78rem', color: '#7D9B76', marginTop: 4 }}>
-            {MULTI_DOG_DISCOUNT * 100}% off each additional dog's nightly rate.
+            {multiDogDiscount * 100}% off each additional dog's nightly rate.
           </div>
         )}
       </Field>
@@ -438,7 +453,7 @@ function StepDogPage({ data, onChange, index, onNext, onBack }) {
   );
 }
 
-function StepDates({ data, onChange, onNext, onBack, rate }) {
+function StepDates({ data, onChange, onNext, onBack, rate, multiDogDiscount, holidayUpcharge }) {
   const [errors, setErrors] = useState({});
 
   function getErrors() {
@@ -452,6 +467,14 @@ function StepDates({ data, onChange, onNext, onBack, rate }) {
     // set some other way than the picker).
     if (data.checkIn && data.checkIn < todayISO()) e.checkIn = 'Check-in cannot be in the past';
     if (data.checkIn && data.checkOut && data.checkOut < data.checkIn) e.checkOut = 'Check-out must be after check-in';
+    // A same-day stay has drop-off and pick-up on the same calendar date,
+    // so pick-up must actually be later in the day - a multi-day stay has
+    // no such constraint (an evening drop-off and a morning pick-up two
+    // days later is completely normal).
+    if (data.checkIn && data.checkOut && data.checkIn === data.checkOut &&
+        data.dropTime && data.pickupTime && data.pickupTime <= data.dropTime) {
+      e.pickupTime = 'Pick-up must be after drop-off for a same-day stay';
+    }
     return e;
   }
 
@@ -468,7 +491,7 @@ function StepDates({ data, onChange, onNext, onBack, rate }) {
   // unexplained grey button once every field has *something* in it.
   const isComplete = !!(data.checkIn && data.checkOut && data.dropTime && data.pickupTime);
 
-  const cost = calcCost(data.checkIn, data.checkOut, data.dropTime, data.pickupTime, rate, data.dogs.length);
+  const cost = calcCost(data.checkIn, data.checkOut, data.dropTime, data.pickupTime, rate, data.dogs.length, multiDogDiscount, holidayUpcharge);
 
   return (
     <div className="step">
@@ -494,8 +517,8 @@ function StepDates({ data, onChange, onNext, onBack, rate }) {
           <span>Estimated cost</span>
           <strong>${formatMoney(cost)}</strong>
           <div className="cost-note">
-            Based on ${formatMoney(rate)}/day · 24-hour minimum · +{HOLIDAY_UPCHARGE * 100}% on holidays
-            {data.dogs.length > 1 && ` · ${MULTI_DOG_DISCOUNT * 100}% off each additional dog`}
+            Based on ${formatMoney(rate)}/day · 24-hour minimum · +{holidayUpcharge * 100}% on holidays
+            {data.dogs.length > 1 && ` · ${multiDogDiscount * 100}% off each additional dog`}
             {' '}· Final invoice at pickup
           </div>
         </div>
@@ -570,7 +593,7 @@ function StepSign({ data, onChange, onSubmit, onBack, ownerName, submitting }) {
       </p>
       <div className="step-actions">
         <button className="btn-secondary" onClick={onBack}>Back</button>
-        <button className="btn-primary btn-submit" onClick={() => validate() && onSubmit()} disabled={submitting || !isComplete}>
+        <button className="btn-primary" onClick={() => validate() && onSubmit()} disabled={submitting || !isComplete}>
           {submitting ? 'Saving...' : 'Submit Agreement'}
         </button>
       </div>
@@ -610,7 +633,10 @@ function Confirmation({ stay, onNewBooking }) {
   );
 }
 
-function AdminView({ onClose, rate, setRate }) {
+function AdminView({
+  onClose, rate, setRate, multiDogDiscount, setMultiDogDiscount,
+  holidayUpcharge, setHolidayUpcharge, vets, setVets,
+}) {
   const [pw, setPw] = useState('');
   const [authed, setAuthed] = useState(false);
   const [error, setError] = useState('');
@@ -620,6 +646,12 @@ function AdminView({ onClose, rate, setRate }) {
   const [selected, setSelected] = useState(null);
   const [loading, setLoading] = useState(false);
   const [editRate, setEditRate] = useState(rate);
+  const [editMultiDogDiscount, setEditMultiDogDiscount] = useState(String(multiDogDiscount * 100));
+  const [editHolidayUpcharge, setEditHolidayUpcharge] = useState(String(holidayUpcharge * 100));
+  const [editVets, setEditVets] = useState(vets);
+  const [newVetText, setNewVetText] = useState('');
+  const [settingsError, setSettingsError] = useState('');
+  const [savingSettings, setSavingSettings] = useState(false);
 
   async function login() {
     setError('');
@@ -635,6 +667,55 @@ function AdminView({ onClose, rate, setRate }) {
     setAuthed(true);
     setDogs(result.dogs);
     setTotalStays(result.totalStays || 0);
+    // editRate/editMultiDogDiscount/editHolidayUpcharge/editVets were
+    // seeded from these same-named props back when this component first
+    // mounted - but App's own settings fetch (a separate network call)
+    // may not have resolved yet at that point, so those props could still
+    // have been the hardcoded fallback defaults, not the real saved
+    // values. Re-sync now, right as the settings UI actually becomes
+    // visible, rather than on every prop change (which would risk
+    // clobbering an admin's in-progress, unsaved edits).
+    setEditRate(rate);
+    setEditMultiDogDiscount(String(multiDogDiscount * 100));
+    setEditHolidayUpcharge(String(holidayUpcharge * 100));
+    setEditVets(vets);
+  }
+
+  // Shared save path for every settings field below - persists to
+  // Supabase (see supabase/functions/settings/index.ts) and syncs the
+  // whole app's live state so the change takes effect immediately,
+  // rather than only on next reload.
+  async function saveSettings(updates) {
+    setSettingsError('');
+    setSavingSettings(true);
+    const { data, error: fnError } = await supabase.functions.invoke('settings', {
+      body: { password: pw, updates },
+    });
+    setSavingSettings(false);
+    if (fnError || !data || data.error) {
+      setSettingsError(data?.error || 'Failed to save. Please try again.');
+      return false;
+    }
+    setRate(data.dayRate);
+    setMultiDogDiscount(data.multiDogDiscount);
+    setHolidayUpcharge(data.holidayUpcharge);
+    setVets(data.vets);
+    setEditRate(data.dayRate);
+    setEditMultiDogDiscount(String(data.multiDogDiscount * 100));
+    setEditHolidayUpcharge(String(data.holidayUpcharge * 100));
+    setEditVets(data.vets);
+    return true;
+  }
+
+  function addVet() {
+    const name = newVetText.trim();
+    if (!name) return;
+    setEditVets(v => [...v, name]);
+    setNewVetText('');
+  }
+
+  function removeVet(index) {
+    setEditVets(v => v.filter((_, i) => i !== index));
   }
 
   if (!authed) {
@@ -711,10 +792,57 @@ function AdminView({ onClose, rate, setRate }) {
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
             <span>$</span>
             <input type="number" value={editRate} onChange={e => setEditRate(e.target.value)} style={{ width: 80, padding: '6px 10px', border: '1.5px solid #D5D9DE', borderRadius: 6, fontSize: '0.95rem' }} />
-            <button className="btn-primary" style={{ padding: '6px 14px' }} onClick={() => setRate(Number(editRate))}>Save</button>
+            <button className="btn-primary" style={{ padding: '6px 14px' }} disabled={savingSettings} onClick={() => saveSettings({ dayRate: Number(editRate) })}>Save</button>
           </div>
           <div style={{ fontSize: '0.75rem', color: '#6B7A8A', marginTop: 4 }}>24-hour minimum · Current rate: ${formatMoney(rate)}/day</div>
         </div>
+
+        <div className="rate-setting">
+          <label className="field-label">2nd+ Dog Discount</label>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <input type="number" value={editMultiDogDiscount} onChange={e => setEditMultiDogDiscount(e.target.value)} style={{ width: 80, padding: '6px 10px', border: '1.5px solid #D5D9DE', borderRadius: 6, fontSize: '0.95rem' }} />
+            <span>%</span>
+            <button className="btn-primary" style={{ padding: '6px 14px' }} disabled={savingSettings} onClick={() => saveSettings({ multiDogDiscount: Number(editMultiDogDiscount) / 100 })}>Save</button>
+          </div>
+          <div style={{ fontSize: '0.75rem', color: '#6B7A8A', marginTop: 4 }}>Off each additional dog's nightly rate · Current: {multiDogDiscount * 100}%</div>
+        </div>
+
+        <div className="rate-setting">
+          <label className="field-label">Holiday Upcharge</label>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <input type="number" value={editHolidayUpcharge} onChange={e => setEditHolidayUpcharge(e.target.value)} style={{ width: 80, padding: '6px 10px', border: '1.5px solid #D5D9DE', borderRadius: 6, fontSize: '0.95rem' }} />
+            <span>%</span>
+            <button className="btn-primary" style={{ padding: '6px 14px' }} disabled={savingSettings} onClick={() => saveSettings({ holidayUpcharge: Number(editHolidayUpcharge) / 100 })}>Save</button>
+          </div>
+          <div style={{ fontSize: '0.75rem', color: '#6B7A8A', marginTop: 4 }}>On holiday nights (New Year's, MLK, Ski Week, etc.) · Current: {holidayUpcharge * 100}%</div>
+        </div>
+
+        <div className="rate-setting">
+          <label className="field-label">Vet Clinics (booking form dropdown)</label>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 8 }}>
+            {editVets.map((v, i) => (
+              <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: '0.85rem' }}>
+                <span style={{ flex: 1 }}>{v}</span>
+                <button className="btn-secondary" style={{ padding: '4px 10px', fontSize: '0.78rem' }} onClick={() => removeVet(i)}>Remove</button>
+              </div>
+            ))}
+          </div>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <input
+              placeholder="Clinic Name — (415) 555-0100"
+              value={newVetText}
+              onChange={e => setNewVetText(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && addVet()}
+              style={{ flex: 1, padding: '6px 10px', border: '1.5px solid #D5D9DE', borderRadius: 6, fontSize: '0.9rem' }}
+            />
+            <button className="btn-secondary" style={{ padding: '6px 14px' }} onClick={addVet}>Add</button>
+          </div>
+          <div style={{ marginTop: 8 }}>
+            <button className="btn-primary" style={{ padding: '6px 14px' }} disabled={savingSettings} onClick={() => saveSettings({ vets: editVets })}>Save Vet List</button>
+          </div>
+        </div>
+        {settingsError && <div className="field-error" style={{ marginBottom: 12 }}>{settingsError}</div>}
+
         <input className="search-input" placeholder="Search by dog or owner name..." value={search} onChange={e => setSearch(e.target.value)} />
         <div className="admin-count">{loading ? 'Loading...' : `${totalStays} signed agreement${totalStays !== 1 ? 's' : ''} on file`}</div>
         {filtered.length === 0 && !loading && <p className="empty">No records found.</p>}
@@ -761,12 +889,32 @@ export default function App() {
   const [submitting, setSubmitting] = useState(false);
   const [currentStay, setCurrentStay] = useState(null);
   const [rate, setRate] = useState(DEFAULT_RATE);
+  const [multiDogDiscount, setMultiDogDiscount] = useState(DEFAULT_MULTI_DOG_DISCOUNT);
+  const [holidayUpcharge, setHolidayUpcharge] = useState(DEFAULT_HOLIDAY_UPCHARGE);
+  const [vets, setVets] = useState(DEFAULT_VETS);
+
+  // Admin-configurable settings (day rate, multi-dog discount, holiday
+  // upcharge, vet list) are persisted in Supabase now, not hardcoded -
+  // every visitor needs the current values to see correct pricing and
+  // the current vet list, so this is a public, unauthenticated read (see
+  // supabase/functions/settings/index.ts), not gated behind admin login.
+  // The hook-declared defaults above are just what's shown until this
+  // resolves.
+  useEffect(() => {
+    supabase.functions.invoke('settings', { body: {} }).then(({ data, error }) => {
+      if (error || !data || data.error) return; // keep the defaults
+      if (typeof data.dayRate === 'number') setRate(data.dayRate);
+      if (typeof data.multiDogDiscount === 'number') setMultiDogDiscount(data.multiDogDiscount);
+      if (typeof data.holidayUpcharge === 'number') setHolidayUpcharge(data.holidayUpcharge);
+      if (Array.isArray(data.vets)) setVets(data.vets);
+    }).catch(() => {}); // network hiccup - keep the defaults, don't crash the page
+  }, []);
 
   function emptyForm() {
     return {
       ownerName: '', ownerPhone: '', ownerEmail: '',
       vetName: 'Select a Vet',
-      dogs: [], // "Number of Dogs" defaults to 0 - StepOwner requires > 0 before Continue
+      dogs: [emptyDog()], // "Number of Dogs" defaults to 1, but is still freely editable (see setDogCountText)
       checkIn: '', checkOut: '', dropTime: '', pickupTime: '', notes: '',
       agreed: false, signature: '',
     };
@@ -778,7 +926,7 @@ export default function App() {
 
   async function handleSubmit() {
     setSubmitting(true);
-    const cost = calcCost(form.checkIn, form.checkOut, form.dropTime, form.pickupTime, rate, form.dogs.length);
+    const cost = calcCost(form.checkIn, form.checkOut, form.dropTime, form.pickupTime, rate, form.dogs.length, multiDogDiscount, holidayUpcharge);
     const payload = {
       owner: {
         name: form.ownerName,
@@ -847,11 +995,19 @@ export default function App() {
     setStep(0); setSubmitted(false); setCurrentStay(null);
   }
 
+  const adminProps = {
+    onClose: () => setShowAdmin(false),
+    rate, setRate,
+    multiDogDiscount, setMultiDogDiscount,
+    holidayUpcharge, setHolidayUpcharge,
+    vets, setVets,
+  };
+
   if (showLanding) {
     return (
       <div className="app">
         <Landing onStart={() => setShowLanding(false)} />
-        {showAdmin && <AdminView onClose={() => setShowAdmin(false)} rate={rate} setRate={setRate} />}
+        {showAdmin && <AdminView {...adminProps} />}
       </div>
     );
   }
@@ -863,7 +1019,15 @@ export default function App() {
         {!submitted ? (
           <>
             <Progress step={step} numberOfDogs={form.dogs.length} />
-            {step === 0 && <StepOwner data={form} onChange={update} onNext={() => setStep(1)} />}
+            {step === 0 && (
+              <StepOwner
+                data={form}
+                onChange={update}
+                onNext={() => setStep(1)}
+                vetOptions={vetDropdownOptions(vets)}
+                multiDogDiscount={multiDogDiscount}
+              />
+            )}
             {step >= 1 && step <= form.dogs.length && (
               <StepDogPage
                 data={form}
@@ -873,7 +1037,17 @@ export default function App() {
                 onBack={() => setStep(step - 1)}
               />
             )}
-            {step === form.dogs.length + 1 && <StepDates data={form} onChange={update} onNext={() => setStep(step + 1)} onBack={() => setStep(step - 1)} rate={rate} />}
+            {step === form.dogs.length + 1 && (
+              <StepDates
+                data={form}
+                onChange={update}
+                onNext={() => setStep(step + 1)}
+                onBack={() => setStep(step - 1)}
+                rate={rate}
+                multiDogDiscount={multiDogDiscount}
+                holidayUpcharge={holidayUpcharge}
+              />
+            )}
             {step === form.dogs.length + 2 && <StepWaiver onNext={() => setStep(step + 1)} onBack={() => setStep(step - 1)} />}
             {step === form.dogs.length + 3 && <StepSign data={form} onChange={update} onSubmit={handleSubmit} onBack={() => setStep(step - 1)} ownerName={form.ownerName} submitting={submitting} />}
           </>
@@ -881,7 +1055,7 @@ export default function App() {
           <Confirmation stay={currentStay} onNewBooking={reset} />
         )}
       </main>
-      {showAdmin && <AdminView onClose={() => setShowAdmin(false)} rate={rate} setRate={setRate} />}
+      {showAdmin && <AdminView {...adminProps} />}
     </div>
   );
 }

@@ -1,0 +1,220 @@
+import { assertEquals, assert } from 'https://deno.land/std@0.168.0/testing/asserts.ts';
+
+const ADMIN_PASSWORD = 'test-admin-password';
+Deno.env.set('ADMIN_PASSWORD', ADMIN_PASSWORD);
+Deno.env.set('SUPABASE_URL', 'https://example.supabase.co');
+Deno.env.set('SUPABASE_SERVICE_ROLE_KEY', 'test-service-role-key');
+
+const { handleRequest } = await import('./index.ts');
+
+const DEFAULT_ROW = {
+  day_rate: 105,
+  multi_dog_discount: 0.10,
+  holiday_upcharge: 0.30,
+  vets: ['Marin Pet Hospital — (415) 479-8387', 'VCA Marin Animal Hospital — (415) 454-5225'],
+};
+
+function stubSupabase(initial: typeof DEFAULT_ROW = DEFAULT_ROW) {
+  const db = { settings: { ...initial } };
+  const calls: { method: string; table: string; body: unknown }[] = [];
+  const original = globalThis.fetch;
+
+  globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    const url = new URL(String(input instanceof Request ? input.url : input));
+    const method = (init?.method || 'GET').toUpperCase();
+    const table = url.pathname.split('/').pop()!;
+    const body = init?.body ? JSON.parse(String(init.body)) : undefined;
+    calls.push({ method, table, body });
+
+    if (table === 'settings') {
+      if (method === 'GET') {
+        return new Response(JSON.stringify([db.settings]), { status: 200 });
+      }
+      if (method === 'PATCH') {
+        Object.assign(db.settings, body);
+        return new Response(JSON.stringify([db.settings]), { status: 200 });
+      }
+    }
+    throw new Error(`stubSupabase: unhandled request ${method} ${url.pathname}`);
+  }) as typeof fetch;
+
+  return { db, calls, restore: () => { globalThis.fetch = original; } };
+}
+
+function postRequest(body: unknown): Request {
+  return new Request('https://example.supabase.co/functions/v1/settings', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+Deno.test('rejects non-POST requests', async () => {
+  const stub = stubSupabase();
+  try {
+    const res = await handleRequest(new Request('https://x/functions/v1/settings', { method: 'GET' }));
+    assertEquals(res.status, 405);
+    assertEquals(stub.calls.length, 0);
+  } finally {
+    stub.restore();
+  }
+});
+
+Deno.test('a plain read requires no password (public)', async () => {
+  const stub = stubSupabase();
+  try {
+    const res = await handleRequest(postRequest({}));
+    assertEquals(res.status, 200);
+    const data = await res.json();
+    assertEquals(data, {
+      dayRate: 105, multiDogDiscount: 0.10, holidayUpcharge: 0.30,
+      vets: DEFAULT_ROW.vets,
+    });
+    assertEquals(stub.calls[0].method, 'GET');
+  } finally {
+    stub.restore();
+  }
+});
+
+Deno.test('rejects a write with no password, without touching the database', async () => {
+  const stub = stubSupabase();
+  try {
+    const res = await handleRequest(postRequest({ updates: { dayRate: 120 } }));
+    assertEquals(res.status, 401);
+    assertEquals(stub.calls.length, 0);
+  } finally {
+    stub.restore();
+  }
+});
+
+Deno.test('rejects a write with the wrong password', async () => {
+  const stub = stubSupabase();
+  try {
+    const res = await handleRequest(postRequest({ password: 'nope', updates: { dayRate: 120 } }));
+    assertEquals(res.status, 401);
+    assertEquals(stub.calls.length, 0);
+  } finally {
+    stub.restore();
+  }
+});
+
+Deno.test('updates just the day rate, leaving other fields untouched', async () => {
+  const stub = stubSupabase();
+  try {
+    const res = await handleRequest(postRequest({ password: ADMIN_PASSWORD, updates: { dayRate: 120 } }));
+    assertEquals(res.status, 200);
+    const data = await res.json();
+    assertEquals(data.dayRate, 120);
+    assertEquals(data.multiDogDiscount, 0.10); // unchanged
+    assertEquals(stub.db.settings.day_rate, 120);
+  } finally {
+    stub.restore();
+  }
+});
+
+Deno.test('updates the multi-dog discount and holiday upcharge together', async () => {
+  const stub = stubSupabase();
+  try {
+    const res = await handleRequest(postRequest({
+      password: ADMIN_PASSWORD,
+      updates: { multiDogDiscount: 0.15, holidayUpcharge: 0.25 },
+    }));
+    assertEquals(res.status, 200);
+    const data = await res.json();
+    assertEquals(data.multiDogDiscount, 0.15);
+    assertEquals(data.holidayUpcharge, 0.25);
+  } finally {
+    stub.restore();
+  }
+});
+
+Deno.test('updates the vet list, trimming each entry', async () => {
+  const stub = stubSupabase();
+  try {
+    const res = await handleRequest(postRequest({
+      password: ADMIN_PASSWORD,
+      updates: { vets: ['  New Vet Clinic — (415) 555-0000  ', 'Second Vet — (415) 555-0001'] },
+    }));
+    assertEquals(res.status, 200);
+    const data = await res.json();
+    assertEquals(data.vets, ['New Vet Clinic — (415) 555-0000', 'Second Vet — (415) 555-0001']);
+  } finally {
+    stub.restore();
+  }
+});
+
+Deno.test('rejects a non-positive day rate, without touching the database', async () => {
+  const stub = stubSupabase();
+  try {
+    const res = await handleRequest(postRequest({ password: ADMIN_PASSWORD, updates: { dayRate: 0 } }));
+    assertEquals(res.status, 400);
+    const data = await res.json();
+    assert(data.error.includes('dayRate'));
+    assertEquals(stub.calls.length, 0);
+  } finally {
+    stub.restore();
+  }
+});
+
+Deno.test('rejects a multi-dog discount outside [0, 1)', async () => {
+  const stub = stubSupabase();
+  try {
+    const tooHigh = await handleRequest(postRequest({ password: ADMIN_PASSWORD, updates: { multiDogDiscount: 1 } }));
+    assertEquals(tooHigh.status, 400);
+    const negative = await handleRequest(postRequest({ password: ADMIN_PASSWORD, updates: { multiDogDiscount: -0.1 } }));
+    assertEquals(negative.status, 400);
+    assertEquals(stub.calls.length, 0);
+  } finally {
+    stub.restore();
+  }
+});
+
+Deno.test('rejects a negative holiday upcharge', async () => {
+  const stub = stubSupabase();
+  try {
+    const res = await handleRequest(postRequest({ password: ADMIN_PASSWORD, updates: { holidayUpcharge: -0.05 } }));
+    assertEquals(res.status, 400);
+    assertEquals(stub.calls.length, 0);
+  } finally {
+    stub.restore();
+  }
+});
+
+Deno.test('rejects an empty vet list', async () => {
+  const stub = stubSupabase();
+  try {
+    const res = await handleRequest(postRequest({ password: ADMIN_PASSWORD, updates: { vets: [] } }));
+    assertEquals(res.status, 400);
+    assertEquals(stub.calls.length, 0);
+  } finally {
+    stub.restore();
+  }
+});
+
+Deno.test('rejects a vet list with a blank entry', async () => {
+  const stub = stubSupabase();
+  try {
+    const res = await handleRequest(postRequest({
+      password: ADMIN_PASSWORD, updates: { vets: ['Real Vet — (415) 555-0000', '   '] },
+    }));
+    assertEquals(res.status, 400);
+    assertEquals(stub.calls.length, 0);
+  } finally {
+    stub.restore();
+  }
+});
+
+Deno.test('rejects a vet list with a case-insensitive duplicate', async () => {
+  const stub = stubSupabase();
+  try {
+    const res = await handleRequest(postRequest({
+      password: ADMIN_PASSWORD,
+      updates: { vets: ['Marin Pet Hospital — (415) 479-8387', 'marin pet hospital — (415) 479-8387'] },
+    }));
+    assertEquals(res.status, 400);
+    const data = await res.json();
+    assert(data.error.includes('duplicate'));
+    assertEquals(stub.calls.length, 0);
+  } finally {
+    stub.restore();
+  }
+});

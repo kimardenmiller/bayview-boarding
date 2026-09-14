@@ -21,13 +21,32 @@ const DEFAULT_STAY = {
   owner_name: 'Kim Miller', owner_phone: '4155550100', dog_names: ['Rex'],
 };
 
+const DEFAULT_SETTINGS = {
+  dayRate: 105, multiDogDiscount: 0.10, holidayUpcharge: 0.30,
+  vets: ['Marin Pet Hospital — (415) 479-8387'],
+};
+
 function mockInvokeDefaults(overrides = {}) {
+  // A fresh mutable copy each call, so a Save in the admin settings UI
+  // (which sends {password, updates}) behaves like the real Edge
+  // Function - merging and echoing back the new values - rather than
+  // always returning the same fixed defaults regardless of what was sent.
+  const currentSettings = { ...DEFAULT_SETTINGS };
   supabase.functions.invoke.mockImplementation((fn, opts) => {
     if (overrides[fn]) return overrides[fn](opts);
     if (fn === 'lookup-client') return Promise.resolve({ data: { found: false }, error: null });
     if (fn === 'submit-booking') return Promise.resolve({ data: { stay: DEFAULT_STAY }, error: null });
     if (fn === 'send-confirmation') return Promise.resolve({ data: {}, error: null });
     if (fn === 'admin-data') return Promise.resolve({ data: null, error: { message: 'not mocked in this test' } });
+    // App fetches this once on mount (public read, no password) to load
+    // live pricing/vet-list settings - every test needs a sane default
+    // here or that automatic call interferes with tests written around
+    // a single expected invoke() call (e.g. mockResolvedValueOnce).
+    if (fn === 'settings') {
+      const updates = opts?.body?.updates;
+      if (updates) Object.assign(currentSettings, updates);
+      return Promise.resolve({ data: { ...currentSettings }, error: null });
+    }
     return Promise.resolve({ data: null, error: null });
   });
 }
@@ -410,6 +429,47 @@ describe('todayISO', () => {
   });
 });
 
+// ── App-level settings (fetched from Supabase, not hardcoded) ───────────────
+describe('Live settings (day rate, discount %, holiday %, vet list)', () => {
+  test('the vet dropdown reflects the fetched vet list, not the hardcoded fallback', async () => {
+    mockInvokeDefaults({
+      'settings': async () => ({
+        data: { dayRate: 105, multiDogDiscount: 0.10, holidayUpcharge: 0.30, vets: ['Only Custom Vet — (415) 555-0100'] },
+        error: null,
+      }),
+    });
+    await goToOwnerStep();
+    expect(await screen.findByText('Only Custom Vet — (415) 555-0100')).toBeInTheDocument();
+    expect(screen.queryByText('Marin Pet Hospital — (415) 479-8387')).not.toBeInTheDocument();
+  });
+
+  test('the cost estimate uses the fetched discount % and holiday %, not the hardcoded defaults', async () => {
+    mockInvokeDefaults({
+      'settings': async () => ({
+        data: { dayRate: 100, multiDogDiscount: 0.20, holidayUpcharge: 0.30, vets: ['Marin Pet Hospital — (415) 479-8387'] },
+        error: null,
+      }),
+    });
+    await fillStep1();
+    await fillStep2();
+    const dateInputs = document.querySelectorAll('input[type="date"]');
+    fireEvent.change(dateInputs[0], { target: { value: '2026-10-01' } });
+    fireEvent.change(dateInputs[1], { target: { value: '2026-10-03' } });
+    const timeInputs = document.querySelectorAll('input[type="time"]');
+    fireEvent.change(timeInputs[0], { target: { value: '09:00' } });
+    fireEvent.change(timeInputs[1], { target: { value: '09:00' } });
+    // 2 nights @ $100/night, fetched rate - confirms dayRate loaded too
+    expect(await screen.findByText('$200.00')).toBeInTheDocument();
+  });
+
+  test('keeps the hardcoded defaults if the settings fetch fails, rather than crashing', async () => {
+    mockInvokeDefaults({ 'settings': async () => ({ data: null, error: { message: 'network down' } }) });
+    await goToOwnerStep();
+    expect(screen.getByDisplayValue('Select a Vet')).toBeInTheDocument();
+    expect(screen.getByText('Marin Pet Hospital — (415) 479-8387')).toBeInTheDocument();
+  });
+});
+
 // ── Step 1: Owner Info (now also vet + Number of Dogs) ──────────────────────
 describe('Step 1 — Owner Info', () => {
   test('Continue is disabled (greyed out) on an empty form, and does nothing if clicked anyway', async () => {
@@ -423,7 +483,7 @@ describe('Step 1 — Owner Info', () => {
     expect(screen.queryByText('Dog 1')).not.toBeInTheDocument();
   });
 
-  test('Continue enables once every required field (name/phone/email/vet/dog count) is filled', async () => {
+  test('Continue enables once every required field (name/phone/email/vet) is filled - dog count already defaults to 1', async () => {
     await goToOwnerStep();
     const button = screen.getByText('Continue');
     await userEvent.type(screen.getByPlaceholderText('(415) 555-0100'), '4155550100');
@@ -431,10 +491,8 @@ describe('Step 1 — Owner Info', () => {
     await userEvent.type(screen.getByPlaceholderText('Jane Smith'), 'Kim Miller');
     expect(button).toBeDisabled();
     await userEvent.type(screen.getByPlaceholderText('jane@email.com'), 'kim@test.com');
-    expect(button).toBeDisabled();
+    expect(button).toBeDisabled(); // vet still unset
     fireEvent.change(screen.getByDisplayValue('Select a Vet'), { target: { value: 'Marin Pet Hospital — (415) 479-8387' } });
-    expect(button).toBeDisabled(); // still 0 dogs
-    fireEvent.change(screen.getByRole('spinbutton'), { target: { value: '1' } });
     expect(button).not.toBeDisabled();
   });
 
@@ -448,18 +506,19 @@ describe('Step 1 — Owner Info', () => {
     expect(screen.getByDisplayValue('Select a Vet')).toBeInTheDocument();
   });
 
-  test('Number of Dogs defaults to 0 and does not show a discount note', async () => {
+  test('Number of Dogs defaults to 1 (editable) and does not show a discount note', async () => {
     await goToOwnerStep();
-    expect(screen.getByRole('spinbutton')).toHaveValue(0);
+    expect(screen.getByRole('spinbutton')).toHaveValue(1);
     expect(screen.queryByText(/off each additional dog/)).not.toBeInTheDocument();
   });
 
-  test('Continue stays disabled while Number of Dogs is still 0, everything else filled', async () => {
+  test('Continue stays disabled if Number of Dogs is cleared down to 0, everything else filled', async () => {
     await goToOwnerStep();
     await userEvent.type(screen.getByPlaceholderText('(415) 555-0100'), '4155550100');
     await userEvent.type(screen.getByPlaceholderText('Jane Smith'), 'Kim Miller');
     await userEvent.type(screen.getByPlaceholderText('jane@email.com'), 'kim@test.com');
     fireEvent.change(screen.getByDisplayValue('Select a Vet'), { target: { value: 'Marin Pet Hospital — (415) 479-8387' } });
+    fireEvent.change(screen.getByRole('spinbutton'), { target: { value: '0' } });
     expect(screen.getByText('Continue')).toBeDisabled();
     expect(screen.queryByText('Dog 1')).not.toBeInTheDocument();
   });
@@ -494,9 +553,11 @@ describe('Step 1 — Owner Info', () => {
   });
 
   test('looks up a returning client by phone and autofills name/email', async () => {
-    supabase.functions.invoke.mockResolvedValueOnce({
-      data: { found: true, client: { owner_name: 'Found Person', owner_email: 'found@test.com' } },
-      error: null,
+    mockInvokeDefaults({
+      'lookup-client': async () => ({
+        data: { found: true, client: { owner_name: 'Found Person', owner_email: 'found@test.com' } },
+        error: null,
+      }),
     });
     await goToOwnerStep();
     await userEvent.type(screen.getByPlaceholderText('(415) 555-0100'), '4155550100');
@@ -584,14 +645,16 @@ describe('Step 1 — Owner Info', () => {
   test('look up does nothing when phone field is empty', async () => {
     await goToOwnerStep();
     fireEvent.click(screen.getByText('Look up'));
-    expect(supabase.functions.invoke).not.toHaveBeenCalled();
+    // App's own settings fetch on mount already called invoke() once -
+    // the assertion is that Look up specifically never called lookup-client
+    expect(supabase.functions.invoke).not.toHaveBeenCalledWith('lookup-client', expect.any(Object));
   });
 
   test('handles an entirely empty lookup record without crashing', async () => {
     // real records can have gaps (e.g. an older submission missing every
     // field) - the `field || ''` fallbacks exist for exactly this case, so
     // controlled inputs never receive null/undefined
-    supabase.functions.invoke.mockResolvedValueOnce({ data: { found: true, client: {} }, error: null });
+    mockInvokeDefaults({ 'lookup-client': async () => ({ data: { found: true, client: {} }, error: null }) });
     await goToOwnerStep();
     await userEvent.type(screen.getByPlaceholderText('(415) 555-0100'), '4155550100');
     fireEvent.click(screen.getByText('Look up'));
@@ -599,7 +662,7 @@ describe('Step 1 — Owner Info', () => {
     expect(screen.getByPlaceholderText('Jane Smith')).toHaveValue('');
     expect(screen.getByPlaceholderText('jane@email.com')).toHaveValue('');
     expect(screen.getByDisplayValue('Select a Vet')).toBeInTheDocument();
-    expect(screen.getByRole('spinbutton')).toHaveValue(0);
+    expect(screen.getByRole('spinbutton')).toHaveValue(1); // unaffected - an empty lookup doesn't touch the count
   });
 });
 
@@ -793,6 +856,33 @@ describe('Step 3 — Stay Dates', () => {
     expect(await screen.findByText('Boarding Agreement')).toBeInTheDocument();
   });
 
+  test('rejects a same-day pick-up at or before drop-off', async () => {
+    await fillStep1();
+    await fillStep2();
+    const dateInputs = document.querySelectorAll('input[type="date"]');
+    const today = daysFromToday(1);
+    fireEvent.change(dateInputs[0], { target: { value: today } });
+    fireEvent.change(dateInputs[1], { target: { value: today } }); // same day
+    const timeInputs = document.querySelectorAll('input[type="time"]');
+    fireEvent.change(timeInputs[0], { target: { value: '17:00' } }); // drop-off
+    fireEvent.change(timeInputs[1], { target: { value: '09:00' } }); // "pick-up" earlier in the day
+    fireEvent.click(screen.getByText('Continue'));
+    expect(await screen.findByText('Pick-up must be after drop-off for a same-day stay')).toBeInTheDocument();
+  });
+
+  test('allows an evening drop-off and a next-morning pick-up across two different days', async () => {
+    await fillStep1();
+    await fillStep2();
+    const dateInputs = document.querySelectorAll('input[type="date"]');
+    fireEvent.change(dateInputs[0], { target: { value: daysFromToday(1) } });
+    fireEvent.change(dateInputs[1], { target: { value: daysFromToday(2) } });
+    const timeInputs = document.querySelectorAll('input[type="time"]');
+    fireEvent.change(timeInputs[0], { target: { value: '17:00' } });
+    fireEvent.change(timeInputs[1], { target: { value: '09:00' } }); // earlier clock time, but a later day - fine
+    fireEvent.click(screen.getByText('Continue'));
+    expect(await screen.findByText('Boarding Agreement')).toBeInTheDocument();
+  });
+
   test('shows an estimated cost once valid dates/times are entered', async () => {
     await fillStep1();
     await fillStep2();
@@ -871,6 +961,16 @@ describe('Step 5 — Signature', () => {
     expect(button).toBeDisabled(); // signature still blank
     await userEvent.type(screen.getByPlaceholderText('Kim Miller'), 'Wrong Name');
     expect(button).not.toBeDisabled(); // filled in, even though it won't match on click
+  });
+
+  test('Submit Agreement uses the same styling as every other Continue button, not a separate muted color', async () => {
+    // Regression guard: it used to carry its own "btn-submit" class with a
+    // muted sage green that read as grey/disabled-looking even when the
+    // button was fully enabled - now it's just btn-primary like everywhere
+    // else in the flow.
+    await fillThrough();
+    const button = screen.getByText('Submit Agreement');
+    expect(button.className).toBe('btn-primary');
   });
 
   test('signature must match name from step 1', async () => {
@@ -1098,9 +1198,84 @@ describe('Admin — logged in', () => {
 
   test('updates and displays the day rate after Save', async () => {
     await loginAsAdmin();
-    const rateInput = document.querySelector('input[type="number"]');
+    // Day Rate is the first of several settings sections, each with its
+    // own "Save" button (rate, discount %, holiday %) - scope to the first.
+    const rateInput = document.querySelectorAll('input[type="number"]')[0];
     fireEvent.change(rateInput, { target: { value: '150' } });
-    fireEvent.click(screen.getByText('Save'));
+    fireEvent.click(screen.getAllByText('Save')[0]);
     expect(await screen.findByText(/Current rate: \$150\/day/)).toBeInTheDocument();
+  });
+
+  test('updates the 2nd+ dog discount %', async () => {
+    await loginAsAdmin();
+    const discountInput = document.querySelectorAll('input[type="number"]')[1];
+    fireEvent.change(discountInput, { target: { value: '15' } });
+    fireEvent.click(screen.getAllByText('Save')[1]);
+    expect(await screen.findByText(/Current: 15%/)).toBeInTheDocument();
+  });
+
+  test('updates the holiday upcharge %', async () => {
+    await loginAsAdmin();
+    const holidayInput = document.querySelectorAll('input[type="number"]')[2];
+    fireEvent.change(holidayInput, { target: { value: '25' } });
+    fireEvent.click(screen.getAllByText('Save')[2]);
+    expect(await screen.findByText(/Current: 25%/)).toBeInTheDocument();
+  });
+
+  test('shows a validation error from the server without crashing, and does not update the displayed rate', async () => {
+    mockInvokeDefaults({
+      'admin-data': async () => ({ data: { dogs: [], totalStays: 0 }, error: null }),
+      'settings': async (opts) => {
+        if (opts?.body?.updates) return { data: { error: 'Invalid settings: dayRate must be a positive number' }, error: null };
+        return { data: { dayRate: 105, multiDogDiscount: 0.10, holidayUpcharge: 0.30, vets: ['Marin Pet Hospital — (415) 479-8387'] }, error: null };
+      },
+    });
+    goToAdminUrl();
+    render(<App />);
+    await userEvent.type(screen.getByPlaceholderText('Password'), 'correct-password');
+    fireEvent.click(screen.getByText('Sign In'));
+    await screen.findByText('Bayview Boarding — Admin');
+
+    const rateInput = document.querySelectorAll('input[type="number"]')[0];
+    fireEvent.change(rateInput, { target: { value: '-5' } });
+    fireEvent.click(screen.getAllByText('Save')[0]);
+    expect(await screen.findByText(/Invalid settings: dayRate must be a positive number/)).toBeInTheDocument();
+    expect(screen.getByText(/Current rate: \$105\/day/)).toBeInTheDocument(); // unchanged
+  });
+
+  test('shows the vet list actually fetched from settings, not the hardcoded fallback', async () => {
+    // Regression test: the admin panel's vet-list editor used to seed
+    // itself from the vets *prop* at the moment AdminView first mounted -
+    // but App's settings fetch (a separate, async network call) hadn't
+    // necessarily resolved by then, so it could show the hardcoded
+    // fallback list (8 entries, defined in src/settings.js) instead of
+    // what was actually saved. DEFAULT_SETTINGS here deliberately has
+    // only 1 entry, distinct from that fallback, so this only passes if
+    // the real fetched value is what's shown.
+    await loginAsAdmin();
+    expect(screen.getByText('Marin Pet Hospital — (415) 479-8387')).toBeInTheDocument();
+    expect(screen.queryByText('VCA Marin Animal Hospital — (415) 454-5225')).not.toBeInTheDocument();
+    expect(screen.getAllByText('Remove')).toHaveLength(1);
+  });
+
+  test('adds a vet clinic to the list, then removes it, before saving', async () => {
+    await loginAsAdmin();
+    expect(screen.getByText('Marin Pet Hospital — (415) 479-8387')).toBeInTheDocument();
+
+    await userEvent.type(screen.getByPlaceholderText(/Clinic Name/), 'New Clinic — (415) 555-0100');
+    fireEvent.click(screen.getByText('Add'));
+    expect(screen.getByText('New Clinic — (415) 555-0100')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByText('Save Vet List'));
+    await waitFor(() => expect(supabase.functions.invoke).toHaveBeenCalledWith('settings', {
+      body: { password: 'correct-password', updates: { vets: ['Marin Pet Hospital — (415) 479-8387', 'New Clinic — (415) 555-0100'] } },
+    }));
+  });
+
+  test('removes a vet clinic from the list before saving', async () => {
+    await loginAsAdmin();
+    const removeButtons = screen.getAllByText('Remove');
+    fireEvent.click(removeButtons[0]);
+    expect(screen.queryByText('Marin Pet Hospital — (415) 479-8387')).not.toBeInTheDocument();
   });
 });

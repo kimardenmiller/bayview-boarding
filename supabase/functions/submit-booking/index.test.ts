@@ -169,6 +169,46 @@ Deno.test('rejects a check-in date in the past, without touching the database', 
   }
 });
 
+Deno.test('rejects a check-out before check-in, without touching the database', async () => {
+  const stub = stubSupabase();
+  try {
+    const res = await handleRequest(postRequest(validBooking({ checkIn: '2026-10-05', checkOut: '2026-10-01' })));
+    assertEquals(res.status, 400);
+    const data = await res.json();
+    assert(data.error.includes('checkOut'));
+    assertEquals(stub.calls.length, 0);
+  } finally {
+    stub.restore();
+  }
+});
+
+Deno.test('rejects a same-day pick-up at or before drop-off, without touching the database', async () => {
+  const stub = stubSupabase();
+  try {
+    const res = await handleRequest(postRequest(validBooking({
+      checkIn: '2026-10-01', checkOut: '2026-10-01', dropTime: '17:00', pickupTime: '09:00',
+    })));
+    assertEquals(res.status, 400);
+    const data = await res.json();
+    assert(data.error.includes('pickupTime'));
+    assertEquals(stub.calls.length, 0);
+  } finally {
+    stub.restore();
+  }
+});
+
+Deno.test('allows an evening drop-off and a next-morning pick-up across different days', async () => {
+  const stub = stubSupabase();
+  try {
+    const res = await handleRequest(postRequest(validBooking({
+      checkIn: '2026-10-01', checkOut: '2026-10-02', dropTime: '17:00', pickupTime: '09:00',
+    })));
+    assertEquals(res.status, 200);
+  } finally {
+    stub.restore();
+  }
+});
+
 Deno.test('computes "today" from clientTimezone, not UTC - accepts a same-day Pacific booking made in the evening', async () => {
   // 06:00 UTC = 11pm PDT the previous evening. A plain UTC "today" would
   // be one calendar day ahead of Pacific's actual today, and would wrongly

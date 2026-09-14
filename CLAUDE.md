@@ -17,11 +17,15 @@ Kim Miller and Estee Fletter at 210 Bayview Drive, San Rafael, CA.
 - Phone-number-based returning client lookup (Owner page's "Look up"
   button) — autofills name/email/vet and every known dog on file, growing
   the dog-page count to match
-- Cost estimate based on drop-off/pick-up times at $105/day, +30% on holiday
-  nights (computed algorithmically, see calcCost/getHolidayWindows in
-  src/App.js), 10% off each additional dog's nightly rate (uncapped)
+- Cost estimate based on drop-off/pick-up times at an admin-configurable
+  day rate (default $105/day), holiday upcharge (default +30%), and
+  multi-dog discount (default 10% off each additional dog's nightly rate,
+  uncapped) — all three, plus the vet clinic list, are loaded from
+  Supabase on every page load (public read) and editable in the admin
+  panel (Sept 15 (3) — see Data model below)
 - Past check-in dates are rejected, client-side (StepDates) and
-  server-side (submit-booking, the actual boundary)
+  server-side (submit-booking, the actual boundary); a same-day stay's
+  pick-up must be after its drop-off (no such constraint across days)
 - Twilio SMS confirmation texts (pending A2P carrier approval)
 - Admin panel: browse by dog, each with its always-current profile and full
   stay history (each past stay shows its own frozen declared/signed
@@ -43,6 +47,14 @@ Since find-or-create-by-phone/name needs a SELECT anon doesn't have, all
 booking writes go through submit-booking (service role key) instead of a
 direct client insert — see supabase/functions/submit-booking/index.ts.
 
+`settings` (Sept 15 (3)) is a singleton row (day rate, multi-dog
+discount, holiday upcharge, vet clinic list) - the admin-configurable
+values calcCost and the vet dropdown actually use, replacing hardcoded
+constants. Reads are public/unauthenticated (every visitor needs current
+pricing and the vet list to use the booking form at all); writes need the
+admin password - both go through supabase/functions/settings/index.ts,
+same RLS-locked-with-zero-policies pattern as everything else.
+
 ## Tech stack
 - React (Create React App)
 - Supabase (database + Edge Functions)
@@ -55,7 +67,8 @@ direct client insert — see supabase/functions/submit-booking/index.ts.
 - src/App.js — main app
 - src/settings.js — all configurable values (rates, vets, messages, packing list)
 - src/waiver.js — full waiver text
-- src/App.test.js — 93 passing tests (TDD), Supabase mocked via src/__mocks__/supabase.js
+- src/App.test.js — 105 passing tests (TDD), Supabase mocked via src/__mocks__/supabase.js
+- supabase/functions/settings/index.ts — public read / password-gated write of day rate, multi-dog discount, holiday upcharge, vet list
 - supabase/functions/submit-booking/index.ts — handles booking submission: find-or-create owner (by phone) and each dog (by owner+name), inserts the stay + stay_dogs snapshot links (service role key)
 - supabase/functions/send-confirmation/index.ts — Twilio SMS function (outbound)
 - supabase/functions/receive-sms/index.ts — inbound SMS webhook: auto-reply + relay to Kim/Estee. Deploy with `--no-verify-jwt` (see comment at top of file) or Twilio's webhook calls silently fail
@@ -81,12 +94,14 @@ direct client insert — see supabase/functions/submit-booking/index.ts.
 ## Current priorities (v1.5)
 1. Stay reminder SMS — cron job 24hrs before drop-off
 2. Billing SMS — admin triggers from stay detail view
-3. Rate persistence — save to Supabase so it survives page refresh
-4. Persist admin rate setting to Supabase settings table
-5. Signature timestamp — add client timezone
 
 ## Rules
 - Always run tests before committing (npm test -- --watchAll=false)
-- All configurable values go in src/settings.js
+- Non-business-rule config (business info, SMS templates, packing list)
+  goes in src/settings.js. Business rules an admin should be able to
+  change (day rate, multi-dog discount, holiday upcharge, vet list) live
+  in Supabase's `settings` table instead (see Data model) - settings.js
+  still holds the fallback defaults for those, used before the fetch
+  resolves or if it fails, but is not the source of truth for them.
 - Follow TDD — write tests before new features
 - Commit messages use format: "v1.x - description"

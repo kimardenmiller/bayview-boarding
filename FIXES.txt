@@ -1,6 +1,6 @@
 BAYVIEW BOARDING — FIX LIST
 ============================
-Last updated: September 15, 2026 (2) (greyed Continue buttons, timezone bug, money commas)
+Last updated: September 15, 2026 (4) (admin settings persistence, date sanity checks)
 
 NEXT CHANGE LIST (v1.5)
 -----------------------
@@ -11,11 +11,6 @@ NEXT CHANGE LIST (v1.5)
 2. Billing SMS — send at pickup time with final cost.
    Admin triggers this manually from the stay detail view, or
    auto-sends at scheduled pickup time.
-
-3. Rate persistence — save day rate to Supabase so it survives
-   page refresh (currently resets to $105 on reload).
-
-4. Persist admin rate setting to Supabase settings table.
 
 DEFERRED (revisit only if it actually blocks something)
 ---------------------------------------------------------
@@ -56,6 +51,65 @@ TWILIO STATUS
 
 COMPLETED
 ---------
+- Sept 15, 2026 (4): Landing page - title moved higher (margin-bottom
+  26px -> 52px) and, on desktop specifically (>=768px), the image's crop
+  point adjusted (object-position 42% -> 60% vertically) to actually
+  center the dog rather than mostly tree canopy - verified by screenshot,
+  not just by eye on the CSS value (an earlier attempt in the wrong
+  direction, 20%, made it visibly worse before landing on 60%).
+
+  "Number of Dogs" defaults back to 1 (was 0, changed last round to fix
+  the "can't type a 2" bug) - still freely editable via the same
+  decoupled-input-state fix from that round, so the earlier bug doesn't
+  come back.
+
+  Stop nonsensical same-day bookings: pick-up must be after drop-off
+  when check-in and check-out are the same calendar date (a multi-day
+  stay has no such constraint - an evening drop-off and a next-morning
+  pick-up two days later is completely normal). Checked both client-side
+  (StepDates) and server-side (submit-booking) - the server also now
+  rejects check-out before check-in, which turned out not to be checked
+  there at all before this pass.
+
+  Fixed "Submit Agreement looks grey" - it wasn't actually stuck
+  disabled (confirmed live: correctly enabled, background genuinely
+  changed to #7D9B76 once complete), but that particular sage-green read
+  as grey against the navy used everywhere else in the flow. Simplest
+  fix: dropped the separate "btn-submit" color entirely so it's styled
+  identically to every other Continue button.
+
+  Admin: 2nd-dog discount %, holiday upcharge %, and vet clinic list
+  ("maintenance" - add/remove entries) are now editable in the admin
+  panel, persisted to a new `settings` table in Supabase rather than
+  hardcoded constants - this also finally fixes the day rate's own
+  long-standing reset-on-reload problem (old backlog items 3 & 4),
+  since it moved onto the same real persistence path. Reads are public/
+  unauthenticated (every visitor's browser needs current pricing and the
+  vet list just to use the booking form), writes need the admin
+  password - both via a new settings Edge Function. calcCost and the vet
+  dropdown now take these as parameters/props instead of closing over
+  hardcoded module constants, with the old hardcoded values kept only as
+  a fallback default (used before the fetch resolves, or if it fails).
+  Caught and fixed a real bug of exactly the kind this project has hit
+  before: the admin panel's edit-fields (rate/discount/holiday/vet list)
+  were seeded from props at the moment AdminView first mounted, but
+  App's settings fetch is a separate async call that might not have
+  resolved yet at that point - so they could silently show the hardcoded
+  fallback instead of the real saved values. Fixed by re-syncing those
+  fields at the moment of a successful admin login (when the settings UI
+  actually becomes visible) instead of only once at mount.
+
+  Tests: 6 new Deno tests for the settings Edge Function's validation
+  (positive day rate, discount in [0,1), non-negative holiday upcharge,
+  non-empty/non-blank/non-duplicate vet list) and its public-read-vs-
+  password-gated-write split; 4 more for submit-booking's new date
+  checks. React: new tests for the default-1-dog behavior, the same-day
+  pick-up/drop-off check, the Submit Agreement styling regression, the
+  full admin settings UI (save each field, validation error display,
+  add/remove/save a vet), and specifically a regression test for the
+  stale-admin-state bug described above (asserts the fetched 1-entry
+  vet list is shown, not the 8-entry hardcoded fallback). 105 React + 54
+  Deno = 159/159 passing.
 - Sept 15, 2026 (3): Landing page: title bumped again (3rem -> 3.3rem)
   and "Book My Stay" shrunk a little (padding 20px/48px -> 16px/40px,
   font-size 1.25rem -> 1.1rem).
