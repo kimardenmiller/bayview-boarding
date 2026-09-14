@@ -1,6 +1,6 @@
 BAYVIEW BOARDING — FIX LIST
 ============================
-Last updated: September 15, 2026 (booking flow: per-dog pages, past-date guard)
+Last updated: September 15, 2026 (landing title size, Number of Dogs typing bug)
 
 NEXT CHANGE LIST (v1.5)
 -----------------------
@@ -56,6 +56,24 @@ TWILIO STATUS
 
 COMPLETED
 ---------
+- Sept 15, 2026 (2): Landing title bumped 2.7rem -> 3rem ("a little
+  larger"). Fixed a real bug: "Number of Dogs" wouldn't let you type a 2 -
+  the field was bound directly to data.dogs.length and clamped to a
+  minimum of 1 on every keystroke, so backspacing "1" to clear it before
+  typing "2" produced "" -> NaN -> clamped right back to "1" in the same
+  tick, meaning the field's displayed value never actually changed and a
+  fresh digit could never land. Fixed by giving the input its own local
+  text state, decoupled from data.dogs.length while focused (can go
+  genuinely blank or hold "0"), resizing the dogs array only on a valid
+  parse, and reverting to the last committed count on blur if left
+  invalid. "Number of Dogs" now defaults to 0 (was 1) - Continue on the
+  owner page enforces > 0 ("Must be at least 1") rather than the input
+  refusing to go there. Tests: 3 new/rewritten (default-0, a keystroke-
+  level regression test for the exact reported bug, blur-reverts-when-
+  invalid) plus the required-fields count test updated for the new
+  dogCount error. 83 React + 35 Deno = 118/118 passing. Verified live via
+  a real backspace-then-type Playwright simulation (not just .fill(),
+  which wouldn't have caught this).
 - Sept 15, 2026: Booking flow refinements on top of the dog-profiles reorg.
   Vet and "Number of Dogs" moved from the (now per-dog) dog page to the
   owner page, asked once alongside name/phone/email; the returning-client

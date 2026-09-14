@@ -65,15 +65,18 @@ async function goToOwnerStep() {
   await screen.findByText('Owner Information');
 }
 
-// Fills Owner Information (name/phone/email/vet) and advances to Dog 1.
-// Vet and "Number of Dogs" live here now, not on the dog pages.
-async function fillStep1(phone = '4155550100', name = 'Kim Miller', email = 'kim@test.com') {
+// Fills Owner Information (name/phone/email/vet/Number of Dogs) and
+// advances to Dog 1. Vet and dog count live here now, not on the dog
+// pages. "Number of Dogs" defaults to 0, so this always sets it to 1
+// unless a test explicitly wants otherwise.
+async function fillStep1(phone = '4155550100', name = 'Kim Miller', email = 'kim@test.com', numberOfDogs = 1) {
   render(<App />);
   fireEvent.click(screen.getByText('Book My Stay'));
   await userEvent.type(screen.getByPlaceholderText('(415) 555-0100'), phone);
   await userEvent.type(screen.getByPlaceholderText('Jane Smith'), name);
   await userEvent.type(screen.getByPlaceholderText('jane@email.com'), email);
   fireEvent.change(screen.getByDisplayValue('Select a Vet'), { target: { value: 'Marin Pet Hospital — (415) 479-8387' } });
+  fireEvent.change(screen.getByRole('spinbutton'), { target: { value: String(numberOfDogs) } });
   fireEvent.click(screen.getByText('Continue'));
   await screen.findByText('Dog 1');
 }
@@ -359,11 +362,13 @@ describe('getHolidayWindows', () => {
 
 // ── Step 1: Owner Info (now also vet + Number of Dogs) ──────────────────────
 describe('Step 1 — Owner Info', () => {
-  test('shows required errors when submitting empty form, including the vet', async () => {
+  test('shows required errors when submitting empty form, including the vet and dog count', async () => {
     await goToOwnerStep();
     fireEvent.click(screen.getByText('Continue'));
     // phone, name, email, vet
     expect(await screen.findAllByText('Required')).toHaveLength(4);
+    // Number of Dogs defaults to 0 - its own, differently-worded error
+    expect(screen.getByText('Must be at least 1')).toBeInTheDocument();
   });
 
   test('advances to Dog 1 when all required fields filled', async () => {
@@ -376,10 +381,21 @@ describe('Step 1 — Owner Info', () => {
     expect(screen.getByDisplayValue('Select a Vet')).toBeInTheDocument();
   });
 
-  test('Number of Dogs defaults to 1 and does not show a discount note', async () => {
+  test('Number of Dogs defaults to 0 and does not show a discount note', async () => {
     await goToOwnerStep();
-    expect(screen.getByRole('spinbutton')).toHaveValue(1);
+    expect(screen.getByRole('spinbutton')).toHaveValue(0);
     expect(screen.queryByText(/off each additional dog/)).not.toBeInTheDocument();
+  });
+
+  test('blocks Continue with "Must be at least 1" while Number of Dogs is still 0', async () => {
+    await goToOwnerStep();
+    await userEvent.type(screen.getByPlaceholderText('(415) 555-0100'), '4155550100');
+    await userEvent.type(screen.getByPlaceholderText('Jane Smith'), 'Kim Miller');
+    await userEvent.type(screen.getByPlaceholderText('jane@email.com'), 'kim@test.com');
+    fireEvent.change(screen.getByDisplayValue('Select a Vet'), { target: { value: 'Marin Pet Hospital — (415) 479-8387' } });
+    fireEvent.click(screen.getByText('Continue'));
+    expect(await screen.findByText('Must be at least 1')).toBeInTheDocument();
+    expect(screen.queryByText('Dog 1')).not.toBeInTheDocument();
   });
 
   test('shows the multi-dog discount note once more than 1 dog is entered', async () => {
@@ -388,10 +404,27 @@ describe('Step 1 — Owner Info', () => {
     expect(await screen.findByText(/10% off each additional dog/)).toBeInTheDocument();
   });
 
-  test('treats a cleared/invalid Number of Dogs input as 1', async () => {
+  test('lets the field go blank while editing, instead of snapping back on every keystroke', async () => {
+    // Regression test for the actual reported bug: clearing "1" before
+    // typing "2" used to clamp straight back to 1 on the empty
+    // intermediate state, so the field could never actually change.
     await goToOwnerStep();
-    fireEvent.change(screen.getByRole('spinbutton'), { target: { value: '' } });
-    expect(screen.getByRole('spinbutton')).toHaveValue(1);
+    const spinbutton = screen.getByRole('spinbutton');
+    fireEvent.change(spinbutton, { target: { value: '1' } });
+    expect(spinbutton).toHaveValue(1);
+    fireEvent.change(spinbutton, { target: { value: '' } }); // simulates backspacing to clear
+    expect(spinbutton).toHaveValue(null); // genuinely blank, not reverted to 1
+    fireEvent.change(spinbutton, { target: { value: '2' } });
+    expect(spinbutton).toHaveValue(2);
+  });
+
+  test('blank Number of Dogs reverts to the last committed count on blur', async () => {
+    await goToOwnerStep();
+    const spinbutton = screen.getByRole('spinbutton');
+    fireEvent.change(spinbutton, { target: { value: '3' } });
+    fireEvent.change(spinbutton, { target: { value: '' } });
+    fireEvent.blur(spinbutton);
+    expect(spinbutton).toHaveValue(3);
   });
 
   test('looks up a returning client by phone and autofills name/email', async () => {
@@ -500,7 +533,7 @@ describe('Step 1 — Owner Info', () => {
     expect(screen.getByPlaceholderText('Jane Smith')).toHaveValue('');
     expect(screen.getByPlaceholderText('jane@email.com')).toHaveValue('');
     expect(screen.getByDisplayValue('Select a Vet')).toBeInTheDocument();
-    expect(screen.getByRole('spinbutton')).toHaveValue(1);
+    expect(screen.getByRole('spinbutton')).toHaveValue(0);
   });
 });
 

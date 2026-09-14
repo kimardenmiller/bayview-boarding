@@ -55,7 +55,7 @@ direct client insert — see supabase/functions/submit-booking/index.ts.
 - src/App.js — main app
 - src/settings.js — all configurable values (rates, vets, messages, packing list)
 - src/waiver.js — full waiver text
-- src/App.test.js — 81 passing tests (TDD), Supabase mocked via src/__mocks__/supabase.js
+- src/App.test.js — 83 passing tests (TDD), Supabase mocked via src/__mocks__/supabase.js
 - supabase/functions/submit-booking/index.ts — handles booking submission: find-or-create owner (by phone) and each dog (by owner+name), inserts the stay + stay_dogs snapshot links (service role key)
 - supabase/functions/send-confirmation/index.ts — Twilio SMS function (outbound)
 - supabase/functions/receive-sms/index.ts — inbound SMS webhook: auto-reply + relay to Kim/Estee. Deploy with `--no-verify-jwt` (see comment at top of file) or Twilio's webhook calls silently fail

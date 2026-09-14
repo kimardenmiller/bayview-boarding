@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { WAIVER_SECTIONS } from './waiver';
 import { supabase } from './supabase';
 import { SETTINGS } from './settings';
@@ -191,6 +191,16 @@ function StepOwner({ data, onChange, onNext }) {
   const [errors, setErrors] = useState({});
   const [looking, setLooking] = useState(false);
   const [found, setFound] = useState(false);
+  // The "Number of Dogs" input's own displayed text, decoupled from
+  // data.dogs.length - see setDogCount below for why.
+  const [dogCountText, setDogCountText] = useState(String(data.dogs.length));
+
+  // Resync the field when the dog count changes for a reason other than
+  // typing here - e.g. a returning-client lookup growing the array to
+  // match known dogs.
+  useEffect(() => {
+    setDogCountText(String(data.dogs.length));
+  }, [data.dogs.length]);
 
   async function lookupPhone() {
     if (!data.ownerPhone.trim()) return;
@@ -228,11 +238,32 @@ function StepOwner({ data, onChange, onNext }) {
     setLooking(false);
   }
 
-  function setDogCount(n) {
-    const count = Math.max(1, n || 1);
-    const next = data.dogs.slice(0, count);
-    while (next.length < count) next.push(emptyDog());
+  // The input's value used to be bound directly to data.dogs.length,
+  // clamped to a minimum of 1 on every keystroke. That was the bug:
+  // backspacing "1" to clear the field before typing "2" produced ""
+  // -> NaN -> clamped right back to 1, so the field's displayed value
+  // never actually changed and "2" could never land. Now the field keeps
+  // its own text (dogCountText) while focused - it can go genuinely
+  // blank, or hold "0" - and only resizes data.dogs on a valid parse.
+  // "Number of Dogs" defaults to 0; Continue itself enforces > 0 (see
+  // validate below) rather than the input refusing to go there.
+  function handleDogCountChange(e) {
+    const raw = e.target.value;
+    setDogCountText(raw);
+    if (raw === '') return; // let them clear it freely, no snap-back
+    const n = parseInt(raw, 10);
+    if (Number.isNaN(n) || n < 0) return;
+    const next = data.dogs.slice(0, n);
+    while (next.length < n) next.push(emptyDog());
     onChange('dogs', next);
+  }
+
+  // If they leave the field blank (or otherwise invalid) and click/tab
+  // away, snap the displayed text back to the actual committed count
+  // instead of leaving it looking blank while dogs.length disagrees.
+  function handleDogCountBlur() {
+    const n = parseInt(dogCountText, 10);
+    if (Number.isNaN(n) || n < 0) setDogCountText(String(data.dogs.length));
   }
 
   function validate() {
@@ -241,6 +272,7 @@ function StepOwner({ data, onChange, onNext }) {
     if (!data.ownerName.trim()) e.ownerName = 'Required';
     if (!data.ownerEmail.trim()) e.ownerEmail = 'Required';
     if (!data.vetName || data.vetName === 'Select a Vet') e.vetName = 'Required';
+    if (data.dogs.length === 0) e.dogCount = 'Must be at least 1';
     setErrors(e);
     return Object.keys(e).length === 0;
   }
@@ -268,13 +300,14 @@ function StepOwner({ data, onChange, onNext }) {
           {SAN_RAFAEL_VETS.map((v, i) => <option key={i} value={v}>{v}</option>)}
         </select>
       </Field>
-      <Field label="Number of Dogs">
+      <Field label="Number of Dogs" error={errors.dogCount}>
         <input
           type="number"
-          min="1"
+          min="0"
           step="1"
-          value={data.dogs.length}
-          onChange={e => setDogCount(parseInt(e.target.value, 10))}
+          value={dogCountText}
+          onChange={handleDogCountChange}
+          onBlur={handleDogCountBlur}
         />
         {data.dogs.length > 1 && (
           <div style={{ fontSize: '0.78rem', color: '#7D9B76', marginTop: 4 }}>
@@ -674,7 +707,7 @@ export default function App() {
     return {
       ownerName: '', ownerPhone: '', ownerEmail: '',
       vetName: 'Select a Vet',
-      dogs: [emptyDog()],
+      dogs: [], // "Number of Dogs" defaults to 0 - StepOwner requires > 0 before Continue
       checkIn: '', checkOut: '', dropTime: '', pickupTime: '', notes: '',
       agreed: false, signature: '',
     };
