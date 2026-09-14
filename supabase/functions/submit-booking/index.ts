@@ -24,6 +24,14 @@ function json(body: unknown, status = 200): Response {
   });
 }
 
+// Server-side backstop for "no booking a stay in the past" - the booking
+// form already validates this client-side, but that's only a UI
+// convenience; this is the actual boundary since submit-booking is now
+// the sole write path (anon has no direct table access at all).
+function todayISO(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
 interface DogInput {
   name?: string;
   breed?: string;
@@ -49,22 +57,23 @@ interface BookingInput {
 }
 
 function validate(body: BookingInput): string[] {
-  const missing: string[] = [];
-  if (!body.owner?.name?.trim()) missing.push("owner.name");
-  if (!body.owner?.phone?.trim()) missing.push("owner.phone");
-  if (!body.owner?.email?.trim()) missing.push("owner.email");
+  const errors: string[] = [];
+  if (!body.owner?.name?.trim()) errors.push("owner.name");
+  if (!body.owner?.phone?.trim()) errors.push("owner.phone");
+  if (!body.owner?.email?.trim()) errors.push("owner.email");
   if (!Array.isArray(body.dogs) || body.dogs.length === 0) {
-    missing.push("dogs");
+    errors.push("dogs");
   } else {
     body.dogs.forEach((d, i) => {
-      if (!d?.name?.trim()) missing.push(`dogs[${i}].name`);
-      if (!d?.breed?.trim()) missing.push(`dogs[${i}].breed`);
+      if (!d?.name?.trim()) errors.push(`dogs[${i}].name`);
+      if (!d?.breed?.trim()) errors.push(`dogs[${i}].breed`);
     });
   }
-  if (!body.checkIn) missing.push("checkIn");
-  if (!body.checkOut) missing.push("checkOut");
-  if (!body.signature?.trim()) missing.push("signature");
-  return missing;
+  if (!body.checkIn) errors.push("checkIn");
+  if (!body.checkOut) errors.push("checkOut");
+  if (body.checkIn && body.checkIn < todayISO()) errors.push("checkIn (cannot be in the past)");
+  if (!body.signature?.trim()) errors.push("signature");
+  return errors;
 }
 
 export async function handleRequest(req: Request): Promise<Response> {
@@ -77,9 +86,9 @@ export async function handleRequest(req: Request): Promise<Response> {
 
   try {
     const body: BookingInput = await req.json();
-    const missing = validate(body);
-    if (missing.length > 0) {
-      return json({ error: `Missing required fields: ${missing.join(", ")}` }, 400);
+    const errors = validate(body);
+    if (errors.length > 0) {
+      return json({ error: `Invalid booking: ${errors.join(", ")}` }, 400);
     }
 
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);

@@ -155,6 +155,19 @@ Deno.test('rejects a dog missing name/breed', async () => {
   }
 });
 
+Deno.test('rejects a check-in date in the past, without touching the database', async () => {
+  const stub = stubSupabase();
+  try {
+    const res = await handleRequest(postRequest(validBooking({ checkIn: '2020-01-01', checkOut: '2020-01-02' })));
+    assertEquals(res.status, 400);
+    const data = await res.json();
+    assert(data.error.includes('checkIn'));
+    assertEquals(stub.calls.length, 0);
+  } finally {
+    stub.restore();
+  }
+});
+
 Deno.test('a new owner with a new dog creates one owner, one dog, one stay, one link', async () => {
   const stub = stubSupabase();
   try {

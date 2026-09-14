@@ -1,6 +1,6 @@
 BAYVIEW BOARDING — FIX LIST
 ============================
-Last updated: September 14, 2026 (dog-profiles reorg)
+Last updated: September 15, 2026 (booking flow: per-dog pages, past-date guard)
 
 NEXT CHANGE LIST (v1.5)
 -----------------------
@@ -56,6 +56,30 @@ TWILIO STATUS
 
 COMPLETED
 ---------
+- Sept 15, 2026: Booking flow refinements on top of the dog-profiles reorg.
+  Vet and "Number of Dogs" moved from the (now per-dog) dog page to the
+  owner page, asked once alongside name/phone/email; the returning-client
+  "Look up" button there now also autofills the vet and every known dog
+  (previously this lived in an automatic on-mount effect on the dog page -
+  consolidated into the one manual lookup now that both live on the same
+  page). Each dog now gets its own page titled "Dog 1", "Dog 2", etc.
+  instead of all dogs stacked on one page - Progress/step count are
+  computed dynamically from the dog count (Owner + N dog pages + Dates +
+  Agreement + Sign). Vet placeholder text changed to "Select a Vet".
+  Aggression/health questions were already required to advance past a dog
+  page but showed no message if left blank (the Field wasn't passed an
+  error prop) - fixed, they now warn "Please select an answer" like every
+  other required field. Bookings can no longer be made for a check-in date
+  in the past - validated both client-side (StepDates, the date input's
+  min attribute is only a UI hint) and server-side in submit-booking
+  (the actual boundary, since anon has no direct table access at all).
+  Database cleared of all records (including stays_legacy) per request -
+  the 3 backfilled owners/dogs/9 stays were test data, not real bookings.
+  Tests: App.test.js helpers rewritten for the per-dog-page flow (6 new/
+  rewritten tests covering vet default text, the Dog-2 page, aggression/
+  health warnings independently and together, past-date rejection, a
+  2-dog submission's payload); submit-booking gained a Deno test for the
+  server-side past-date rejection. 81 React + 35 Deno = 116/116 passing.
 - Sept 14, 2026: Dog-profiles reorg (follow-up to v1.5.14's multi-dog
   pricing). New schema: owners (by phone) -> dogs (always-current
   profile) -> stays (one per booking) <- stay_dogs (join; which dogs

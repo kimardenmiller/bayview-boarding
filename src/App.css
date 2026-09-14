@@ -114,21 +114,3 @@
     width: 100%;
   }
 }
-
-/* ── Multi-dog blocks (Step 2) ───────────────────────────────────────────── */
-.dog-block {
-  margin-top: 24px;
-  padding-top: 20px;
-  border-top: 1px solid #EAE3D6;
-}
-.dog-block:first-of-type {
-  margin-top: 8px;
-  padding-top: 0;
-  border-top: none;
-}
-.dog-block-title {
-  font-size: 0.95rem;
-  font-weight: 600;
-  color: #7D9B76;
-  margin-bottom: 14px;
-}

@@ -50,7 +50,7 @@ export const SETTINGS = {
 
   // ── Vet Dropdown ──────────────────────────────────────────────────────────
   SAN_RAFAEL_VETS: [
-    'Select a veterinarian',
+    'Select a Vet',
     'Marin Pet Hospital — (415) 479-8387',
     'VCA Marin Animal Hospital — (415) 454-5225',
     'Bel Marin Animal Hospital — (415) 883-1700',

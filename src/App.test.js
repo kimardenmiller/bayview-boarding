@@ -50,27 +50,52 @@ function isoMonthsAgo(months, day = 15) {
   return d.toISOString().slice(0, 10);
 }
 
+function daysFromToday(offset) {
+  const d = new Date();
+  d.setDate(d.getDate() + offset);
+  return d.toISOString().slice(0, 10);
+}
+
+// Renders and advances only to the Owner Information page - for tests
+// that check that page's own fields (vet, Number of Dogs) directly,
+// without also filling and leaving it.
+async function goToOwnerStep() {
+  render(<App />);
+  fireEvent.click(screen.getByText('Book My Stay'));
+  await screen.findByText('Owner Information');
+}
+
+// Fills Owner Information (name/phone/email/vet) and advances to Dog 1.
+// Vet and "Number of Dogs" live here now, not on the dog pages.
 async function fillStep1(phone = '4155550100', name = 'Kim Miller', email = 'kim@test.com') {
   render(<App />);
   fireEvent.click(screen.getByText('Book My Stay'));
   await userEvent.type(screen.getByPlaceholderText('(415) 555-0100'), phone);
   await userEvent.type(screen.getByPlaceholderText('Jane Smith'), name);
   await userEvent.type(screen.getByPlaceholderText('jane@email.com'), email);
+  fireEvent.change(screen.getByDisplayValue('Select a Vet'), { target: { value: 'Marin Pet Hospital — (415) 479-8387' } });
   fireEvent.click(screen.getByText('Continue'));
-  await screen.findByText('About Your Dog');
+  await screen.findByText('Dog 1');
 }
 
-async function fillStep2() {
-  await userEvent.type(screen.getByPlaceholderText('Buddy'), 'Rex');
-  await userEvent.type(screen.getByPlaceholderText('Golden Retriever'), 'Labrador');
-  const dobInput = document.querySelector('input[type="date"]');
-  fireEvent.change(dobInput, { target: { value: '2020-01-01' } });
-  fireEvent.change(screen.getByDisplayValue('Select a veterinarian'), { target: { value: 'Marin Pet Hospital — (415) 479-8387' } });
+// Fills whichever dog page is currently showing and clicks Continue.
+// Does not assert where it lands - the caller checks ("Dog 2" for an
+// earlier dog, "Stay Dates" for the last one).
+async function fillDogPage({ name = 'Rex', breed = 'Labrador', dob = '2020-01-01' } = {}) {
+  await userEvent.type(screen.getByPlaceholderText('Buddy'), name);
+  await userEvent.type(screen.getByPlaceholderText('Golden Retriever'), breed);
+  fireEvent.change(document.querySelector('input[type="date"]'), { target: { value: dob } });
   const selects = document.querySelectorAll('select');
-  fireEvent.change(selects[1], { target: { value: 'yes' } }); // spayNeuter
-  fireEvent.change(selects[2], { target: { value: 'no' } });  // aggression
-  fireEvent.change(selects[3], { target: { value: 'no' } });  // health
+  fireEvent.change(selects[0], { target: { value: 'yes' } }); // spayNeuter
+  fireEvent.change(selects[1], { target: { value: 'no' } });  // aggression
+  fireEvent.change(selects[2], { target: { value: 'no' } });  // health
   fireEvent.click(screen.getByText('Continue'));
+}
+
+// Single-dog case (the default form state) - fills Dog 1 and lands on
+// Stay Dates. Multi-dog flows call fillDogPage() directly per dog.
+async function fillStep2() {
+  await fillDogPage();
   await screen.findByText('Stay Dates');
 }
 
@@ -332,18 +357,41 @@ describe('getHolidayWindows', () => {
   });
 });
 
-// ── Step 1: Owner Info ──────────────────────────────────────────────────────
+// ── Step 1: Owner Info (now also vet + Number of Dogs) ──────────────────────
 describe('Step 1 — Owner Info', () => {
-  test('shows required errors when submitting empty form', async () => {
-    render(<App />);
-    fireEvent.click(screen.getByText('Book My Stay'));
+  test('shows required errors when submitting empty form, including the vet', async () => {
+    await goToOwnerStep();
     fireEvent.click(screen.getByText('Continue'));
-    expect(await screen.findAllByText('Required')).toHaveLength(3);
+    // phone, name, email, vet
+    expect(await screen.findAllByText('Required')).toHaveLength(4);
   });
 
-  test('advances to step 2 when all required fields filled', async () => {
+  test('advances to Dog 1 when all required fields filled', async () => {
     await fillStep1();
-    expect(screen.getByText('About Your Dog')).toBeInTheDocument();
+    expect(screen.getByText('Dog 1')).toBeInTheDocument();
+  });
+
+  test('vet defaults to the "Select a Vet" placeholder', async () => {
+    await goToOwnerStep();
+    expect(screen.getByDisplayValue('Select a Vet')).toBeInTheDocument();
+  });
+
+  test('Number of Dogs defaults to 1 and does not show a discount note', async () => {
+    await goToOwnerStep();
+    expect(screen.getByRole('spinbutton')).toHaveValue(1);
+    expect(screen.queryByText(/off each additional dog/)).not.toBeInTheDocument();
+  });
+
+  test('shows the multi-dog discount note once more than 1 dog is entered', async () => {
+    await goToOwnerStep();
+    fireEvent.change(screen.getByRole('spinbutton'), { target: { value: '2' } });
+    expect(await screen.findByText(/10% off each additional dog/)).toBeInTheDocument();
+  });
+
+  test('treats a cleared/invalid Number of Dogs input as 1', async () => {
+    await goToOwnerStep();
+    fireEvent.change(screen.getByRole('spinbutton'), { target: { value: '' } });
+    expect(screen.getByRole('spinbutton')).toHaveValue(1);
   });
 
   test('looks up a returning client by phone and autofills name/email', async () => {
@@ -351,8 +399,7 @@ describe('Step 1 — Owner Info', () => {
       data: { found: true, client: { owner_name: 'Found Person', owner_email: 'found@test.com' } },
       error: null,
     });
-    render(<App />);
-    fireEvent.click(screen.getByText('Book My Stay'));
+    await goToOwnerStep();
     await userEvent.type(screen.getByPlaceholderText('(415) 555-0100'), '4155550100');
     fireEvent.click(screen.getByText('Look up'));
     expect(await screen.findByText(/Info found/)).toBeInTheDocument();
@@ -361,59 +408,13 @@ describe('Step 1 — Owner Info', () => {
     expect(supabase.functions.invoke).toHaveBeenCalledWith('lookup-client', { body: { phone: '4155550100' } });
   });
 
-  test('does not autofill or show the banner when phone is not found', async () => {
-    render(<App />); // default mock: { found: false }
-    fireEvent.click(screen.getByText('Book My Stay'));
-    await userEvent.type(screen.getByPlaceholderText('(415) 555-0100'), '4155559999');
-    fireEvent.click(screen.getByText('Look up'));
-    await waitFor(() => expect(supabase.functions.invoke).toHaveBeenCalled());
-    expect(screen.queryByText(/Info found/)).not.toBeInTheDocument();
-    expect(screen.getByPlaceholderText('Jane Smith')).toHaveValue('');
-  });
-
-  test('look up does nothing when phone field is empty', async () => {
-    render(<App />);
-    fireEvent.click(screen.getByText('Book My Stay'));
-    fireEvent.click(screen.getByText('Look up'));
-    expect(supabase.functions.invoke).not.toHaveBeenCalled();
-  });
-
-  test('handles an entirely empty lookup record without crashing', async () => {
-    // real records can have gaps (e.g. an older submission missing every
-    // field) - the `field || ''` fallbacks exist for exactly this case, so
-    // controlled inputs never receive null/undefined
-    supabase.functions.invoke.mockResolvedValueOnce({ data: { found: true, client: {} }, error: null });
-    render(<App />);
-    fireEvent.click(screen.getByText('Book My Stay'));
-    await userEvent.type(screen.getByPlaceholderText('(415) 555-0100'), '4155550100');
-    fireEvent.click(screen.getByText('Look up'));
-    await screen.findByText(/Info found/);
-    expect(screen.getByPlaceholderText('Jane Smith')).toHaveValue('');
-    expect(screen.getByPlaceholderText('jane@email.com')).toHaveValue('');
-  });
-});
-
-// ── Step 2: Dog Info ────────────────────────────────────────────────────────
-describe('Step 2 — Dog Info', () => {
-  test('shows required errors when submitting empty dog form', async () => {
-    await fillStep1();
-    fireEvent.click(screen.getByText('Continue'));
-    expect(await screen.findAllByText('Required')).toHaveLength(5);
-  });
-
-  test('calculates age from DOB', async () => {
-    await fillStep1();
-    const dobInput = document.querySelector('input[type="date"]');
-    fireEvent.change(dobInput, { target: { value: isoMonthsAgo(36) } });
-    expect(await screen.findByText('Age: 3 years')).toBeInTheDocument();
-  });
-
-  test('autofills dog info (and the once-per-booking vet) on mount when the phone matches a returning client', async () => {
+  test('the same lookup also autofills the vet and dog profile, visible once advanced to Dog 1', async () => {
     mockInvokeDefaults({
       'lookup-client': async () => ({
         data: {
           found: true,
           client: {
+            owner_name: 'Kim Miller', owner_email: 'kim@test.com',
             vet_name: 'Marin Pet Hospital — (415) 479-8387',
             dogs: [{ dog_name: 'Rex', dog_breed: 'Labrador', dog_dob: '2020-01-01', spay_neuter: 'yes' }],
           },
@@ -421,13 +422,19 @@ describe('Step 2 — Dog Info', () => {
         error: null,
       }),
     });
-    await fillStep1();
-    expect(await screen.findByPlaceholderText('Buddy')).toHaveValue('Rex');
-    expect(screen.getByPlaceholderText('Golden Retriever')).toHaveValue('Labrador');
+    await goToOwnerStep();
+    await userEvent.type(screen.getByPlaceholderText('(415) 555-0100'), '4155550100');
+    fireEvent.click(screen.getByText('Look up'));
+    await screen.findByText(/Info found/);
     expect(screen.getByDisplayValue('Marin Pet Hospital — (415) 479-8387')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByText('Continue'));
+    await screen.findByText('Dog 1');
+    expect(screen.getByPlaceholderText('Buddy')).toHaveValue('Rex');
+    expect(screen.getByPlaceholderText('Golden Retriever')).toHaveValue('Labrador');
   });
 
-  test('autofills every dog block for a returning owner with multiple dogs on file, growing the count', async () => {
+  test('autofills every dog for a returning owner with multiple dogs, growing the count', async () => {
     mockInvokeDefaults({
       'lookup-client': async () => ({
         data: {
@@ -443,30 +450,95 @@ describe('Step 2 — Dog Info', () => {
         error: null,
       }),
     });
-    await fillStep1();
-    expect(await screen.findByRole('spinbutton')).toHaveValue(2); // count grew to match, not left at 1
-    const nameInputs = screen.getAllByPlaceholderText('Buddy');
-    const breedInputs = screen.getAllByPlaceholderText('Golden Retriever');
-    expect(nameInputs).toHaveLength(2);
-    expect(nameInputs[0]).toHaveValue('Rex');
-    expect(breedInputs[0]).toHaveValue('Labrador');
-    expect(nameInputs[1]).toHaveValue('Fido');
-    expect(breedInputs[1]).toHaveValue('Poodle');
+    await goToOwnerStep();
+    await userEvent.type(screen.getByPlaceholderText('(415) 555-0100'), '4155550100');
+    fireEvent.click(screen.getByText('Look up'));
+    await screen.findByText(/Info found/);
+    expect(screen.getByRole('spinbutton')).toHaveValue(2); // count grew to match, not left at 1
+    // this mock's client has no owner_name/owner_email - fill those
+    // manually so Continue's own validation isn't what's under test here
+    await userEvent.type(screen.getByPlaceholderText('Jane Smith'), 'Kim Miller');
+    await userEvent.type(screen.getByPlaceholderText('jane@email.com'), 'kim@test.com');
+
+    fireEvent.click(screen.getByText('Continue'));
+    await screen.findByText('Dog 1');
+    expect(screen.getByPlaceholderText('Buddy')).toHaveValue('Rex');
+    // lookup-client never returns aggression/health (re-confirmed fresh
+    // each stay, not carried forward) - still required to advance
+    let selects = document.querySelectorAll('select');
+    fireEvent.change(selects[1], { target: { value: 'no' } });
+    fireEvent.change(selects[2], { target: { value: 'no' } });
+    fireEvent.click(screen.getByText('Continue'));
+    await screen.findByText('Dog 2');
+    expect(screen.getByPlaceholderText('Buddy')).toHaveValue('Fido');
   });
 
-  test('handles an entirely empty returning-dog record without crashing', async () => {
+  test('does not autofill or show the banner when phone is not found', async () => {
+    await goToOwnerStep(); // default mock: { found: false }
+    await userEvent.type(screen.getByPlaceholderText('(415) 555-0100'), '4155559999');
+    fireEvent.click(screen.getByText('Look up'));
+    await waitFor(() => expect(supabase.functions.invoke).toHaveBeenCalled());
+    expect(screen.queryByText(/Info found/)).not.toBeInTheDocument();
+    expect(screen.getByPlaceholderText('Jane Smith')).toHaveValue('');
+  });
+
+  test('look up does nothing when phone field is empty', async () => {
+    await goToOwnerStep();
+    fireEvent.click(screen.getByText('Look up'));
+    expect(supabase.functions.invoke).not.toHaveBeenCalled();
+  });
+
+  test('handles an entirely empty lookup record without crashing', async () => {
+    // real records can have gaps (e.g. an older submission missing every
+    // field) - the `field || ''` fallbacks exist for exactly this case, so
+    // controlled inputs never receive null/undefined
     supabase.functions.invoke.mockResolvedValueOnce({ data: { found: true, client: {} }, error: null });
+    await goToOwnerStep();
+    await userEvent.type(screen.getByPlaceholderText('(415) 555-0100'), '4155550100');
+    fireEvent.click(screen.getByText('Look up'));
+    await screen.findByText(/Info found/);
+    expect(screen.getByPlaceholderText('Jane Smith')).toHaveValue('');
+    expect(screen.getByPlaceholderText('jane@email.com')).toHaveValue('');
+    expect(screen.getByDisplayValue('Select a Vet')).toBeInTheDocument();
+    expect(screen.getByRole('spinbutton')).toHaveValue(1);
+  });
+});
+
+// ── Dog pages ────────────────────────────────────────────────────────────────
+describe('Dog pages', () => {
+  test('shows required errors (including the aggression/health warning) when submitting an empty dog form', async () => {
     await fillStep1();
-    await waitFor(() => expect(supabase.functions.invoke).toHaveBeenCalled()); // let the on-mount lookup actually resolve
-    expect(screen.getByPlaceholderText('Buddy')).toHaveValue('');
-    expect(screen.getByPlaceholderText('Golden Retriever')).toHaveValue('');
-    expect(screen.getByDisplayValue('Select a veterinarian')).toBeInTheDocument();
+    fireEvent.click(screen.getByText('Continue'));
+    // name, breed, dob, spayNeuter
+    expect(await screen.findAllByText('Required')).toHaveLength(4);
+    // aggressionHistory, healthConcerns - previously silent even though
+    // required; now warn the user so they know to fill them in
+    expect(screen.getAllByText('Please select an answer')).toHaveLength(2);
+  });
+
+  test('warns independently - answering one still warns about the other', async () => {
+    await fillStep1();
+    await userEvent.type(screen.getByPlaceholderText('Buddy'), 'Rex');
+    await userEvent.type(screen.getByPlaceholderText('Golden Retriever'), 'Labrador');
+    fireEvent.change(document.querySelector('input[type="date"]'), { target: { value: '2020-01-01' } });
+    const selects = document.querySelectorAll('select');
+    fireEvent.change(selects[0], { target: { value: 'yes' } }); // spayNeuter
+    fireEvent.change(selects[2], { target: { value: 'no' } });  // health answered, aggression left blank
+    fireEvent.click(screen.getByText('Continue'));
+    expect(await screen.findAllByText('Please select an answer')).toHaveLength(1);
+  });
+
+  test('calculates age from DOB', async () => {
+    await fillStep1();
+    const dobInput = document.querySelector('input[type="date"]');
+    fireEvent.change(dobInput, { target: { value: isoMonthsAgo(36) } });
+    expect(await screen.findByText('Age: 3 years')).toBeInTheDocument();
   });
 
   test('reveals the aggression detail field when "Yes" is selected, and accepts text', async () => {
     await fillStep1();
     const selects = document.querySelectorAll('select');
-    fireEvent.change(selects[2], { target: { value: 'yes' } }); // aggression
+    fireEvent.change(selects[1], { target: { value: 'yes' } }); // aggression
     const detail = await screen.findByPlaceholderText(/known triggers/);
     await userEvent.type(detail, 'Growls at squirrels');
     expect(detail).toHaveValue('Growls at squirrels');
@@ -475,7 +547,7 @@ describe('Step 2 — Dog Info', () => {
   test('reveals the health detail field when "Yes" is selected, and accepts text', async () => {
     await fillStep1();
     const selects = document.querySelectorAll('select');
-    fireEvent.change(selects[3], { target: { value: 'yes' } }); // health
+    fireEvent.change(selects[2], { target: { value: 'yes' } }); // health
     const detail = await screen.findByPlaceholderText(/conditions, limitations/);
     await userEvent.type(detail, 'Mild arthritis');
     expect(detail).toHaveValue('Mild arthritis');
@@ -488,22 +560,41 @@ describe('Step 2 — Dog Info', () => {
     expect(screen.getByPlaceholderText('Jane Smith')).toHaveValue('Kim Miller');
   });
 
-  test('Number of Dogs defaults to 1 and does not show a discount note', async () => {
-    await fillStep1();
-    expect(screen.getByRole('spinbutton')).toHaveValue(1);
-    expect(screen.queryByText(/off each additional dog/)).not.toBeInTheDocument();
-  });
-
-  test('shows the multi-dog discount note once more than 1 dog is entered', async () => {
-    await fillStep1();
+  test('a 2nd dog gets its own page, titled "Dog 2"', async () => {
+    render(<App />);
+    fireEvent.click(screen.getByText('Book My Stay'));
+    await userEvent.type(screen.getByPlaceholderText('(415) 555-0100'), '4155550100');
+    await userEvent.type(screen.getByPlaceholderText('Jane Smith'), 'Kim Miller');
+    await userEvent.type(screen.getByPlaceholderText('jane@email.com'), 'kim@test.com');
+    fireEvent.change(screen.getByDisplayValue('Select a Vet'), { target: { value: 'Marin Pet Hospital — (415) 479-8387' } });
     fireEvent.change(screen.getByRole('spinbutton'), { target: { value: '2' } });
-    expect(await screen.findByText(/10% off each additional dog/)).toBeInTheDocument();
+    fireEvent.click(screen.getByText('Continue'));
+
+    await screen.findByText('Dog 1');
+    await fillDogPage({ name: 'Rex', breed: 'Labrador' });
+    expect(await screen.findByText('Dog 2')).toBeInTheDocument();
+    expect(screen.queryByText('Dog 1')).not.toBeInTheDocument();
+    // dog 1's data isn't lost - just off-screen, verified via a later test
+    // that submits a 2-dog booking and checks both dogs made it to the
+    // payload (see Step 5 - Signature)
   });
 
-  test('treats a cleared/invalid Number of Dogs input as 1', async () => {
-    await fillStep1();
-    fireEvent.change(screen.getByRole('spinbutton'), { target: { value: '' } });
-    expect(screen.getByRole('spinbutton')).toHaveValue(1);
+  test('Back from Dog 2 returns to Dog 1 with its data preserved', async () => {
+    render(<App />);
+    fireEvent.click(screen.getByText('Book My Stay'));
+    await userEvent.type(screen.getByPlaceholderText('(415) 555-0100'), '4155550100');
+    await userEvent.type(screen.getByPlaceholderText('Jane Smith'), 'Kim Miller');
+    await userEvent.type(screen.getByPlaceholderText('jane@email.com'), 'kim@test.com');
+    fireEvent.change(screen.getByDisplayValue('Select a Vet'), { target: { value: 'Marin Pet Hospital — (415) 479-8387' } });
+    fireEvent.change(screen.getByRole('spinbutton'), { target: { value: '2' } });
+    fireEvent.click(screen.getByText('Continue'));
+
+    await screen.findByText('Dog 1');
+    await fillDogPage({ name: 'Rex', breed: 'Labrador' });
+    await screen.findByText('Dog 2');
+    fireEvent.click(screen.getByText('Back'));
+    expect(await screen.findByText('Dog 1')).toBeInTheDocument();
+    expect(screen.getByPlaceholderText('Buddy')).toHaveValue('Rex');
   });
 });
 
@@ -529,6 +620,32 @@ describe('Step 3 — Stay Dates', () => {
     expect(await screen.findByText(/must be after check-in/)).toBeInTheDocument();
   });
 
+  test('rejects a check-in date in the past, even though the date input\'s min is only a UI hint', async () => {
+    await fillStep1();
+    await fillStep2();
+    const dateInputs = document.querySelectorAll('input[type="date"]');
+    fireEvent.change(dateInputs[0], { target: { value: daysFromToday(-1) } });
+    fireEvent.change(dateInputs[1], { target: { value: daysFromToday(1) } });
+    const timeInputs = document.querySelectorAll('input[type="time"]');
+    fireEvent.change(timeInputs[0], { target: { value: '09:00' } });
+    fireEvent.change(timeInputs[1], { target: { value: '09:00' } });
+    fireEvent.click(screen.getByText('Continue'));
+    expect(await screen.findByText('Check-in cannot be in the past')).toBeInTheDocument();
+  });
+
+  test('accepts a check-in of today', async () => {
+    await fillStep1();
+    await fillStep2();
+    const dateInputs = document.querySelectorAll('input[type="date"]');
+    fireEvent.change(dateInputs[0], { target: { value: daysFromToday(0) } });
+    fireEvent.change(dateInputs[1], { target: { value: daysFromToday(1) } });
+    const timeInputs = document.querySelectorAll('input[type="time"]');
+    fireEvent.change(timeInputs[0], { target: { value: '09:00' } });
+    fireEvent.change(timeInputs[1], { target: { value: '09:00' } });
+    fireEvent.click(screen.getByText('Continue'));
+    expect(await screen.findByText('Boarding Agreement')).toBeInTheDocument();
+  });
+
   test('shows an estimated cost once valid dates/times are entered', async () => {
     await fillStep1();
     await fillStep2();
@@ -549,34 +666,20 @@ describe('Step 3 — Stay Dates', () => {
     expect(notes).toHaveValue('Please give 1 cup of food twice a day.');
   });
 
-  test('estimated cost factors in the multi-dog discount set on Step 2', async () => {
-    // Since each dog now gets its own full intake block, growing "Number
-    // of Dogs" adds a second required block - fill both before Continue.
-    await fillStep1();
-    fireEvent.change(screen.getByDisplayValue('Select a veterinarian'), { target: { value: 'Marin Pet Hospital — (415) 479-8387' } });
+  test('estimated cost factors in the multi-dog discount set on the owner page', async () => {
+    render(<App />);
+    fireEvent.click(screen.getByText('Book My Stay'));
+    await userEvent.type(screen.getByPlaceholderText('(415) 555-0100'), '4155550100');
+    await userEvent.type(screen.getByPlaceholderText('Jane Smith'), 'Kim Miller');
+    await userEvent.type(screen.getByPlaceholderText('jane@email.com'), 'kim@test.com');
+    fireEvent.change(screen.getByDisplayValue('Select a Vet'), { target: { value: 'Marin Pet Hospital — (415) 479-8387' } });
     fireEvent.change(screen.getByRole('spinbutton'), { target: { value: '2' } });
-
-    const nameInputs = screen.getAllByPlaceholderText('Buddy');
-    const breedInputs = screen.getAllByPlaceholderText('Golden Retriever');
-    const dobInputs = document.querySelectorAll('input[type="date"]');
-    await userEvent.type(nameInputs[0], 'Rex');
-    await userEvent.type(breedInputs[0], 'Labrador');
-    fireEvent.change(dobInputs[0], { target: { value: '2020-01-01' } });
-    await userEvent.type(nameInputs[1], 'Fido');
-    await userEvent.type(breedInputs[1], 'Poodle');
-    fireEvent.change(dobInputs[1], { target: { value: '2021-06-01' } });
-
-    // selects[0] = vet (once, shared); each dog block then contributes 3
-    // selects of its own (spayNeuter, aggression, health).
-    const selects = document.querySelectorAll('select');
-    fireEvent.change(selects[1], { target: { value: 'yes' } }); // dog 1 spayNeuter
-    fireEvent.change(selects[2], { target: { value: 'no' } });  // dog 1 aggression
-    fireEvent.change(selects[3], { target: { value: 'no' } });  // dog 1 health
-    fireEvent.change(selects[4], { target: { value: 'yes' } }); // dog 2 spayNeuter
-    fireEvent.change(selects[5], { target: { value: 'no' } });  // dog 2 aggression
-    fireEvent.change(selects[6], { target: { value: 'no' } });  // dog 2 health
-
     fireEvent.click(screen.getByText('Continue'));
+
+    await screen.findByText('Dog 1');
+    await fillDogPage({ name: 'Rex', breed: 'Labrador', dob: '2020-01-01' });
+    await screen.findByText('Dog 2');
+    await fillDogPage({ name: 'Fido', breed: 'Poodle', dob: '2021-06-01' });
     await screen.findByText('Stay Dates');
 
     const dateInputs = document.querySelectorAll('input[type="date"]');
@@ -590,11 +693,11 @@ describe('Step 3 — Stay Dates', () => {
     expect(screen.getByText(/10% off each additional dog/)).toBeInTheDocument();
   });
 
-  test('Back returns to Step 2', async () => {
+  test('Back returns to Dog 1', async () => {
     await fillStep1();
     await fillStep2();
     fireEvent.click(screen.getByText('Back'));
-    expect(await screen.findByText('About Your Dog')).toBeInTheDocument();
+    expect(await screen.findByText('Dog 1')).toBeInTheDocument();
   });
 });
 
@@ -689,6 +792,36 @@ describe('Step 5 — Signature', () => {
     await waitFor(() => expect(consoleSpy).toHaveBeenCalledWith('Text send failed:', expect.any(Error)));
 
     consoleSpy.mockRestore();
+  });
+
+  test('a 2-dog booking submits both dogs\' data, each from its own page', async () => {
+    render(<App />);
+    fireEvent.click(screen.getByText('Book My Stay'));
+    await userEvent.type(screen.getByPlaceholderText('(415) 555-0100'), '4155550100');
+    await userEvent.type(screen.getByPlaceholderText('Jane Smith'), 'Kim Miller');
+    await userEvent.type(screen.getByPlaceholderText('jane@email.com'), 'kim@test.com');
+    fireEvent.change(screen.getByDisplayValue('Select a Vet'), { target: { value: 'Marin Pet Hospital — (415) 479-8387' } });
+    fireEvent.change(screen.getByRole('spinbutton'), { target: { value: '2' } });
+    fireEvent.click(screen.getByText('Continue'));
+
+    await screen.findByText('Dog 1');
+    await fillDogPage({ name: 'Rex', breed: 'Labrador', dob: '2020-01-01' });
+    await screen.findByText('Dog 2');
+    await fillDogPage({ name: 'Fido', breed: 'Poodle', dob: '2021-06-01' });
+    await fillStep3();
+    await fillStep4();
+
+    fireEvent.click(screen.getByRole('checkbox'));
+    await userEvent.type(screen.getByPlaceholderText('Kim Miller'), 'Kim Miller');
+    fireEvent.click(screen.getByText('Submit Agreement'));
+
+    await waitFor(() => expect(supabase.functions.invoke).toHaveBeenCalledWith('submit-booking', expect.any(Object)));
+    const call = supabase.functions.invoke.mock.calls.find(c => c[0] === 'submit-booking');
+    expect(call[1].body.dogs).toEqual([
+      expect.objectContaining({ name: 'Rex', breed: 'Labrador', dob: '2020-01-01' }),
+      expect.objectContaining({ name: 'Fido', breed: 'Poodle', dob: '2021-06-01' }),
+    ]);
+    expect(call[1].body.owner).toEqual(expect.objectContaining({ vetName: 'Marin Pet Hospital — (415) 479-8387' }));
   });
 });
 

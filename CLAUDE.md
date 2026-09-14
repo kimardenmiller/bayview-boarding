@@ -5,18 +5,23 @@ A React web app for Bayview Boarding, a home-based dog boarding business run by
 Kim Miller and Estee Fletter at 210 Bayview Drive, San Rafael, CA.
 
 ## What it does
-- Client intake form (5 steps: owner info, dog(s) info, stay dates, waiver, signature)
-- Full profile per dog (breed/DOB/spay-neuter/aggression/health) — Step 2
-  repeats one intake block per dog, driven by a "Number of Dogs" count; the
-  owner's info and vet are asked once and shared across all dogs on that
-  booking (Sept 14 dog-profiles reorg — see below)
+- Client intake form, a dynamic number of steps: owner info (name/phone/
+  email/vet/"Number of Dogs"), one full-profile page per dog ("Dog 1",
+  "Dog 2", ... — breed/DOB/spay-neuter/aggression/health), stay dates,
+  waiver, signature. Vet and dog count are asked once on the owner page,
+  not per dog (Sept 14 reorg, moved off the dog page Sept 15)
+- Aggression/health questions warn visibly if left blank (previously
+  required to advance but silently so - no message ever showed)
 - Electronic waiver with e-signature (legally binding under E-SIGN / UETA)
 - Supabase database saves all submissions
-- Phone-number-based returning client lookup — autofills the vet and every
-  known dog on file, growing the dog-block count to match
+- Phone-number-based returning client lookup (Owner page's "Look up"
+  button) — autofills name/email/vet and every known dog on file, growing
+  the dog-page count to match
 - Cost estimate based on drop-off/pick-up times at $105/day, +30% on holiday
   nights (computed algorithmically, see calcCost/getHolidayWindows in
   src/App.js), 10% off each additional dog's nightly rate (uncapped)
+- Past check-in dates are rejected, client-side (StepDates) and
+  server-side (submit-booking, the actual boundary)
 - Twilio SMS confirmation texts (pending A2P carrier approval)
 - Admin panel: browse by dog, each with its always-current profile and full
   stay history (each past stay shows its own frozen declared/signed
@@ -50,7 +55,7 @@ direct client insert — see supabase/functions/submit-booking/index.ts.
 - src/App.js — main app
 - src/settings.js — all configurable values (rates, vets, messages, packing list)
 - src/waiver.js — full waiver text
-- src/App.test.js — 75 passing tests (TDD), Supabase mocked via src/__mocks__/supabase.js
+- src/App.test.js — 81 passing tests (TDD), Supabase mocked via src/__mocks__/supabase.js
 - supabase/functions/submit-booking/index.ts — handles booking submission: find-or-create owner (by phone) and each dog (by owner+name), inserts the stay + stay_dogs snapshot links (service role key)
 - supabase/functions/send-confirmation/index.ts — Twilio SMS function (outbound)
 - supabase/functions/receive-sms/index.ts — inbound SMS webhook: auto-reply + relay to Kim/Estee. Deploy with `--no-verify-jwt` (see comment at top of file) or Twilio's webhook calls silently fail
