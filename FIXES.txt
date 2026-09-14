@@ -12,6 +12,10 @@ NEXT CHANGE LIST (v1.5)
    Admin triggers this manually from the stay detail view, or
    auto-sends at scheduled pickup time.
 
+3. Landing page — move the "Bayview Boarding" title up to the top 1/3
+   of the page (currently anchored near the bottom, just above "Book
+   My Stay"). Requested Sept 15, 2026, not yet started.
+
 DEFERRED (revisit only if it actually blocks something)
 ---------------------------------------------------------
 - Migrate off Create React App (react-scripts) to Vite. CRA was
