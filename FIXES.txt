@@ -16,6 +16,14 @@ NEXT CHANGE LIST (v1.5)
    of the page (currently anchored near the bottom, just above "Book
    My Stay"). Requested Sept 15, 2026, not yet started.
 
+4. SECURITY: revoke the Twilio API key Kim shared in chat earlier this
+   session for debugging (SK... SID, kept live "until we're done
+   debugging"). It's still active as of Sept 15, 2026 - go to Twilio
+   Console > Account > API keys & tokens and delete it once we're done
+   using it for the current campaign-status check. It has full account
+   access via the API and shouldn't be left live indefinitely just
+   because it happened to be useful once.
+
 DEFERRED (revisit only if it actually blocks something)
 ---------------------------------------------------------
 - Migrate off Create React App (react-scripts) to Vite. CRA was
