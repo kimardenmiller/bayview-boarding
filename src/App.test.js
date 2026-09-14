@@ -5,12 +5,38 @@ import { supabase } from './supabase';
 
 jest.mock('./supabase');
 
+// The booking flow now calls three different Edge Functions through the
+// same supabase.functions.invoke() - lookup-client (StepOwner's manual
+// button + StepDog's on-mount check), submit-booking (final submit), and
+// send-confirmation (the SMS after a successful submit) - so the mock
+// dispatches by function name rather than relying on call order, which
+// would break the moment more than one function is in play in a test.
+// `overrides` replaces the default for just the named function(s); pass
+// a fake implementation matching supabase-js's (fnName, opts) => Promise
+// shape.
+const DEFAULT_STAY = {
+  id: 'stay-1', check_in: '2026-10-01', check_out: '2026-10-05',
+  drop_time: '09:00:00', pickup_time: '09:00:00', estimated_cost: 420,
+  submitted_at: '2026-09-13T10:00:00Z',
+  owner_name: 'Kim Miller', owner_phone: '4155550100', dog_names: ['Rex'],
+};
+
+function mockInvokeDefaults(overrides = {}) {
+  supabase.functions.invoke.mockImplementation((fn, opts) => {
+    if (overrides[fn]) return overrides[fn](opts);
+    if (fn === 'lookup-client') return Promise.resolve({ data: { found: false }, error: null });
+    if (fn === 'submit-booking') return Promise.resolve({ data: { stay: DEFAULT_STAY }, error: null });
+    if (fn === 'send-confirmation') return Promise.resolve({ data: {}, error: null });
+    if (fn === 'admin-data') return Promise.resolve({ data: null, error: { message: 'not mocked in this test' } });
+    return Promise.resolve({ data: null, error: null });
+  });
+}
+
 // CRA's Jest config sets resetMocks: true, which wipes mock implementations
 // (not just call history) before every test — so defaults are re-applied
 // here each time rather than once at module scope.
 beforeEach(() => {
-  supabase.from.mockReturnValue({ insert: jest.fn().mockResolvedValue({ error: null }) });
-  supabase.functions.invoke.mockResolvedValue({ data: { found: false }, error: null });
+  mockInvokeDefaults();
   // Reset the URL before every test - admin tests opt in via goToAdminUrl(),
   // everything else should start from a plain, non-admin URL.
   window.history.pushState({}, '', '/');
@@ -71,29 +97,47 @@ async function fillThrough(phone, name, email) {
   await fillStep4();
 }
 
-const SAMPLE_STAYS = [
+// Shaped like admin-data's actual response: dogs (each with a current
+// profile, owner, and a `stays` array already sorted newest-first, where
+// each stay entry carries its own frozen snapshot of name/breed/dob/
+// aggression/health as declared for THAT stay - see admin-data/index.ts).
+// Bud's two stays deliberately have different dob/aggression snapshots
+// to exercise that distinction.
+const SAMPLE_DOGS = [
   {
-    dog_name: 'Bud', owner_name: 'Kim', owner_email: 'kim@test.com', owner_phone: '6505551111',
-    check_in: '2026-09-01', check_out: '2026-09-03', drop_time: '09:00:00', pickup_time: '17:00:00',
-    estimated_cost: 210, submitted_at: '2026-08-30T10:00:00Z', dog_dob: '2020-01-01',
-    notes: 'Loves belly rubs', aggression_history: 'no', aggression_detail: '',
+    id: 'dog-bud', name: 'Bud', breed: 'Labrador', dob: '2020-01-01',
+    spay_neuter: 'yes', aggression_history: 'no', aggression_detail: '',
     health_concerns: 'no', health_detail: '',
+    owner: { name: 'Kim', phone: '6505551111', email: 'kim@test.com' },
+    stays: [
+      {
+        id: 'stay-1', check_in: '2026-09-01', check_out: '2026-09-03', drop_time: '09:00:00', pickup_time: '17:00:00',
+        estimated_cost: 210, submitted_at: '2026-08-30T10:00:00Z', notes: 'Loves belly rubs', number_of_dogs: 1,
+        dob: '2020-01-01', aggression_history: 'no', aggression_detail: '', health_concerns: 'no', health_detail: '',
+      },
+      {
+        id: 'stay-3', check_in: '2026-06-01', check_out: '2026-06-02', drop_time: '09:00:00', pickup_time: '17:00:00',
+        estimated_cost: 105, submitted_at: '2026-05-30T10:00:00Z', notes: '', number_of_dogs: 1,
+        dob: null, aggression_history: 'no', aggression_detail: '', health_concerns: 'no', health_detail: '',
+      },
+    ],
   },
   {
-    dog_name: 'Choco', owner_name: 'Estee', owner_email: 'estee@test.com', owner_phone: '6505552222',
-    check_in: '2026-09-05', check_out: '2026-09-06', drop_time: '10:00:00', pickup_time: '12:00:00',
-    estimated_cost: null, submitted_at: '2026-08-31T10:00:00Z', dog_dob: null,
-    notes: '', aggression_history: 'yes', aggression_detail: 'Barks at mail carrier',
+    id: 'dog-choco', name: 'Choco', breed: 'Poodle', dob: null,
+    spay_neuter: 'no', aggression_history: 'yes', aggression_detail: 'Barks at mail carrier',
     health_concerns: 'yes', health_detail: 'Mild hip dysplasia',
-  },
-  {
-    dog_name: 'Bud', owner_name: 'Kim', owner_email: 'kim@test.com', owner_phone: '6505551111',
-    check_in: '2026-06-01', check_out: '2026-06-02', drop_time: '09:00:00', pickup_time: '17:00:00',
-    estimated_cost: 105, submitted_at: '2026-05-30T10:00:00Z', dog_dob: null,
-    notes: '', aggression_history: 'no', aggression_detail: '',
-    health_concerns: 'no', health_detail: '',
+    owner: { name: 'Estee', phone: '6505552222', email: 'estee@test.com' },
+    stays: [
+      {
+        id: 'stay-2', check_in: '2026-09-05', check_out: '2026-09-06', drop_time: '10:00:00', pickup_time: '12:00:00',
+        estimated_cost: null, submitted_at: '2026-08-31T10:00:00Z', notes: '', number_of_dogs: 1,
+        dob: null, aggression_history: 'yes', aggression_detail: 'Barks at mail carrier',
+        health_concerns: 'yes', health_detail: 'Mild hip dysplasia',
+      },
+    ],
   },
 ];
+const SAMPLE_TOTAL_STAYS = 3; // 2 (Bud) + 1 (Choco), independent of dog count
 
 // Admin has no visible button in the UI - reached only via a bookmarked
 // ?admin URL. Tests navigate there the same way a real bookmark would.
@@ -101,8 +145,8 @@ function goToAdminUrl() {
   window.history.pushState({}, '', '/?admin');
 }
 
-async function loginAsAdmin(stays = SAMPLE_STAYS) {
-  supabase.functions.invoke.mockResolvedValueOnce({ data: { stays }, error: null });
+async function loginAsAdmin(dogs = SAMPLE_DOGS, totalStays = SAMPLE_TOTAL_STAYS) {
+  mockInvokeDefaults({ 'admin-data': async () => ({ data: { dogs, totalStays }, error: null }) });
   goToAdminUrl();
   render(<App />);
   await userEvent.type(screen.getByPlaceholderText('Password'), 'correct-password');
@@ -364,21 +408,50 @@ describe('Step 2 — Dog Info', () => {
     expect(await screen.findByText('Age: 3 years')).toBeInTheDocument();
   });
 
-  test('autofills dog info on mount when the phone matches a returning client', async () => {
-    supabase.functions.invoke.mockResolvedValueOnce({
-      data: {
-        found: true,
-        client: {
-          dog_name: 'Rex', dog_breed: 'Labrador', dog_dob: '2020-01-01',
-          vet_name: 'Marin Pet Hospital — (415) 479-8387', spay_neuter: 'yes',
+  test('autofills dog info (and the once-per-booking vet) on mount when the phone matches a returning client', async () => {
+    mockInvokeDefaults({
+      'lookup-client': async () => ({
+        data: {
+          found: true,
+          client: {
+            vet_name: 'Marin Pet Hospital — (415) 479-8387',
+            dogs: [{ dog_name: 'Rex', dog_breed: 'Labrador', dog_dob: '2020-01-01', spay_neuter: 'yes' }],
+          },
         },
-      },
-      error: null,
+        error: null,
+      }),
     });
     await fillStep1();
     expect(await screen.findByPlaceholderText('Buddy')).toHaveValue('Rex');
     expect(screen.getByPlaceholderText('Golden Retriever')).toHaveValue('Labrador');
     expect(screen.getByDisplayValue('Marin Pet Hospital — (415) 479-8387')).toBeInTheDocument();
+  });
+
+  test('autofills every dog block for a returning owner with multiple dogs on file, growing the count', async () => {
+    mockInvokeDefaults({
+      'lookup-client': async () => ({
+        data: {
+          found: true,
+          client: {
+            vet_name: 'Marin Pet Hospital — (415) 479-8387',
+            dogs: [
+              { dog_name: 'Rex', dog_breed: 'Labrador', dog_dob: '2020-01-01', spay_neuter: 'yes' },
+              { dog_name: 'Fido', dog_breed: 'Poodle', dog_dob: '2021-06-01', spay_neuter: 'no' },
+            ],
+          },
+        },
+        error: null,
+      }),
+    });
+    await fillStep1();
+    expect(await screen.findByRole('spinbutton')).toHaveValue(2); // count grew to match, not left at 1
+    const nameInputs = screen.getAllByPlaceholderText('Buddy');
+    const breedInputs = screen.getAllByPlaceholderText('Golden Retriever');
+    expect(nameInputs).toHaveLength(2);
+    expect(nameInputs[0]).toHaveValue('Rex');
+    expect(breedInputs[0]).toHaveValue('Labrador');
+    expect(nameInputs[1]).toHaveValue('Fido');
+    expect(breedInputs[1]).toHaveValue('Poodle');
   });
 
   test('handles an entirely empty returning-dog record without crashing', async () => {
@@ -477,17 +550,32 @@ describe('Step 3 — Stay Dates', () => {
   });
 
   test('estimated cost factors in the multi-dog discount set on Step 2', async () => {
+    // Since each dog now gets its own full intake block, growing "Number
+    // of Dogs" adds a second required block - fill both before Continue.
     await fillStep1();
-    await userEvent.type(screen.getByPlaceholderText('Buddy'), 'Rex');
-    await userEvent.type(screen.getByPlaceholderText('Golden Retriever'), 'Labrador');
-    const dobInput = document.querySelector('input[type="date"]');
-    fireEvent.change(dobInput, { target: { value: '2020-01-01' } });
     fireEvent.change(screen.getByDisplayValue('Select a veterinarian'), { target: { value: 'Marin Pet Hospital — (415) 479-8387' } });
-    const selects = document.querySelectorAll('select');
-    fireEvent.change(selects[1], { target: { value: 'yes' } });
-    fireEvent.change(selects[2], { target: { value: 'no' } });
-    fireEvent.change(selects[3], { target: { value: 'no' } });
     fireEvent.change(screen.getByRole('spinbutton'), { target: { value: '2' } });
+
+    const nameInputs = screen.getAllByPlaceholderText('Buddy');
+    const breedInputs = screen.getAllByPlaceholderText('Golden Retriever');
+    const dobInputs = document.querySelectorAll('input[type="date"]');
+    await userEvent.type(nameInputs[0], 'Rex');
+    await userEvent.type(breedInputs[0], 'Labrador');
+    fireEvent.change(dobInputs[0], { target: { value: '2020-01-01' } });
+    await userEvent.type(nameInputs[1], 'Fido');
+    await userEvent.type(breedInputs[1], 'Poodle');
+    fireEvent.change(dobInputs[1], { target: { value: '2021-06-01' } });
+
+    // selects[0] = vet (once, shared); each dog block then contributes 3
+    // selects of its own (spayNeuter, aggression, health).
+    const selects = document.querySelectorAll('select');
+    fireEvent.change(selects[1], { target: { value: 'yes' } }); // dog 1 spayNeuter
+    fireEvent.change(selects[2], { target: { value: 'no' } });  // dog 1 aggression
+    fireEvent.change(selects[3], { target: { value: 'no' } });  // dog 1 health
+    fireEvent.change(selects[4], { target: { value: 'yes' } }); // dog 2 spayNeuter
+    fireEvent.change(selects[5], { target: { value: 'no' } });  // dog 2 aggression
+    fireEvent.change(selects[6], { target: { value: 'no' } });  // dog 2 health
+
     fireEvent.click(screen.getByText('Continue'));
     await screen.findByText('Stay Dates');
 
@@ -538,18 +626,24 @@ describe('Step 5 — Signature', () => {
     expect(screen.getByText('10/05/2026')).toBeInTheDocument();
     expect(screen.getByText('$420')).toBeInTheDocument(); // 4 nights (Oct 1-5) @ $105/day, Confirmation shows the raw number
 
-    // regression check for the v1.5.1 bug: submission must not depend on
-    // reading the inserted row back (insert().select() breaks under RLS
-    // that only grants anon INSERT, not SELECT)
-    expect(supabase.from).toHaveBeenCalledWith('stays');
-    const insertMock = supabase.from.mock.results[0].value.insert;
-    expect(insertMock).toHaveBeenCalled();
+    // Regression guard: submission goes through the submit-booking Edge
+    // Function (server-side find-or-create under the service role key),
+    // never a direct client insert - the owners/dogs/stays tables grant
+    // anon nothing at all (see the Sept 14 dog-profiles reorg).
+    expect(supabase.functions.invoke).toHaveBeenCalledWith('submit-booking', {
+      body: expect.objectContaining({
+        owner: expect.objectContaining({ name: 'Kim Miller', phone: '4155550100', email: 'kim@test.com' }),
+        dogs: [expect.objectContaining({ name: 'Rex', breed: 'Labrador' })],
+        checkIn: '2026-10-01',
+        checkOut: '2026-10-05',
+      }),
+    });
     expect(supabase.functions.invoke).toHaveBeenCalledWith('send-confirmation', expect.any(Object));
   });
 
   test('shows an alert and stays on the form when saving fails', async () => {
     const alertSpy = jest.spyOn(window, 'alert').mockImplementation(() => {});
-    supabase.from.mockReturnValueOnce({ insert: jest.fn().mockResolvedValue({ error: { message: 'db down' } }) });
+    mockInvokeDefaults({ 'submit-booking': async () => ({ data: null, error: { message: 'db down' } }) });
 
     await fillThrough();
     fireEvent.click(screen.getByRole('checkbox'));
@@ -584,11 +678,9 @@ describe('Step 5 — Signature', () => {
 
   test('still shows the confirmation screen even if the confirmation text fails to send', async () => {
     const consoleSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+    mockInvokeDefaults({ 'send-confirmation': async () => { throw new Error('twilio down'); } });
 
-    await fillThrough(); // StepDog's on-mount lookup consumes the default mock here
-    // only *now* does the queued rejection apply to the next invoke() call,
-    // which will be the send-confirmation call inside handleSubmit
-    supabase.functions.invoke.mockRejectedValueOnce(new Error('twilio down'));
+    await fillThrough();
     fireEvent.click(screen.getByRole('checkbox'));
     await userEvent.type(screen.getByPlaceholderText('Kim Miller'), 'Kim Miller');
     fireEvent.click(screen.getByText('Submit Agreement'));
@@ -619,12 +711,12 @@ describe('Admin login', () => {
   });
 
   test('shows the singular label for exactly one record', async () => {
-    await loginAsAdmin([SAMPLE_STAYS[0]]);
+    await loginAsAdmin([{ ...SAMPLE_DOGS[0], stays: [SAMPLE_DOGS[0].stays[0]] }], 1);
     expect(screen.getByText('1 signed agreement on file')).toBeInTheDocument();
   });
 
   test('shows an empty state when there are no records', async () => {
-    await loginAsAdmin([]);
+    await loginAsAdmin([], 0);
     expect(screen.getByText('No records found.')).toBeInTheDocument();
   });
 
@@ -636,7 +728,7 @@ describe('Admin login', () => {
   });
 
   test('pressing Enter in the password field submits it', async () => {
-    supabase.functions.invoke.mockResolvedValueOnce({ data: { stays: SAMPLE_STAYS }, error: null });
+    mockInvokeDefaults({ 'admin-data': async () => ({ data: { dogs: SAMPLE_DOGS, totalStays: SAMPLE_TOTAL_STAYS }, error: null }) });
     goToAdminUrl();
     render(<App />);
     await userEvent.type(screen.getByPlaceholderText('Password'), 'correct-password{Enter}');
@@ -671,7 +763,9 @@ describe('Admin — logged in', () => {
     await loginAsAdmin();
     fireEvent.click(screen.getByText('Bud'));
     expect(await screen.findByRole('heading', { name: 'Bud' })).toBeInTheDocument();
-    expect(screen.getByText('Kim')).toBeInTheDocument();
+    // owner name shares a line with the dog's current breed/age, so this
+    // is a partial match rather than the line's full text
+    expect(screen.getByText(/Kim/)).toBeInTheDocument();
     expect(screen.getByText('Est. $210')).toBeInTheDocument();
     expect(screen.getByText(/Loves belly rubs/)).toBeInTheDocument();
     expect(screen.getByText(/DOB:/)).toBeInTheDocument();

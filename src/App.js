@@ -223,6 +223,17 @@ function StepOwner({ data, onChange, onNext }) {
   );
 }
 
+function emptyDog() {
+  return {
+    name: '', breed: '', dob: '', spayNeuter: '',
+    aggressionHistory: '', aggressionDetail: '',
+    healthConcerns: '', healthDetail: '',
+  };
+}
+
+// Owner info and the vet are asked once per booking, not once per dog
+// (Sept 14 scope decision) - only these per-dog fields repeat, one block
+// per entry in data.dogs, driven by the "Number of Dogs" count.
 function StepDog({ data, onChange, onNext, onBack }) {
   const [errors, setErrors] = useState({});
 
@@ -233,95 +244,128 @@ function StepDog({ data, onChange, onNext, onBack }) {
     });
     if (result?.found) {
       const r = result.client;
-      onChange('dogName', r.dog_name || '');
-      onChange('dogBreed', r.dog_breed || '');
-      onChange('dogDob', r.dog_dob || '');
-      onChange('vetName', r.vet_name || '');
-      onChange('spayNeuter', r.spay_neuter || '');
+      if (r.vet_name) onChange('vetName', r.vet_name);
+      if (r.dogs && r.dogs.length > 0) {
+        // Grow the block count to match every known dog, not just slot 0 -
+        // a returning owner with 2 dogs on file should see both prefilled
+        // without having to know to bump "Number of Dogs" first.
+        const base = data.dogs.slice(0, Math.max(data.dogs.length, r.dogs.length));
+        while (base.length < r.dogs.length) base.push(emptyDog());
+        onChange('dogs', base.map((dog, i) => {
+          const rd = r.dogs[i];
+          if (!rd) return dog;
+          return {
+            ...dog,
+            name: rd.dog_name || dog.name,
+            breed: rd.dog_breed || dog.breed,
+            dob: rd.dog_dob || dog.dob,
+            spayNeuter: rd.spay_neuter || dog.spayNeuter,
+          };
+        }));
+      }
     }
   }
 
   useState(() => { lookupDog(data.ownerPhone); }, []);
 
+  function updateDog(index, field, value) {
+    onChange('dogs', data.dogs.map((d, i) => i === index ? { ...d, [field]: value } : d));
+  }
+
+  function setDogCount(n) {
+    const count = Math.max(1, n || 1);
+    const next = data.dogs.slice(0, count);
+    while (next.length < count) next.push(emptyDog());
+    onChange('dogs', next);
+  }
+
   function validate() {
     const e = {};
-    if (!data.dogName.trim()) e.dogName = 'Required';
-    if (!data.dogBreed.trim()) e.dogBreed = 'Required';
-    if (!data.dogDob) e.dogDob = 'Required';
     if (!data.vetName || data.vetName === 'Select a veterinarian') e.vetName = 'Required';
-    if (!data.spayNeuter) e.spayNeuter = 'Required';
-    if (!data.aggressionHistory) e.aggressionHistory = 'Required';
-    if (!data.healthConcerns) e.healthConcerns = 'Required';
+    data.dogs.forEach((dog, i) => {
+      if (!dog.name.trim()) e[`dog${i}Name`] = 'Required';
+      if (!dog.breed.trim()) e[`dog${i}Breed`] = 'Required';
+      if (!dog.dob) e[`dog${i}Dob`] = 'Required';
+      if (!dog.spayNeuter) e[`dog${i}SpayNeuter`] = 'Required';
+      if (!dog.aggressionHistory) e[`dog${i}Aggression`] = 'Required';
+      if (!dog.healthConcerns) e[`dog${i}Health`] = 'Required';
+    });
     setErrors(e);
     return Object.keys(e).length === 0;
   }
 
-  const age = calcAge(data.dogDob);
-
   return (
     <div className="step">
-      <h2 className="step-title">About Your Dog</h2>
-      <Field label="Dog's Name" error={errors.dogName}>
-        <input value={data.dogName} onChange={e => onChange('dogName', e.target.value)} placeholder="Buddy" />
-      </Field>
-      <Field label="Breed" error={errors.dogBreed}>
-        <input value={data.dogBreed} onChange={e => onChange('dogBreed', e.target.value)} placeholder="Golden Retriever" />
-      </Field>
-      <Field label="Date of Birth" error={errors.dogDob}>
-        <input type="date" value={data.dogDob} max={todayISO()} onChange={e => onChange('dogDob', e.target.value)} />
-        {age && <div style={{ fontSize: '0.78rem', color: '#7D9B76', marginTop: 4 }}>Age: {age}</div>}
-      </Field>
+      <h2 className="step-title">About Your Dog{data.dogs.length > 1 ? 's' : ''}</h2>
       <Field label="Veterinarian" error={errors.vetName}>
         <select value={data.vetName} onChange={e => onChange('vetName', e.target.value)}>
           {SAN_RAFAEL_VETS.map((v, i) => <option key={i} value={v}>{v}</option>)}
         </select>
       </Field>
-      <Field label="Spayed / Neutered?" error={errors.spayNeuter}>
-        <select value={data.spayNeuter} onChange={e => onChange('spayNeuter', e.target.value)}>
-          <option value="">Select one</option>
-          <option value="yes">Yes</option>
-          <option value="no">No (over 1 year)</option>
-          <option value="under1">Not yet (under 1 year)</option>
-        </select>
-      </Field>
-      <Field label="Any aggression history toward people or dogs?">
-        <select value={data.aggressionHistory} onChange={e => onChange('aggressionHistory', e.target.value)}>
-          <option value="">Select one</option>
-          <option value="no">No</option>
-          <option value="yes">Yes — I'll describe below</option>
-        </select>
-      </Field>
-      {data.aggressionHistory === 'yes' && (
-        <Field label="Please describe">
-          <textarea value={data.aggressionDetail} onChange={e => onChange('aggressionDetail', e.target.value)} rows={3} placeholder="Describe any known triggers or incidents" />
-        </Field>
-      )}
-      <Field label="Any health conditions or heat sensitivity?">
-        <select value={data.healthConcerns} onChange={e => onChange('healthConcerns', e.target.value)}>
-          <option value="">Select one</option>
-          <option value="no">No</option>
-          <option value="yes">Yes — I'll describe below</option>
-        </select>
-      </Field>
-      {data.healthConcerns === 'yes' && (
-        <Field label="Please describe">
-          <textarea value={data.healthDetail} onChange={e => onChange('healthDetail', e.target.value)} rows={3} placeholder="Describe any conditions, limitations, or sensitivities" />
-        </Field>
-      )}
       <Field label="Number of Dogs">
         <input
           type="number"
           min="1"
           step="1"
-          value={data.numberOfDogs}
-          onChange={e => onChange('numberOfDogs', Math.max(1, parseInt(e.target.value, 10) || 1))}
+          value={data.dogs.length}
+          onChange={e => setDogCount(parseInt(e.target.value, 10))}
         />
-        {data.numberOfDogs > 1 && (
+        {data.dogs.length > 1 && (
           <div style={{ fontSize: '0.78rem', color: '#7D9B76', marginTop: 4 }}>
-            {MULTI_DOG_DISCOUNT * 100}% off each additional dog's nightly rate. Full intake for dogs 2+ is collected at drop-off.
+            {MULTI_DOG_DISCOUNT * 100}% off each additional dog's nightly rate.
           </div>
         )}
       </Field>
+      {data.dogs.map((dog, i) => {
+        const age = calcAge(dog.dob);
+        return (
+          <div className="dog-block" key={i}>
+            {data.dogs.length > 1 && <h3 className="dog-block-title">Dog {i + 1}</h3>}
+            <Field label="Dog's Name" error={errors[`dog${i}Name`]}>
+              <input value={dog.name} onChange={e => updateDog(i, 'name', e.target.value)} placeholder="Buddy" />
+            </Field>
+            <Field label="Breed" error={errors[`dog${i}Breed`]}>
+              <input value={dog.breed} onChange={e => updateDog(i, 'breed', e.target.value)} placeholder="Golden Retriever" />
+            </Field>
+            <Field label="Date of Birth" error={errors[`dog${i}Dob`]}>
+              <input type="date" value={dog.dob} max={todayISO()} onChange={e => updateDog(i, 'dob', e.target.value)} />
+              {age && <div style={{ fontSize: '0.78rem', color: '#7D9B76', marginTop: 4 }}>Age: {age}</div>}
+            </Field>
+            <Field label="Spayed / Neutered?" error={errors[`dog${i}SpayNeuter`]}>
+              <select value={dog.spayNeuter} onChange={e => updateDog(i, 'spayNeuter', e.target.value)}>
+                <option value="">Select one</option>
+                <option value="yes">Yes</option>
+                <option value="no">No (over 1 year)</option>
+                <option value="under1">Not yet (under 1 year)</option>
+              </select>
+            </Field>
+            <Field label="Any aggression history toward people or dogs?">
+              <select value={dog.aggressionHistory} onChange={e => updateDog(i, 'aggressionHistory', e.target.value)}>
+                <option value="">Select one</option>
+                <option value="no">No</option>
+                <option value="yes">Yes — I'll describe below</option>
+              </select>
+            </Field>
+            {dog.aggressionHistory === 'yes' && (
+              <Field label="Please describe">
+                <textarea value={dog.aggressionDetail} onChange={e => updateDog(i, 'aggressionDetail', e.target.value)} rows={3} placeholder="Describe any known triggers or incidents" />
+              </Field>
+            )}
+            <Field label="Any health conditions or heat sensitivity?">
+              <select value={dog.healthConcerns} onChange={e => updateDog(i, 'healthConcerns', e.target.value)}>
+                <option value="">Select one</option>
+                <option value="no">No</option>
+                <option value="yes">Yes — I'll describe below</option>
+              </select>
+            </Field>
+            {dog.healthConcerns === 'yes' && (
+              <Field label="Please describe">
+                <textarea value={dog.healthDetail} onChange={e => updateDog(i, 'healthDetail', e.target.value)} rows={3} placeholder="Describe any conditions, limitations, or sensitivities" />
+              </Field>
+            )}
+          </div>
+        );
+      })}
       <div className="step-actions">
         <button className="btn-secondary" onClick={onBack}>Back</button>
         <button className="btn-primary" onClick={() => validate() && onNext()}>Continue</button>
@@ -344,7 +388,7 @@ function StepDates({ data, onChange, onNext, onBack, rate }) {
     return Object.keys(e).length === 0;
   }
 
-  const cost = calcCost(data.checkIn, data.checkOut, data.dropTime, data.pickupTime, rate, data.numberOfDogs);
+  const cost = calcCost(data.checkIn, data.checkOut, data.dropTime, data.pickupTime, rate, data.dogs.length);
 
   return (
     <div className="step">
@@ -371,7 +415,7 @@ function StepDates({ data, onChange, onNext, onBack, rate }) {
           <strong>${cost}</strong>
           <div className="cost-note">
             Based on ${rate}/day · 24-hour minimum · +{HOLIDAY_UPCHARGE * 100}% on holidays
-            {data.numberOfDogs > 1 && ` · ${MULTI_DOG_DISCOUNT * 100}% off each additional dog`}
+            {data.dogs.length > 1 && ` · ${MULTI_DOG_DISCOUNT * 100}% off each additional dog`}
             {' '}· Final invoice at pickup
           </div>
         </div>
@@ -482,7 +526,8 @@ function AdminView({ onClose, rate, setRate }) {
   const [pw, setPw] = useState('');
   const [authed, setAuthed] = useState(false);
   const [error, setError] = useState('');
-  const [stays, setStays] = useState([]);
+  const [dogs, setDogs] = useState([]);
+  const [totalStays, setTotalStays] = useState(0);
   const [search, setSearch] = useState('');
   const [selected, setSelected] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -495,12 +540,13 @@ function AdminView({ onClose, rate, setRate }) {
       body: { password: pw },
     });
     setLoading(false);
-    if (fnError || !result?.stays) {
+    if (fnError || !result?.dogs) {
       setError('Incorrect password');
       return;
     }
     setAuthed(true);
-    setStays(result.stays);
+    setDogs(result.dogs);
+    setTotalStays(result.totalStays || 0);
   }
 
   if (!authed) {
@@ -519,22 +565,16 @@ function AdminView({ onClose, rate, setRate }) {
     );
   }
 
-  const filtered = stays.filter(s =>
-    s.dog_name?.toLowerCase().includes(search.toLowerCase()) ||
-    s.owner_name?.toLowerCase().includes(search.toLowerCase())
+  const filtered = dogs.filter(d =>
+    d.name?.toLowerCase().includes(search.toLowerCase()) ||
+    d.owner?.name?.toLowerCase().includes(search.toLowerCase())
   );
 
-  const byDog = {};
-  filtered.forEach(s => {
-    const key = `${s.dog_name}|${s.owner_name}`;
-    if (!byDog[key]) byDog[key] = { dogName: s.dog_name, ownerName: s.owner_name, stays: [] };
-    byDog[key].stays.push(s);
-  });
-  const dogs = Object.values(byDog);
-
   if (selected) {
-    const dogStays = stays.filter(s => s.dog_name === selected.dogName && s.owner_name === selected.ownerName)
-      .sort((a, b) => new Date(b.check_in) - new Date(a.check_in));
+    // selected.stays is each stay's frozen per-booking snapshot (what was
+    // declared/signed at the time), already sorted newest-first by
+    // admin-data - deliberately distinct from selected.* below, which is
+    // the dog's always-current profile.
     return (
       <div className="admin-overlay">
         <div className="admin-panel">
@@ -542,10 +582,14 @@ function AdminView({ onClose, rate, setRate }) {
             <button className="back-btn" onClick={() => setSelected(null)}>← All Dogs</button>
             <button className="close-btn" onClick={onClose}>✕</button>
           </div>
-          <h2>{selected.dogName}</h2>
-          <p className="admin-owner">{selected.ownerName}</p>
+          <h2>{selected.name}</h2>
+          <p className="admin-owner">
+            {selected.owner?.name}
+            {selected.breed && ` · ${selected.breed}`}
+            {selected.dob && ` · ${calcAge(selected.dob)} old`}
+          </p>
           <div className="stay-history">
-            {dogStays.map((s, i) => (
+            {selected.stays.map((s, i) => (
               <div key={i} className="stay-card">
                 <div className="stay-dates">
                   <span>{formatDate(s.check_in)} {s.drop_time?.slice(0,5)}</span>
@@ -554,8 +598,8 @@ function AdminView({ onClose, rate, setRate }) {
                 </div>
                 {s.estimated_cost && <div className="stay-cost">Est. ${s.estimated_cost}</div>}
                 {s.number_of_dogs > 1 && <div className="stay-meta">{s.number_of_dogs} dogs</div>}
-                <div className="stay-meta">Signed {formatDate(s.submitted_at?.slice(0,10))} · {s.owner_email} · {s.owner_phone}</div>
-                {s.dog_dob && <div className="stay-meta">DOB: {formatDate(s.dog_dob)} · Age at stay: {calcAge(s.dog_dob)}</div>}
+                <div className="stay-meta">Signed {formatDate(s.submitted_at?.slice(0,10))} · {selected.owner?.email} · {selected.owner?.phone}</div>
+                {s.dob && <div className="stay-meta">DOB: {formatDate(s.dob)} · Age at stay: {calcAge(s.dob)}</div>}
                 {s.notes && <div className="stay-notes">"{s.notes}"</div>}
                 {s.aggression_history === 'yes' && <div className="stay-flag">⚠ Aggression noted: {s.aggression_detail}</div>}
                 {s.health_concerns === 'yes' && <div className="stay-flag">⚕ Health note: {s.health_detail}</div>}
@@ -584,14 +628,14 @@ function AdminView({ onClose, rate, setRate }) {
           <div style={{ fontSize: '0.75rem', color: '#6B7A8A', marginTop: 4 }}>24-hour minimum · Current rate: ${rate}/day</div>
         </div>
         <input className="search-input" placeholder="Search by dog or owner name..." value={search} onChange={e => setSearch(e.target.value)} />
-        <div className="admin-count">{loading ? 'Loading...' : `${stays.length} signed agreement${stays.length !== 1 ? 's' : ''} on file`}</div>
-        {dogs.length === 0 && !loading && <p className="empty">No records found.</p>}
+        <div className="admin-count">{loading ? 'Loading...' : `${totalStays} signed agreement${totalStays !== 1 ? 's' : ''} on file`}</div>
+        {filtered.length === 0 && !loading && <p className="empty">No records found.</p>}
         <div className="dog-list">
-          {dogs.map((d, i) => (
+          {filtered.map((d, i) => (
             <div key={i} className="dog-row" onClick={() => setSelected(d)}>
               <div className="dog-row-left">
-                <div className="dog-row-name">{d.dogName}</div>
-                <div className="dog-row-owner">{d.ownerName}</div>
+                <div className="dog-row-name">{d.name}</div>
+                <div className="dog-row-owner">{d.owner?.name}</div>
               </div>
               <div className="dog-row-right">
                 <span className="stay-count">{d.stays.length} stay{d.stays.length !== 1 ? 's' : ''}</span>
@@ -630,65 +674,76 @@ export default function App() {
   const [currentStay, setCurrentStay] = useState(null);
   const [rate, setRate] = useState(DEFAULT_RATE);
 
-  const [form, setForm] = useState({
-    ownerName: '', ownerPhone: '', ownerEmail: '',
-    emergencyName: '', emergencyPhone: '',
-    dogName: '', dogBreed: '', dogDob: '',
-    vetName: 'Select a veterinarian', spayNeuter: '',
-    aggressionHistory: '', aggressionDetail: '',
-    healthConcerns: '', healthDetail: '',
-    numberOfDogs: 1,
-    checkIn: '', checkOut: '', dropTime: '', pickupTime: '', notes: '',
-    agreed: false, signature: '',
-  });
+  function emptyForm() {
+    return {
+      ownerName: '', ownerPhone: '', ownerEmail: '',
+      vetName: 'Select a veterinarian',
+      dogs: [emptyDog()],
+      checkIn: '', checkOut: '', dropTime: '', pickupTime: '', notes: '',
+      agreed: false, signature: '',
+    };
+  }
+
+  const [form, setForm] = useState(emptyForm);
 
   function update(key, val) { setForm(f => ({ ...f, [key]: val })); }
 
   async function handleSubmit() {
     setSubmitting(true);
-    const cost = calcCost(form.checkIn, form.checkOut, form.dropTime, form.pickupTime, rate, form.numberOfDogs);
-    const record = {
-      owner_name: form.ownerName,
-      owner_phone: form.ownerPhone,
-      owner_email: form.ownerEmail.toLowerCase(),
-      emergency_name: form.emergencyName,
-      emergency_phone: form.emergencyPhone,
-      dog_name: form.dogName,
-      dog_breed: form.dogBreed,
-      dog_dob: form.dogDob || null,
-      vet_name: form.vetName,
-      spay_neuter: form.spayNeuter,
-      aggression_history: form.aggressionHistory,
-      aggression_detail: form.aggressionDetail,
-      health_concerns: form.healthConcerns,
-      health_detail: form.healthDetail,
-      number_of_dogs: form.numberOfDogs,
-      check_in: form.checkIn,
-      check_out: form.checkOut,
-      drop_time: form.dropTime || null,
-      pickup_time: form.pickupTime || null,
-      estimated_cost: cost ? parseFloat(cost) : null,
+    const cost = calcCost(form.checkIn, form.checkOut, form.dropTime, form.pickupTime, rate, form.dogs.length);
+    const payload = {
+      owner: {
+        name: form.ownerName,
+        phone: form.ownerPhone,
+        email: form.ownerEmail.toLowerCase(),
+        vetName: form.vetName,
+      },
+      dogs: form.dogs.map(d => ({
+        name: d.name,
+        breed: d.breed,
+        dob: d.dob || null,
+        spayNeuter: d.spayNeuter,
+        aggressionHistory: d.aggressionHistory,
+        aggressionDetail: d.aggressionDetail,
+        healthConcerns: d.healthConcerns,
+        healthDetail: d.healthDetail,
+      })),
+      checkIn: form.checkIn,
+      checkOut: form.checkOut,
+      dropTime: form.dropTime || null,
+      pickupTime: form.pickupTime || null,
       notes: form.notes,
+      estimatedCost: cost ? parseFloat(cost) : null,
       signature: form.signature,
-      submitted_at: new Date().toISOString(),
+      clientTimezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
     };
-    const { error } = await supabase.from('stays').insert([record]);
+    const { data: result, error } = await supabase.functions.invoke('submit-booking', { body: payload });
     setSubmitting(false);
-    if (!error) {
-      setCurrentStay(record);
+    if (!error && result?.stay) {
+      const stay = result.stay;
+      const confirmation = {
+        owner_name: stay.owner_name,
+        dog_name: stay.dog_names.join(' & '),
+        check_in: stay.check_in,
+        check_out: stay.check_out,
+        drop_time: stay.drop_time,
+        pickup_time: stay.pickup_time,
+        estimated_cost: stay.estimated_cost,
+      };
+      setCurrentStay(confirmation);
       setSubmitted(true);
       // Send confirmation text
       try {
         await supabase.functions.invoke('send-confirmation', {
           body: {
-            owner_name: record.owner_name,
-            owner_phone: record.owner_phone,
-            dog_name: record.dog_name,
-            check_in: record.check_in,
-            check_out: record.check_out,
-            drop_time: record.drop_time,
-            pickup_time: record.pickup_time,
-            estimated_cost: record.estimated_cost,
+            owner_name: confirmation.owner_name,
+            owner_phone: form.ownerPhone,
+            dog_name: confirmation.dog_name,
+            check_in: confirmation.check_in,
+            check_out: confirmation.check_out,
+            drop_time: confirmation.drop_time,
+            pickup_time: confirmation.pickup_time,
+            estimated_cost: confirmation.estimated_cost,
           }
         });
       } catch (textErr) {
@@ -700,16 +755,7 @@ export default function App() {
   }
 
   function reset() {
-    setForm({
-      ownerName: '', ownerPhone: '', ownerEmail: '',
-      emergencyName: '', emergencyPhone: '',
-      dogName: '', dogBreed: '', dogDob: '',
-      vetName: 'Select a veterinarian', spayNeuter: '',
-      aggressionHistory: '', aggressionDetail: '',
-      healthConcerns: '', healthDetail: '',
-      checkIn: '', checkOut: '', dropTime: '', pickupTime: '', notes: '',
-      agreed: false, signature: '',
-    });
+    setForm(emptyForm());
     setStep(0); setSubmitted(false); setCurrentStay(null);
   }
 

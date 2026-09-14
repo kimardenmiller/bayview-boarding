@@ -5,18 +5,38 @@ A React web app for Bayview Boarding, a home-based dog boarding business run by
 Kim Miller and Estee Fletter at 210 Bayview Drive, San Rafael, CA.
 
 ## What it does
-- Client intake form (5 steps: owner info, dog info, stay dates, waiver, signature)
+- Client intake form (5 steps: owner info, dog(s) info, stay dates, waiver, signature)
+- Full profile per dog (breed/DOB/spay-neuter/aggression/health) — Step 2
+  repeats one intake block per dog, driven by a "Number of Dogs" count; the
+  owner's info and vet are asked once and shared across all dogs on that
+  booking (Sept 14 dog-profiles reorg — see below)
 - Electronic waiver with e-signature (legally binding under E-SIGN / UETA)
 - Supabase database saves all submissions
-- Phone-number-based returning client lookup
+- Phone-number-based returning client lookup — autofills the vet and every
+  known dog on file, growing the dog-block count to match
 - Cost estimate based on drop-off/pick-up times at $105/day, +30% on holiday
   nights (computed algorithmically, see calcCost/getHolidayWindows in
-  src/App.js), 10% off each additional dog's nightly rate (uncapped) via a
-  "Number of Dogs" field on Step 2 — full intake is still collected for the
-  primary dog only
+  src/App.js), 10% off each additional dog's nightly rate (uncapped)
 - Twilio SMS confirmation texts (pending A2P carrier approval)
-- Admin panel with stay history per dog, reached only via a bookmarked URL
-  (?admin) — no visible Admin button in the UI
+- Admin panel: browse by dog, each with its always-current profile and full
+  stay history (each past stay shows its own frozen declared/signed
+  snapshot, not just the dog's latest profile — see Data model below).
+  Reached only via a bookmarked URL (?admin) — no visible Admin button in
+  the UI
+
+## Data model (Sept 14, 2026 reorg)
+`owners` (by phone) → `dogs` (owner's always-current profile) → `stays`
+(one per booking) ← `stay_dogs` (join table; which dogs were on a stay,
+each carrying its OWN frozen snapshot of that dog's profile as declared
+and signed for that specific booking — deliberately separate from `dogs`,
+since a later booking can update the profile without rewriting history).
+The pre-reorg flat `stays` table (one row per booking, one dog's full
+profile embedded directly) is kept as `stays_legacy` for reference; see
+supabase/migrations/20260914000000_dog_profiles_reorg.sql for the full
+rationale and the backfill that migrated existing data into the new shape.
+Since find-or-create-by-phone/name needs a SELECT anon doesn't have, all
+booking writes go through submit-booking (service role key) instead of a
+direct client insert — see supabase/functions/submit-booking/index.ts.
 
 ## Tech stack
 - React (Create React App)
@@ -30,13 +50,14 @@ Kim Miller and Estee Fletter at 210 Bayview Drive, San Rafael, CA.
 - src/App.js — main app
 - src/settings.js — all configurable values (rates, vets, messages, packing list)
 - src/waiver.js — full waiver text
-- src/App.test.js — 74 passing tests (TDD), Supabase mocked via src/__mocks__/supabase.js
+- src/App.test.js — 75 passing tests (TDD), Supabase mocked via src/__mocks__/supabase.js
+- supabase/functions/submit-booking/index.ts — handles booking submission: find-or-create owner (by phone) and each dog (by owner+name), inserts the stay + stay_dogs snapshot links (service role key)
 - supabase/functions/send-confirmation/index.ts — Twilio SMS function (outbound)
 - supabase/functions/receive-sms/index.ts — inbound SMS webhook: auto-reply + relay to Kim/Estee. Deploy with `--no-verify-jwt` (see comment at top of file) or Twilio's webhook calls silently fail
 - supabase/functions/_shared/contact.ts — pure text builders + Twilio signature validator, shared by send-confirmation and receive-sms, unit-tested via `deno test`
-- supabase/functions/admin-data/index.ts — server-side admin password check + full stay data (service role key, never exposed to client)
-- supabase/functions/lookup-client/index.ts — returning-client autofill by phone (returns only safe fields, not full record)
-- supabase/migrations/ — RLS policy history for the `stays` table
+- supabase/functions/admin-data/index.ts — server-side admin password check + every dog (profile + owner + stay history) (service role key, never exposed to client)
+- supabase/functions/lookup-client/index.ts — returning-client autofill by phone: vet + every dog on file (returns only safe fields, never aggression/health)
+- supabase/migrations/ — schema history, including the Sept 14 dog-profiles reorg (owners/dogs/stays/stay_dogs) and the RLS lockdown history for the old flat `stays` table
 - FIXES.txt — current fix list and backlog
 
 ## Security notes
@@ -44,10 +65,13 @@ Kim Miller and Estee Fletter at 210 Bayview Drive, San Rafael, CA.
   in the JS bundle is public. Never put secrets (passwords, API keys) directly
   in App.js/settings.js again; they must live server-side as Supabase secrets
   and be checked from an Edge Function.
-- `stays` RLS only allows anon `INSERT` (the booking form). All reads go
-  through Edge Functions using the service role key. Do not re-add a public
-  SELECT/UPDATE/DELETE policy on `stays` without a real reason — this table
-  holds client PII (names, phone, email, signatures, health/aggression notes).
+- `owners`, `dogs`, `stays`, `stay_dogs` are all RLS-locked with zero
+  policies — no anon or authenticated access at all, reads and writes alike.
+  Admin reads go through admin-data, returning-client lookup through
+  lookup-client, and booking submission through submit-booking — all three
+  use the service role key server-side. Do not add a public policy on any
+  of these tables without a real reason — they hold client PII (names,
+  phone, email, signatures, health/aggression notes).
 
 ## Current priorities (v1.5)
 1. Stay reminder SMS — cron job 24hrs before drop-off

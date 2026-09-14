@@ -1,0 +1,146 @@
+import { assertEquals } from 'https://deno.land/std@0.168.0/testing/asserts.ts';
+
+const ADMIN_PASSWORD = 'test-admin-password';
+Deno.env.set('ADMIN_PASSWORD', ADMIN_PASSWORD);
+Deno.env.set('SUPABASE_URL', 'https://example.supabase.co');
+Deno.env.set('SUPABASE_SERVICE_ROLE_KEY', 'test-service-role-key');
+
+const { handleRequest } = await import('./index.ts');
+
+// Fixture shaped like PostgREST's actual embed response for
+// dogs -> owner:owners(...) and dogs -> stay_dogs(..., stay:stays(...)) -
+// deliberately out of chronological order, to verify handleRequest sorts
+// each dog's stays newest-first rather than trusting insertion order.
+// The two stay_dogs rows carry different aggression_history snapshots
+// (the profile has since been updated between the two stays) to verify
+// the per-stay historical snapshot survives distinct from the current
+// dog-level profile.
+const DOGS_FIXTURE = [
+  {
+    id: 'dog-1', name: 'Rex', breed: 'Labrador', dob: '2020-01-01', spay_neuter: 'yes',
+    aggression_history: 'yes', aggression_detail: 'Growls at the mail carrier', health_concerns: 'no', health_detail: null,
+    owner: { name: 'Kim Miller', phone: '4155550100', email: 'kim@test.com' },
+    stay_dogs: [
+      {
+        name: 'Rex', breed: 'Labrador', dob: '2020-01-01', spay_neuter: 'yes',
+        aggression_history: 'no', aggression_detail: null, health_concerns: 'no', health_detail: null,
+        stay: { id: 'stay-1', check_in: '2026-08-01', check_out: '2026-08-03', drop_time: '09:00:00', pickup_time: '09:00:00', notes: '', estimated_cost: 210, number_of_dogs: 1, submitted_at: '2026-07-01T00:00:00Z' },
+      },
+      {
+        name: 'Rex', breed: 'Labrador', dob: '2020-01-01', spay_neuter: 'yes',
+        aggression_history: 'yes', aggression_detail: 'Growls at the mail carrier', health_concerns: 'no', health_detail: null,
+        stay: { id: 'stay-2', check_in: '2026-10-01', check_out: '2026-10-03', drop_time: '09:00:00', pickup_time: '09:00:00', notes: '', estimated_cost: 210, number_of_dogs: 1, submitted_at: '2026-09-01T00:00:00Z' },
+      },
+    ],
+  },
+];
+
+function stubSupabase(opts: { dogs?: unknown[]; totalStays?: number } = {}) {
+  const dogs = opts.dogs ?? DOGS_FIXTURE;
+  const totalStays = opts.totalStays ?? 2;
+  const calls: { method: string; table: string }[] = [];
+
+  const original = globalThis.fetch;
+  globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    const url = new URL(String(input instanceof Request ? input.url : input));
+    const method = (init?.method || 'GET').toUpperCase();
+    const table = url.pathname.split('/').pop()!;
+    calls.push({ method, table });
+
+    if (table === 'dogs' && method === 'GET') {
+      return new Response(JSON.stringify(dogs), { status: 200 });
+    }
+    if (table === 'stays' && method === 'HEAD') {
+      return new Response(null, { status: 200, headers: { 'content-range': `0-0/${totalStays}` } });
+    }
+    throw new Error(`stubSupabase: unhandled request ${method} ${url.pathname}`);
+  }) as typeof fetch;
+
+  return { calls, restore: () => { globalThis.fetch = original; } };
+}
+
+function postRequest(body: unknown): Request {
+  return new Request('https://example.supabase.co/functions/v1/admin-data', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+Deno.test('rejects an incorrect password without querying the database', async () => {
+  const stub = stubSupabase();
+  try {
+    const res = await handleRequest(postRequest({ password: 'wrong' }));
+    assertEquals(res.status, 401);
+    assertEquals(stub.calls.length, 0);
+  } finally {
+    stub.restore();
+  }
+});
+
+Deno.test('returns dogs (each with owner + stay history) and the total stays count', async () => {
+  const stub = stubSupabase();
+  try {
+    const res = await handleRequest(postRequest({ password: ADMIN_PASSWORD }));
+    assertEquals(res.status, 200);
+    const data = await res.json();
+
+    assertEquals(data.totalStays, 2);
+    assertEquals(data.dogs.length, 1);
+    assertEquals(data.dogs[0].name, 'Rex');
+    assertEquals(data.dogs[0].owner.name, 'Kim Miller');
+    assertEquals(data.dogs[0].owner.phone, '4155550100');
+  } finally {
+    stub.restore();
+  }
+});
+
+Deno.test('flattens stay_dogs into a plain stays array, sorted newest check-in first', async () => {
+  const stub = stubSupabase();
+  try {
+    const res = await handleRequest(postRequest({ password: ADMIN_PASSWORD }));
+    const data = await res.json();
+
+    const stays = data.dogs[0].stays;
+    assertEquals(stays.length, 2);
+    assertEquals(stays[0].check_in, '2026-10-01'); // newest first, despite fixture order
+    assertEquals(stays[1].check_in, '2026-08-01');
+    assertEquals(data.dogs[0].stay_dogs, undefined); // join rows should not leak through
+  } finally {
+    stub.restore();
+  }
+});
+
+Deno.test('each stay keeps its own frozen aggression snapshot, distinct from the dog\'s current profile', async () => {
+  const stub = stubSupabase();
+  try {
+    const res = await handleRequest(postRequest({ password: ADMIN_PASSWORD }));
+    const data = await res.json();
+    const dog = data.dogs[0];
+    const stays = dog.stays;
+
+    // Current profile (top-level) reflects the latest answer.
+    assertEquals(dog.aggression_history, 'yes');
+
+    // But each stay shows exactly what was declared/signed at the time.
+    const older = stays.find((s: { check_in: string }) => s.check_in === '2026-08-01');
+    const newer = stays.find((s: { check_in: string }) => s.check_in === '2026-10-01');
+    assertEquals(older.aggression_history, 'no');
+    assertEquals(newer.aggression_history, 'yes');
+    assertEquals(newer.aggression_detail, 'Growls at the mail carrier');
+  } finally {
+    stub.restore();
+  }
+});
+
+Deno.test('a dog with no stays gets an empty stays array, not an error', async () => {
+  const stub = stubSupabase({
+    dogs: [{ ...DOGS_FIXTURE[0], stay_dogs: [] }],
+  });
+  try {
+    const res = await handleRequest(postRequest({ password: ADMIN_PASSWORD }));
+    const data = await res.json();
+    assertEquals(data.dogs[0].stays, []);
+  } finally {
+    stub.restore();
+  }
+});

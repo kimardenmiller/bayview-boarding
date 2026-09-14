@@ -1,6 +1,6 @@
 BAYVIEW BOARDING — FIX LIST
 ============================
-Last updated: September 13, 2026 (v1.5.14 — multi-dog + holiday pricing)
+Last updated: September 14, 2026 (dog-profiles reorg)
 
 NEXT CHANGE LIST (v1.5)
 -----------------------
@@ -16,9 +16,6 @@ NEXT CHANGE LIST (v1.5)
    page refresh (currently resets to $105 on reload).
 
 4. Persist admin rate setting to Supabase settings table.
-
-5. Signature timestamp — add client timezone to Supabase record
-   for legal clarity.
 
 DEFERRED (revisit only if it actually blocks something)
 ---------------------------------------------------------
@@ -59,6 +56,46 @@ TWILIO STATUS
 
 COMPLETED
 ---------
+- Sept 14, 2026: Dog-profiles reorg (follow-up to v1.5.14's multi-dog
+  pricing). New schema: owners (by phone) -> dogs (always-current
+  profile) -> stays (one per booking) <- stay_dogs (join; which dogs
+  were on a stay, each with its OWN frozen snapshot of that dog's
+  profile as declared/signed for that specific booking, kept deliberately
+  separate from `dogs` so a later booking's profile update doesn't rewrite
+  history - see the migration file for the full rationale). The old flat
+  `stays` table is kept as `stays_legacy` for reference and was backfilled
+  into the new tables (owners/dogs matched by phone / case-insensitive
+  name, one dog per legacy row since that's all the old data had).
+  Booking form (Step 2): now collects a full profile - breed/DOB/spay-
+  neuter/aggression/health - for EVERY dog on the booking, not just the
+  primary one; one repeated block per dog, driven by "Number of Dogs".
+  Owner info and the vet are asked once, not per dog, per scope decision.
+  Returning-client lookup now autofills the vet plus every known dog,
+  growing the dog-block count to match rather than only filling slot 0.
+  New submit-booking Edge Function handles the actual write: find-or-
+  create the owner by phone and each dog by (owner, case-insensitive
+  name), so a returning dog's profile gets updated in place rather than
+  duplicated. This is a schema-level architecture change, not just a UI
+  one - anon has zero access (not even INSERT) to any of the four new
+  tables, since the find-or-create logic needs a SELECT anon was never
+  granted; the client-side `supabase.from('stays').insert(...)` call
+  from v1.5 is gone entirely, replaced by this one Edge Function call.
+  Also slipped in for free since the write path was already being
+  touched: client_timezone is now captured and stored per stay (closes
+  the old item 5, "signature timestamp - add client timezone").
+  Admin panel: now browses by dog (each with its current profile and
+  full stay history) rather than grouping flat stay rows client-side;
+  each past stay in the history still shows exactly what was declared/
+  signed at the time, even if the dog's profile has since been updated.
+  Tests: 9 new Deno tests for submit-booking's find-or-create logic
+  (new owner+dog, returning owner, returning dog matched case-
+  insensitively, multi-dog bookings, the frozen-snapshot behavior) using
+  a lightweight in-memory PostgREST stand-in; admin-data and lookup-
+  client rewritten with their own new Deno test suites (34 Deno total,
+  up from 15). React side: StepDog rewritten for repeatable per-dog
+  blocks, AdminView rewritten for the dog-centric response shape, 2 new
+  tests for multi-dog-on-mount autofill (75 React total, up from 74).
+  109/109 passing.
 - v1.5.14: Multi-dog pricing + holiday upcharge (FIXES.txt items 6 & 7).
   calcCost (src/App.js) now computes cost night-by-night: each night is
   checked against getHolidayWindows(year) (algorithmic, not hardcoded —
