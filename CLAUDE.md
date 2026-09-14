@@ -22,7 +22,7 @@ Kim Miller and Estee Fletter at 210 Bayview Drive, San Rafael, CA.
   multi-dog discount (default 10% off each additional dog's nightly rate,
   uncapped) — all three, plus the vet clinic list, are loaded from
   Supabase on every page load (public read) and editable in the admin
-  panel (Sept 15 (3) — see Data model below)
+  panel (Sept 15 (4) — see Data model below)
 - Past check-in dates are rejected, client-side (StepDates) and
   server-side (submit-booking, the actual boundary); a same-day stay's
   pick-up must be after its drop-off (no such constraint across days)
@@ -47,7 +47,7 @@ Since find-or-create-by-phone/name needs a SELECT anon doesn't have, all
 booking writes go through submit-booking (service role key) instead of a
 direct client insert — see supabase/functions/submit-booking/index.ts.
 
-`settings` (Sept 15 (3)) is a singleton row (day rate, multi-dog
+`settings` (Sept 15 (4)) is a singleton row (day rate, multi-dog
 discount, holiday upcharge, vet clinic list) - the admin-configurable
 values calcCost and the vet dropdown actually use, replacing hardcoded
 constants. Reads are public/unauthenticated (every visitor needs current
@@ -83,13 +83,16 @@ same RLS-locked-with-zero-policies pattern as everything else.
   in the JS bundle is public. Never put secrets (passwords, API keys) directly
   in App.js/settings.js again; they must live server-side as Supabase secrets
   and be checked from an Edge Function.
-- `owners`, `dogs`, `stays`, `stay_dogs` are all RLS-locked with zero
-  policies — no anon or authenticated access at all, reads and writes alike.
-  Admin reads go through admin-data, returning-client lookup through
-  lookup-client, and booking submission through submit-booking — all three
-  use the service role key server-side. Do not add a public policy on any
-  of these tables without a real reason — they hold client PII (names,
-  phone, email, signatures, health/aggression notes).
+- `owners`, `dogs`, `stays`, `stay_dogs`, `settings` are all RLS-locked
+  with zero policies — no anon or authenticated access at all, reads and
+  writes alike. Admin reads go through admin-data, returning-client
+  lookup through lookup-client, booking submission through
+  submit-booking, and pricing/vet-list reads and writes through
+  settings — all four Edge Functions use the service role key
+  server-side. Do not add a public policy on any of these tables without
+  a real reason — the first four hold client PII (names, phone, email,
+  signatures, health/aggression notes); `settings` isn't sensitive but
+  writes still need the admin password, checked in the function.
 
 ## Current priorities (v1.5)
 1. Stay reminder SMS — cron job 24hrs before drop-off
