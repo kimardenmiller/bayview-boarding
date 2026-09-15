@@ -1,22 +1,10 @@
 BAYVIEW BOARDING — FIX LIST
 ============================
-Last updated: September 15, 2026 (4) (admin settings persistence, date sanity checks)
+Last updated: September 16, 2026 (reminder/billing SMS, landing title top-1/3)
 
 NEXT CHANGE LIST (v1.5)
 -----------------------
-1. Stay reminder SMS — send automatically 24 hours before drop-off.
-   Needs a Supabase scheduled function (cron job) that checks for
-   upcoming stays and triggers send-confirmation with type="reminder".
-
-2. Billing SMS — send at pickup time with final cost.
-   Admin triggers this manually from the stay detail view, or
-   auto-sends at scheduled pickup time.
-
-3. Landing page — move the "Bayview Boarding" title up to the top 1/3
-   of the page (currently anchored near the bottom, just above "Book
-   My Stay"). Requested Sept 15, 2026, not yet started.
-
-4. SECURITY: revoke the Twilio API key Kim shared in chat for
+1. SECURITY: revoke the Twilio API key Kim shared in chat for
    debugging (SK... SID). Still active as of Sept 15, 2026 - used
    successfully that day to check A2P campaign status via the API
    (IN_PROGRESS, no errors, brand APPROVED - just still queued at TCR).
@@ -65,6 +53,76 @@ TWILIO STATUS
 
 COMPLETED
 ---------
+- Sept 16, 2026: Landing page - title moved again, now anchored to the
+  top 1/3 of the page (was: higher, but still bottom-anchored above the
+  button). Split into two independently-positioned blocks (title fixed
+  at 14% from the top; button stays fixed 56px from the bottom, its own
+  spot unchanged) instead of one bottom-anchored column - top-of-page
+  gradient darkened slightly (0.3->0.45, 0.05->0.1) for text contrast
+  now that it sits over lighter sky/leaves instead of the darker bottom
+  of the photo.
+
+  Stay reminder SMS: a daily cron job (pg_cron + pg_net, 9am Pacific)
+  finds stays checking in the next day and texts each a reminder via a
+  new send-reminders Edge Function, which delegates the actual message
+  to send-confirmation (already supported type="reminder", just had
+  nothing calling it that way before). A `reminder_sent_at` column on
+  `stays` makes this idempotent - already-reminded stays are skipped, so
+  a retried or overlapping run can't double-text anyone. Deployed with
+  --no-verify-jwt since the caller is pg_cron, not a Supabase-JWT client
+  (same reasoning as receive-sms) - instead checks its own shared secret
+  (CRON_SECRET) against an x-cron-secret header. That secret is never in
+  any git-tracked file: created once via `vault.create_secret(...)` run
+  directly against the live database, referenced only by name from the
+  committed migration's cron.schedule() call, and set separately as the
+  CRON_SECRET Edge Function secret - reading the repo alone reveals
+  nothing usable. "24 hours before drop-off" was scoped to a fixed daily
+  batch at a normal hour rather than a message timed to each stay's own
+  exact drop-off time, to avoid texting someone at 2am just because
+  that's when their drop-off happens to be.
+
+  Billing SMS: admin-triggered (not auto-sent at pickup) from each
+  stay's card in the admin detail view - a "Final Cost" field defaults
+  to that stay's estimate but is editable before sending, since the
+  actual amount can differ by pickup (early/late pickup, extra
+  services) and texting a wrong dollar amount to a paying customer is a
+  real failure mode auto-send at the estimate would risk. Reuses
+  send-confirmation's existing type="billing" support - no server
+  changes needed, just the admin UI and the call. Named for whichever
+  dog's page the admin is currently viewing; a multi-dog stay's text
+  only names that one dog, a deliberate scope trade-off rather than
+  reworking admin-data to surface every dog on a shared stay.
+
+  Tests: 9 new Deno tests for send-reminders (secret auth, finds/skips
+  stays correctly by date and by whether already reminded, joins
+  multiple dog names, does NOT mark reminder_sent_at if the send
+  itself fails so a later run can retry, handles several due stays in
+  one run) using Deno's FakeTime to control "tomorrow." 4 new React
+  tests for the billing SMS UI (default/adjustable final cost, the
+  actual send-confirmation call shape, refuses to send with no amount,
+  shows an error without claiming success if the send fails). 109
+  React + 63 Deno = 172/172 passing.
+
+  Along the way, a real bug turned up in the TEST SUITE itself: the
+  React test helper daysFromToday() used `.toISOString().slice(0,10)` -
+  the exact same UTC-vs-local mistake todayISO() (src/App.js) was fixed
+  for earlier this session. It surfaced as a genuinely reproducible test
+  failure (not a flake) specifically because tests happened to run in
+  the evening Pacific hours where the bug bites: "yesterday" computed
+  that way silently came back as "today", and "today" came back as
+  "tomorrow". Fixed with the same local-calendar-fields approach as
+  todayISO(). A good reminder that this class of bug hides in test
+  helpers just as easily as app code, and that "run it once, it passed"
+  isn't enough for date logic - re-ran the suite twice more in that
+  same evening window to confirm the fix actually holds, not just that
+  it happened to pass once.
+
+  Verified live: the cron secret's auth gate (401 on a wrong secret,
+  200 with the real one) and the date computation against the actual
+  production database and today's real date; the landing page visually
+  on production. Did not trigger a real Twilio send during verification
+  (the Deno suite already covers that path in isolation without
+  texting an actual phone).
 - Sept 15, 2026 (4): Landing page - title moved higher (margin-bottom
   26px -> 52px) and, on desktop specifically (>=768px), the image's crop
   point adjusted (object-position 42% -> 60% vertically) to actually

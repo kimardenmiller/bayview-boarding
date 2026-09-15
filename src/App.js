@@ -652,6 +652,46 @@ function AdminView({
   const [newVetText, setNewVetText] = useState('');
   const [settingsError, setSettingsError] = useState('');
   const [savingSettings, setSavingSettings] = useState(false);
+  // Billing SMS is admin-triggered (not auto-sent at pickup time) - the
+  // estimated cost can be wrong by pickup (early/late pickup, extra
+  // services), so an admin reviews/adjusts the actual final amount before
+  // it goes out, rather than the system silently texting a guess. Keyed
+  // by stay id since a dog can have several stays, each independently
+  // billable.
+  const [billingDrafts, setBillingDrafts] = useState({});
+  const [billingStatus, setBillingStatus] = useState({});
+
+  function billingDraftFor(s) {
+    if (s.id in billingDrafts) return billingDrafts[s.id];
+    return s.estimated_cost != null ? String(s.estimated_cost) : '';
+  }
+
+  async function sendBillingText(s) {
+    const finalCost = Number(billingDraftFor(s));
+    if (!finalCost || finalCost <= 0) {
+      setBillingStatus(prev => ({ ...prev, [s.id]: 'Enter a valid amount first' }));
+      return;
+    }
+    setBillingStatus(prev => ({ ...prev, [s.id]: 'sending' }));
+    const { data, error: fnError } = await supabase.functions.invoke('send-confirmation', {
+      body: {
+        type: 'billing',
+        owner_name: selected.owner?.name,
+        owner_phone: selected.owner?.phone,
+        // Named for the dog currently being viewed - a stay covering
+        // several dogs still only names this one in the text, a known
+        // scope trade-off rather than reworking admin-data to surface
+        // every dog on a shared stay.
+        dog_name: selected.name,
+        final_cost: finalCost,
+      },
+    });
+    if (fnError || data?.error) {
+      setBillingStatus(prev => ({ ...prev, [s.id]: 'Failed to send. Please try again.' }));
+      return;
+    }
+    setBillingStatus(prev => ({ ...prev, [s.id]: 'sent' }));
+  }
 
   async function login() {
     setError('');
@@ -772,6 +812,27 @@ function AdminView({
                 {s.notes && <div className="stay-notes">"{s.notes}"</div>}
                 {s.aggression_history === 'yes' && <div className="stay-flag">⚠ Aggression noted: {s.aggression_detail}</div>}
                 {s.health_concerns === 'yes' && <div className="stay-flag">⚕ Health note: {s.health_detail}</div>}
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 8 }}>
+                  <span style={{ fontSize: '0.85rem' }}>$</span>
+                  <input
+                    type="number"
+                    value={billingDraftFor(s)}
+                    onChange={e => setBillingDrafts(prev => ({ ...prev, [s.id]: e.target.value }))}
+                    style={{ width: 80, padding: '6px 10px', border: '1.5px solid #D5D9DE', borderRadius: 6, fontSize: '0.85rem' }}
+                  />
+                  <button
+                    className="btn-secondary"
+                    style={{ padding: '4px 10px', fontSize: '0.78rem' }}
+                    disabled={billingStatus[s.id] === 'sending'}
+                    onClick={() => sendBillingText(s)}
+                  >
+                    {billingStatus[s.id] === 'sending' ? 'Sending...' : 'Send Billing Text'}
+                  </button>
+                  {billingStatus[s.id] === 'sent' && <span style={{ color: '#7D9B76', fontSize: '0.78rem' }}>✓ Sent</span>}
+                  {billingStatus[s.id] && billingStatus[s.id] !== 'sending' && billingStatus[s.id] !== 'sent' && (
+                    <span className="field-error" style={{ fontSize: '0.78rem' }}>{billingStatus[s.id]}</span>
+                  )}
+                </div>
               </div>
             ))}
           </div>
@@ -870,8 +931,10 @@ function Landing({ onStart }) {
     <div className="landing">
       <img className="landing-img" src={heroDog} alt="A happy dog boarding with Bayview Boarding on a Marin hillside trail" />
       <div className="landing-overlay">
-        <div className="landing-content">
+        <div className="landing-top">
           <h1 className="landing-title">Bayview Boarding</h1>
+        </div>
+        <div className="landing-bottom">
           <button className="landing-cta" onClick={onStart}>Book My Stay</button>
         </div>
       </div>

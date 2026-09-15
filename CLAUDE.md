@@ -26,12 +26,17 @@ Kim Miller and Estee Fletter at 210 Bayview Drive, San Rafael, CA.
 - Past check-in dates are rejected, client-side (StepDates) and
   server-side (submit-booking, the actual boundary); a same-day stay's
   pick-up must be after its drop-off (no such constraint across days)
-- Twilio SMS confirmation texts (pending A2P carrier approval)
+- Twilio SMS: booking confirmations (pending A2P carrier approval, sent at
+  submission), stay reminders (a daily cron job texts everyone checking in
+  the next day, Sept 16 — see supabase/functions/send-reminders), and
+  billing texts (admin-triggered from the stay detail view with an
+  editable final cost, not auto-sent — the estimate can be wrong by
+  pickup)
 - Admin panel: browse by dog, each with its always-current profile and full
   stay history (each past stay shows its own frozen declared/signed
-  snapshot, not just the dog's latest profile — see Data model below).
-  Reached only via a bookmarked URL (?admin) — no visible Admin button in
-  the UI
+  snapshot, not just the dog's latest profile — see Data model below), a
+  "Send Billing Text" control on every stay. Reached only via a bookmarked
+  URL (?admin) — no visible Admin button in the UI
 
 ## Data model (Sept 14, 2026 reorg)
 `owners` (by phone) → `dogs` (owner's always-current profile) → `stays`
@@ -55,6 +60,22 @@ pricing and the vet list to use the booking form at all); writes need the
 admin password - both go through supabase/functions/settings/index.ts,
 same RLS-locked-with-zero-policies pattern as everything else.
 
+`stays.reminder_sent_at` (Sept 16, 2026) marks a stay's reminder text as
+already sent, so the daily cron job can't double-text someone on a
+retried or overlapping run.
+
+**Reproducing the reminder cron's secret** (Sept 16, 2026): the cron job
+(supabase/migrations/20260916000000_stay_reminders_cron.sql) calls
+send-reminders via pg_net with an x-cron-secret header, read from
+`vault.decrypted_secrets where name = 'cron_secret'` - the actual value
+is deliberately not in any git-tracked file. If the cron job or the
+vault secret is ever lost/needs rotating: generate a random value, run
+`select vault.create_secret('<value>', 'cron_secret');` directly against
+the live database (not saved as a migration), and
+`supabase secrets set CRON_SECRET=<same value>` so the Edge Function can
+check it. The migration only needs re-running if the cron.schedule()
+call itself is dropped, not for a routine secret rotation.
+
 ## Tech stack
 - React (Create React App)
 - Supabase (database + Edge Functions)
@@ -67,10 +88,11 @@ same RLS-locked-with-zero-policies pattern as everything else.
 - src/App.js — main app
 - src/settings.js — all configurable values (rates, vets, messages, packing list)
 - src/waiver.js — full waiver text
-- src/App.test.js — 105 passing tests (TDD), Supabase mocked via src/__mocks__/supabase.js
+- src/App.test.js — 109 passing tests (TDD), Supabase mocked via src/__mocks__/supabase.js
+- supabase/functions/send-reminders/index.ts — daily cron target (pg_cron + pg_net, see the migration): finds stays checking in tomorrow, texts each via send-confirmation, marks reminder_sent_at. Deployed with `--no-verify-jwt`; checks its own CRON_SECRET instead (see Data model for how that secret is set up without ever being committed)
 - supabase/functions/settings/index.ts — public read / password-gated write of day rate, multi-dog discount, holiday upcharge, vet list
 - supabase/functions/submit-booking/index.ts — handles booking submission: find-or-create owner (by phone) and each dog (by owner+name), inserts the stay + stay_dogs snapshot links (service role key)
-- supabase/functions/send-confirmation/index.ts — Twilio SMS function (outbound)
+- supabase/functions/send-confirmation/index.ts — Twilio SMS function (outbound); handles all 3 message types (confirmation/reminder/billing) via a `type` field - called directly by the client at booking time, and by send-reminders and the admin panel for the other two
 - supabase/functions/receive-sms/index.ts — inbound SMS webhook: auto-reply + relay to Kim/Estee. Deploy with `--no-verify-jwt` (see comment at top of file) or Twilio's webhook calls silently fail
 - supabase/functions/_shared/contact.ts — pure text builders + Twilio signature validator, shared by send-confirmation and receive-sms, unit-tested via `deno test`
 - supabase/functions/admin-data/index.ts — server-side admin password check + every dog (profile + owner + stay history) (service role key, never exposed to client)
@@ -95,8 +117,9 @@ same RLS-locked-with-zero-policies pattern as everything else.
   writes still need the admin password, checked in the function.
 
 ## Current priorities (v1.5)
-1. Stay reminder SMS — cron job 24hrs before drop-off
-2. Billing SMS — admin triggers from stay detail view
+See FIXES.txt for the live list - nothing outstanding here as of Sept
+16, 2026 beyond that file's own items (currently just revoking the
+debug Twilio API key, whenever that's actually needed).
 
 ## Rules
 - Always run tests before committing (npm test -- --watchAll=false)

@@ -1,4 +1,4 @@
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import App, { formatDate, calcAge, calcCost, isHolidayNight, getHolidayWindows, todayISO, formatMoney } from './App';
 import { supabase } from './supabase';
@@ -70,9 +70,18 @@ function isoMonthsAgo(months, day = 15) {
 }
 
 function daysFromToday(offset) {
+  // NOT `.toISOString().slice(0,10)` - toISOString() is always UTC, and
+  // this helper hit exactly the bug todayISO() (src/App.js) was fixed
+  // for earlier: in the evening Pacific time, UTC has already rolled to
+  // tomorrow, silently shifting every date this returns by a day and
+  // breaking date-sensitive tests specifically when run in the evening.
+  // Local calendar fields instead, same fix as todayISO().
   const d = new Date();
   d.setDate(d.getDate() + offset);
-  return d.toISOString().slice(0, 10);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
 }
 
 // Renders and advances only to the Owner Information page - for tests
@@ -1178,6 +1187,73 @@ describe('Admin — logged in', () => {
     expect(await screen.findByRole('heading', { name: 'Choco' })).toBeInTheDocument();
     expect(screen.getByText(/Aggression noted: Barks at mail carrier/)).toBeInTheDocument();
     expect(screen.getByText(/Health note: Mild hip dysplasia/)).toBeInTheDocument();
+  });
+
+  test('Billing SMS: final cost defaults to the estimate, and Send calls send-confirmation with type billing', async () => {
+    await loginAsAdmin();
+    fireEvent.click(screen.getByText('Bud'));
+    await screen.findByRole('heading', { name: 'Bud' });
+
+    const budCards = document.querySelectorAll('.stay-card');
+    const costInput = budCards[0].querySelector('input[type="number"]');
+    expect(costInput).toHaveValue(210); // defaults to that stay's estimate
+
+    fireEvent.click(within(budCards[0]).getByText('Send Billing Text'));
+    await waitFor(() => expect(supabase.functions.invoke).toHaveBeenCalledWith('send-confirmation', {
+      body: {
+        type: 'billing',
+        owner_name: 'Kim',
+        owner_phone: '6505551111',
+        dog_name: 'Bud',
+        final_cost: 210,
+      },
+    }));
+    expect(await within(budCards[0]).findByText('✓ Sent')).toBeInTheDocument();
+  });
+
+  test('Billing SMS: admin can adjust the final cost before sending', async () => {
+    await loginAsAdmin();
+    fireEvent.click(screen.getByText('Bud'));
+    await screen.findByRole('heading', { name: 'Bud' });
+
+    const budCards = document.querySelectorAll('.stay-card');
+    const costInput = budCards[0].querySelector('input[type="number"]');
+    fireEvent.change(costInput, { target: { value: '250' } });
+    fireEvent.click(within(budCards[0]).getByText('Send Billing Text'));
+
+    await waitFor(() => expect(supabase.functions.invoke).toHaveBeenCalledWith('send-confirmation', {
+      body: expect.objectContaining({ final_cost: 250 }),
+    }));
+  });
+
+  test('Billing SMS: refuses to send with no amount entered', async () => {
+    await loginAsAdmin();
+    fireEvent.click(screen.getByText('Choco')); // Choco's stay has a null estimate
+    await screen.findByRole('heading', { name: 'Choco' });
+
+    const chocoCard = document.querySelector('.stay-card');
+    fireEvent.click(within(chocoCard).getByText('Send Billing Text'));
+    expect(await within(chocoCard).findByText('Enter a valid amount first')).toBeInTheDocument();
+    expect(supabase.functions.invoke).not.toHaveBeenCalledWith('send-confirmation', expect.any(Object));
+  });
+
+  test('Billing SMS: shows an error and does not claim success if the send fails', async () => {
+    mockInvokeDefaults({
+      'admin-data': async () => ({ data: { dogs: SAMPLE_DOGS, totalStays: SAMPLE_TOTAL_STAYS }, error: null }),
+      'send-confirmation': async () => ({ data: null, error: { message: 'Twilio down' } }),
+    });
+    goToAdminUrl();
+    render(<App />);
+    await userEvent.type(screen.getByPlaceholderText('Password'), 'correct-password');
+    fireEvent.click(screen.getByText('Sign In'));
+    await screen.findByText('Bayview Boarding — Admin');
+    fireEvent.click(screen.getByText('Bud'));
+    await screen.findByRole('heading', { name: 'Bud' });
+
+    const budCard = document.querySelectorAll('.stay-card')[0];
+    fireEvent.click(within(budCard).getByText('Send Billing Text'));
+    expect(await within(budCard).findByText('Failed to send. Please try again.')).toBeInTheDocument();
+    expect(within(budCard).queryByText('✓ Sent')).not.toBeInTheDocument();
   });
 
   test('back button returns from the detail view to the dog list', async () => {
