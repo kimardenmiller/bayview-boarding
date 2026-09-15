@@ -1100,17 +1100,16 @@ const ABOUT_PHOTOS = [
   { src: `${process.env.PUBLIC_URL}/img/about/6-china-camp-bay-line.jpg`, alt: 'China Camp, along the bay' },
 ];
 
-// Approximate-location map (About page "Location" section). Deliberately a
-// neighborhood-level query, not the real street address - see the note in
-// that section's own text. Kept as one shared query string so the embed
-// (iframe) and the click-through link (the whole map area opens full
-// Google Maps in a new tab - iframes otherwise swallow clicks for their
-// own embedded UI instead of navigating anywhere) always point at the same
-// place.
-const ABOUT_MAP_QUERY = 'Loch Lomond, San Rafael, CA';
-const ABOUT_MAP_QUERY_ENCODED = ABOUT_MAP_QUERY.replace(/, /g, ',+').replace(/ /g, '+');
-const ABOUT_MAP_EMBED_URL = `https://maps.google.com/maps?q=${ABOUT_MAP_QUERY_ENCODED}&z=13&output=embed`;
-const ABOUT_MAP_LINK_URL = `https://www.google.com/maps/search/?api=1&query=${ABOUT_MAP_QUERY_ENCODED}`;
+// Approximate-location map (About page "Location" section). A specific
+// point Kim placed ~300 yards past the actual address (Sept 16, 2026),
+// not the real street address itself - see the note in that section's
+// own text. The embed (iframe) uses the coordinates directly; the click-
+// through link reuses Kim's own Google Maps short link verbatim rather
+// than reconstructing one, so it's guaranteed to open the exact same spot
+// he picked.
+const ABOUT_MAP_COORDS = '37.980802,-122.484319';
+const ABOUT_MAP_EMBED_URL = `https://maps.google.com/maps?q=${ABOUT_MAP_COORDS}&z=16&output=embed`;
+const ABOUT_MAP_LINK_URL = 'https://maps.app.goo.gl/xWg4sCFVpevDCKd16';
 
 // "Learn more about us" (content adapted from the Bayview Boarding Rover
 // profile) - a real, underlined link on the landing page itself (not the
@@ -1179,7 +1178,7 @@ function AboutUs({ onBack, onStart }) {
         <h2 className="about-subhead">Location</h2>
         <p>
           We're in the Loch Lomond neighborhood of San Rafael, right at the
-          China Camp State Park trailhead - map below shows the general area,
+          China Camp State Park trailhead - map below shows a nearby point,
           not our exact address; we'll share that once your stay is booked.
         </p>
         <div className="about-map">

@@ -1,20 +1,18 @@
 BAYVIEW BOARDING — FIX LIST
 ============================
-Last updated: September 16, 2026 (Twilio A2P 10DLC campaign now APPROVED)
+Last updated: September 16, 2026 (map pin placed 300 yards past the address; Twilio A2P APPROVED)
 
 NEXT CHANGE LIST (v1.5)
 -----------------------
-1. SECURITY: revoke the Twilio debug API key(s) Kim has shared in chat.
-   Used again Sept 16, 2026 (a key named "debug_attempt_3_persit",
-   possibly a freshly-created one - SID shared didn't match the one on
-   file from Sept 15) to confirm A2P finally APPROVED via the API - see
-   TWILIO STATUS. That was the whole reason this key was being kept
-   live; now that the actual goal (approval) is confirmed, this is a
-   natural point to actually revoke it rather than keep deferring -
-   worth asking Kim directly next round rather than assuming. Go to
-   Twilio Console > Account > API keys & tokens to delete whichever
-   key(s) are still listed - full account access, shouldn't stay live
-   indefinitely.
+1. SECURITY: confirm the Twilio debug API key(s) Kim has shared in chat
+   are actually deleted. Used again Sept 16, 2026 (a key named
+   "debug_attempt_3_persit", possibly a freshly-created one - SID shared
+   didn't match the one on file from Sept 15) to confirm A2P finally
+   APPROVED via the API - see TWILIO STATUS. That was the whole reason
+   this key was being kept live; now that the actual goal (approval) is
+   confirmed, Kim said he'd delete it (Twilio Console > Account > API
+   keys & tokens) - leaving this open only until that's confirmed done,
+   since it isn't something Claude can verify or do on his behalf.
 2. Set up a staging environment now that real client PII/bookings are
    flowing through production (discussed Sept 16, 2026). Recommended
    shape: same repo, a `staging` branch deployed to a second GitHub
@@ -25,14 +23,6 @@ NEXT CHANGE LIST (v1.5)
    maintain. Not urgent by itself; do this the next time a DB schema or
    RLS change is about to be made against production, rather than
    testing it live the way this session's changes have been.
-3. Move the About page's map pin from the current neighborhood-level
-   query ("Loch Lomond, San Rafael, CA") to the specific spot 300 yards
-   past the actual address, per Kim's request Sept 16, 2026 - waiting on
-   Kim to send exact lat/lng coordinates (dropped a pin in Google Maps
-   and copy the numbers) since an estimated GPS offset near a private
-   address risks landing somewhere meaningfully wrong. Once given, update
-   ABOUT_MAP_QUERY in src/App.js (or switch it to a lat,lng pair) - both
-   the embed and the click-through link already share that one constant.
 
 DEFERRED (revisit only if it actually blocks something)
 ---------------------------------------------------------
@@ -79,6 +69,18 @@ TWILIO STATUS
 
 COMPLETED
 ---------
+- Sept 16, 2026 (6): About page map pin placed at the specific spot Kim
+  chose (~300 yards past the actual address), replacing the earlier
+  neighborhood-level "Loch Lomond, San Rafael, CA" query. Kim sent a
+  Google Maps short link (maps.app.goo.gl/xWg4sCFVpevDCKd16) rather than
+  raw coordinates; resolved via a redirect check to 37.980802,-122.484319
+  for the embed (iframe), while the click-through overlay link reuses
+  Kim's original short link verbatim rather than reconstructing one, so
+  it's guaranteed to open the exact spot he picked. Embed zoom bumped
+  13 -> 16 now that it's a specific point rather than a broad
+  neighborhood. "General area" wording in the section's own text changed
+  to "a nearby point" to match. 137/137 React passing (2 tests updated
+  for the new src/href; Deno unchanged). Verified live.
 - Sept 16, 2026 (5): Followed up on the admin-editable-values scan (item 4
   below): packing list and the 3 SMS templates (confirmation/reminder/
   billing) moved from hardcoded (settings.js + a second, already-slightly-

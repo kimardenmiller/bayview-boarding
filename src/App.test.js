@@ -520,12 +520,13 @@ describe('Landing — Learn more about us', () => {
     expect(screen.getByText(/not our exact address/)).toBeInTheDocument();
     const map = screen.getByTitle(/Approximate location/);
     expect(map.tagName).toBe('IFRAME');
-    expect(map.getAttribute('src')).toContain('Loch+Lomond');
+    // a specific point ~300 yards past the actual address, not the address itself
+    expect(map.getAttribute('src')).toContain('37.980802,-122.484319');
     // the exact street address must never appear on this public page
     expect(screen.queryByText(/210 Bayview Drive/)).not.toBeInTheDocument();
   });
 
-  test('clicking anywhere on the map opens Google Maps in a new tab, at the same place as the embed', async () => {
+  test('clicking anywhere on the map opens Google Maps in a new tab, at the pinned spot', async () => {
     render(<App />);
     fireEvent.click(screen.getByText(/Learn more/));
     await screen.findByText('Dog Paradise Above Loch Lomond');
@@ -533,8 +534,7 @@ describe('Landing — Learn more about us', () => {
     expect(overlay.tagName).toBe('A');
     expect(overlay).toHaveAttribute('target', '_blank');
     expect(overlay).toHaveAttribute('rel', expect.stringContaining('noopener'));
-    expect(overlay.getAttribute('href')).toContain('google.com/maps');
-    expect(overlay.getAttribute('href')).toContain('Loch+Lomond');
+    expect(overlay.getAttribute('href')).toBe('https://maps.app.goo.gl/xWg4sCFVpevDCKd16');
   });
 
   test('About page shows a Schedule section, written in "we" not "I"', async () => {

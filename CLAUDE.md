@@ -151,11 +151,9 @@ call itself is dropped, not for a routine secret rotation.
 
 ## Current priorities (v1.5)
 See FIXES.txt for the live list - nothing outstanding here as of Sept
-16, 2026 beyond that file's own items (revoking the debug Twilio API key
-whenever that's actually needed, setting up a staging environment next
-time a DB/RLS change is made against production, and placing the About
-page's map pin 300 yards past the real address once Kim sends exact
-coordinates).
+16, 2026 beyond that file's own items (confirming the debug Twilio API
+key is actually deleted, and setting up a staging environment next time
+a DB/RLS change is made against production).
 
 ## Rules
 - Always run tests before committing (npm test -- --watchAll=false)
