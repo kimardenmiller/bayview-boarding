@@ -1,6 +1,6 @@
 BAYVIEW BOARDING — FIX LIST
 ============================
-Last updated: September 16, 2026 (About Us page, nav menu, Contact form)
+Last updated: September 16, 2026 (About page polish; admin-editable-values scan)
 
 NEXT CHANGE LIST (v1.5)
 -----------------------
@@ -63,6 +63,22 @@ TWILIO STATUS
 
 COMPLETED
 ---------
+- Sept 16, 2026 (3): About page polish - "New? Learn more" link recolored
+  to a brighter sky blue (#6EA8FE) instead of classic #0000EE, since the
+  dark navy hero overlay it sits on made the darker shade hard to read
+  (the Rover-rating link stays classic blue - that one's on plain white).
+  Heading broken into 3 lines ("Dog Paradise / Above / Loch Lomond") via
+  <br> with trailing spaces preserved, so the underlying accessible text
+  is still exactly "Dog Paradise Above Loch Lomond" - existing tests
+  needed no changes. Gallery photos now scale up on hover (CSS only,
+  1.7x, shadow, above their neighbors) rather than needing a click-to-
+  open lightbox, since "roll over" was the ask. Every review card now
+  shows its own ★★★★★ row, not just the aggregate rating line (added as
+  new assertions in the existing reviews test rather than a new test, so
+  the count is unchanged at 131 React + 71 Deno = 202/202 passing).
+  Verified live (link color, <br> in the
+  title, hover actually growing the image's rendered width, star rows on
+  all 17 cards).
 - Sept 16, 2026 (2): New "Learn more about us" About page, content adapted
   from the Bayview Boarding Rover profile (rover.com couldn't be scraped
   directly - 403s all bot traffic including archive.org's cache - so Kim

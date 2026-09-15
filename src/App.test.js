@@ -557,6 +557,10 @@ describe('Landing — Learn more about us', () => {
     expect(screen.getByText(/Aiste B\. · Jun 15, 2026/)).toBeInTheDocument();
     // the one 4-star, mixed review should not appear alongside the glowing ones
     expect(screen.queryByText(/somewhat awkward/)).not.toBeInTheDocument();
+    // every review card shows its own 5-star row, not just the aggregate rating
+    const starRows = document.querySelectorAll('.about-review-stars');
+    expect(starRows.length).toBe(17);
+    starRows.forEach(row => expect(row.textContent).toBe('★★★★★'));
   });
 
   test('Book My Stay on the About page starts the booking flow directly', async () => {

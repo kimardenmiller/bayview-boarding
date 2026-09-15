@@ -19,7 +19,12 @@
 .step-intro { font-size: 0.85rem; color: #6B7A8A; line-height: 1.5; margin-top: -8px; margin-bottom: 20px; }
 
 .link-blue, .link-blue:visited { color: #0000EE; }
-.landing-learn-more { display: block; margin: 14px auto 0; background: none; border: none; color: #0000EE; font-size: 0.85rem; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+/* A brighter sky-blue rather than classic #0000EE here specifically - the
+   dark navy hero overlay this link sits on (rgba(28,40,51,.88)) makes the
+   darker classic blue hard to read; this stays clearly "blue" while
+   actually contrasting against that background (unlike .link-blue above,
+   used on plain white where the classic shade reads fine). */
+.landing-learn-more { display: block; margin: 14px auto 0; background: none; border: none; color: #6EA8FE; font-size: 0.85rem; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
 .landing-learn-more:hover { opacity: 0.85; }
 
 .about { min-height: 100vh; min-height: 100dvh; background: #fff; }
@@ -30,7 +35,8 @@
 .about-title { font-family: 'Playfair Display', serif; font-size: 1.7rem; font-weight: 600; color: #2C3E50; margin-bottom: 16px; }
 .about-title--center { text-align: center; }
 .about-gallery { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 24px; }
-.about-gallery-img { width: 100%; height: 110px; object-fit: cover; border-radius: 6px; display: block; }
+.about-gallery-img { width: 100%; height: 110px; object-fit: cover; border-radius: 6px; display: block; cursor: zoom-in; transition: transform .2s ease, box-shadow .2s ease; }
+.about-gallery-img:hover { transform: scale(1.7); position: relative; z-index: 5; box-shadow: 0 10px 28px rgba(0,0,0,.4); }
 @media (min-width: 480px) { .about-gallery-img { height: 150px; } }
 .about-subhead { font-size: 1.05rem; font-weight: 600; color: #2C3E50; margin: 24px 0 10px; }
 .about-subhead--minor { font-size: 0.92rem; margin-top: 16px; }
@@ -54,6 +60,7 @@
 .about-rating strong { letter-spacing: normal; }
 .about-reviews { display: flex; flex-direction: column; gap: 12px; max-height: 420px; overflow-y: auto; border: 1.5px solid #EAE3D6; border-radius: 6px; padding: 14px; margin-bottom: 24px; background: #F5F0E8; -webkit-overflow-scrolling: touch; }
 .about-review { background: #fff; border-radius: 8px; padding: 14px 16px; }
+.about-review-stars { color: #E0A100; font-size: 0.8rem; letter-spacing: 1px; margin-bottom: 4px; }
 .about-review-quote { font-size: 0.88rem; color: #1A2530; line-height: 1.55; font-style: italic; margin-bottom: 6px; }
 .about-review-author { font-size: 0.78rem; color: #6B7A8A; }
 .about-content .landing-cta { display: block; width: 100%; text-align: center; margin-top: 8px; box-shadow: none; }

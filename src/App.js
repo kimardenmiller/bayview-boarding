@@ -997,7 +997,7 @@ function AboutUs({ onBack, onStart }) {
         <button className="about-back" onClick={onBack}>← Back</button>
       </div>
       <div className="about-content">
-        <h1 className="about-title about-title--center">Dog Paradise Above Loch Lomond</h1>
+        <h1 className="about-title about-title--center">Dog Paradise <br />Above <br />Loch Lomond</h1>
         <p>
           We specialize in providing a consistent family experience for your
           dog to come back to time and again. Our home sits on the China Camp
@@ -1082,6 +1082,7 @@ function AboutUs({ onBack, onStart }) {
         <div className="about-reviews">
           {ABOUT_REVIEWS.map((r, i) => (
             <div className="about-review" key={i}>
+              <p className="about-review-stars" aria-label="5 out of 5 stars">★★★★★</p>
               <p className="about-review-quote">"{r.quote}"</p>
               <p className="about-review-author">— {r.author} · {r.date}</p>
             </div>
