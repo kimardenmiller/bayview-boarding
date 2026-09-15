@@ -1,6 +1,6 @@
 BAYVIEW BOARDING — FIX LIST
 ============================
-Last updated: September 16, 2026 (reminder/billing SMS, landing title top-1/3)
+Last updated: September 16, 2026 (added staging-environment backlog item)
 
 NEXT CHANGE LIST (v1.5)
 -----------------------
@@ -13,6 +13,16 @@ NEXT CHANGE LIST (v1.5)
    to delete it whenever we're actually done needing API debugging
    access - it has full account access and shouldn't stay live
    indefinitely once that's no longer true.
+2. Set up a staging environment now that real client PII/bookings are
+   flowing through production (discussed Sept 16, 2026). Recommended
+   shape: same repo, a `staging` branch deployed to a second GitHub
+   Pages target, pointed at a second Supabase project (so test bookings/
+   migrations/RLS changes can't touch real client data), with Twilio's
+   test credentials (magic test numbers, never actually send) instead of
+   a second real phone number - no need for a fully separate codebase to
+   maintain. Not urgent by itself; do this the next time a DB schema or
+   RLS change is about to be made against production, rather than
+   testing it live the way this session's changes have been.
 
 DEFERRED (revisit only if it actually blocks something)
 ---------------------------------------------------------
