@@ -38,6 +38,7 @@ function mockInvokeDefaults(overrides = {}) {
     if (fn === 'submit-booking') return Promise.resolve({ data: { stay: DEFAULT_STAY }, error: null });
     if (fn === 'send-confirmation') return Promise.resolve({ data: {}, error: null });
     if (fn === 'admin-data') return Promise.resolve({ data: null, error: { message: 'not mocked in this test' } });
+    if (fn === 'send-contact') return Promise.resolve({ data: { success: true }, error: null });
     // App fetches this once on mount (public read, no password) to load
     // live pricing/vet-list settings - every test needs a sane default
     // here or that automatic call interferes with tests written around
@@ -479,6 +480,226 @@ describe('Live settings (day rate, discount %, holiday %, vet list)', () => {
   });
 });
 
+describe('Landing — Learn more about us', () => {
+  test('a real link, separate from the title, takes a first-timer to the About page', async () => {
+    render(<App />);
+    expect(screen.getByText('Bayview Boarding')).toBeInTheDocument();
+    fireEvent.click(screen.getByText(/Learn more/));
+    expect(await screen.findByText('Dog Paradise Above Loch Lomond')).toBeInTheDocument();
+  });
+
+  test('Back from the About page returns to the landing page', async () => {
+    render(<App />);
+    fireEvent.click(screen.getByText(/Learn more/));
+    await screen.findByText('Dog Paradise Above Loch Lomond');
+    fireEvent.click(screen.getByText('← Back'));
+    expect(await screen.findByText('Book My Stay')).toBeInTheDocument();
+    expect(screen.queryByText('Dog Paradise Above Loch Lomond')).not.toBeInTheDocument();
+  });
+
+  test('About page shows home characteristics and the typical-day/safety sections', async () => {
+    render(<App />);
+    fireEvent.click(screen.getByText(/Learn more/));
+    await screen.findByText('Dog Paradise Above Loch Lomond');
+    expect(screen.getByText('Has a fenced yard')).toBeInTheDocument();
+    expect(screen.getByText('Potty breaks every 0-2 hours')).toBeInTheDocument();
+    expect(screen.getByText('Safety, trust & environment')).toBeInTheDocument();
+    expect(screen.getByText('A typical day')).toBeInTheDocument();
+    expect(screen.getByText(/1,500-acre China Camp State Park/)).toBeInTheDocument();
+  });
+
+  test('About page shows an approximate-location map, not the exact address', async () => {
+    render(<App />);
+    fireEvent.click(screen.getByText(/Learn more/));
+    await screen.findByText('Dog Paradise Above Loch Lomond');
+    expect(screen.getByText(/not our exact address/)).toBeInTheDocument();
+    const map = screen.getByTitle(/Approximate location/);
+    expect(map.tagName).toBe('IFRAME');
+    expect(map.getAttribute('src')).toContain('Loch+Lomond');
+    // the exact street address must never appear on this public page
+    expect(screen.queryByText(/210 Bayview Drive/)).not.toBeInTheDocument();
+  });
+
+  test('About page shows a Schedule section, written in "we" not "I"', async () => {
+    render(<App />);
+    fireEvent.click(screen.getByText(/Learn more/));
+    await screen.findByText('Dog Paradise Above Loch Lomond');
+    expect(screen.getByText('Schedule')).toBeInTheDocument();
+    expect(screen.getByText(/We are home throughout the week, early risers/)).toBeInTheDocument();
+    // the old single-host, first-person phrasing should be gone entirely
+    expect(screen.queryByText(/\bI am\b/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/We only take males that have been neutered/)).not.toBeInTheDocument();
+  });
+
+  test('the title is centered and a photo gallery renders in numbered order', async () => {
+    render(<App />);
+    fireEvent.click(screen.getByText(/Learn more/));
+    const title = await screen.findByText('Dog Paradise Above Loch Lomond');
+    expect(title).toHaveClass('about-title--center');
+    const photos = document.querySelectorAll('.about-gallery-img');
+    expect(photos.length).toBe(6);
+    expect(photos[0].src).toContain('1-choco');
+    expect(photos[5].src).toContain('6-china-camp-bay-line');
+  });
+
+  test('About page shows the Rover rating as a link to the Rover reviews, with dated review quotes', async () => {
+    render(<App />);
+    fireEvent.click(screen.getByText(/Learn more/));
+    await screen.findByText('Dog Paradise Above Loch Lomond');
+    const ratingLink = screen.getByText('21 ratings on Rover');
+    expect(ratingLink.tagName).toBe('A');
+    expect(ratingLink).toHaveAttribute(
+      'href',
+      'https://www.rover.com/members/kim-m-dog-paradise-above-loch-lomond/#:~:text=be%20cared%20for.-,View,-all'
+    );
+    expect(ratingLink).toHaveAttribute('target', '_blank');
+    expect(screen.getByText(/Took great care of our pup/)).toBeInTheDocument();
+    expect(screen.getByText(/Aiste B\. · Jun 15, 2026/)).toBeInTheDocument();
+    // the one 4-star, mixed review should not appear alongside the glowing ones
+    expect(screen.queryByText(/somewhat awkward/)).not.toBeInTheDocument();
+  });
+
+  test('Book My Stay on the About page starts the booking flow directly', async () => {
+    render(<App />);
+    fireEvent.click(screen.getByText(/Learn more/));
+    await screen.findByText('Dog Paradise Above Loch Lomond');
+    fireEvent.click(screen.getAllByText('Book My Stay')[0]);
+    expect(await screen.findByText('Owner Information')).toBeInTheDocument();
+  });
+
+  test('clicking the "Bayview Boarding" landing title also goes to the About page', async () => {
+    render(<App />);
+    fireEvent.click(screen.getByText('Bayview Boarding'));
+    expect(await screen.findByText('Dog Paradise Above Loch Lomond')).toBeInTheDocument();
+  });
+
+  test('clicking the "Bayview Boarding" header wordmark mid-booking goes to the About page', async () => {
+    await fillStep1();
+    fireEvent.click(screen.getByText('Bayview Boarding'));
+    expect(await screen.findByText('Dog Paradise Above Loch Lomond')).toBeInTheDocument();
+  });
+});
+
+describe('Nav menu (hamburger)', () => {
+  function openMenu() {
+    fireEvent.click(screen.getByLabelText('Open menu'));
+  }
+
+  test('is collapsed until opened, then shows all four destinations', async () => {
+    render(<App />);
+    expect(screen.queryByText('About Us')).not.toBeInTheDocument();
+    openMenu();
+    expect(screen.getByText('About Us')).toBeInTheDocument();
+    expect(screen.getByText('Contact Us')).toBeInTheDocument();
+    expect(screen.getByText('Book a Stay')).toBeInTheDocument();
+    expect(screen.getByText('Admin')).toBeInTheDocument();
+  });
+
+  test('clicking the backdrop closes the menu without navigating', () => {
+    render(<App />);
+    openMenu();
+    fireEvent.click(document.querySelector('.nav-menu-backdrop'));
+    expect(screen.queryByText('About Us')).not.toBeInTheDocument();
+    expect(screen.getByText('Bayview Boarding')).toBeInTheDocument();
+  });
+
+  test('"About Us" opens the About page', async () => {
+    render(<App />);
+    openMenu();
+    fireEvent.click(screen.getByText('About Us'));
+    expect(await screen.findByText('Dog Paradise Above Loch Lomond')).toBeInTheDocument();
+  });
+
+  test('"Contact Us" opens the contact form', async () => {
+    render(<App />);
+    openMenu();
+    fireEvent.click(screen.getByText('Contact Us'));
+    expect(await screen.findByText('Contact Us', { selector: 'h1' })).toBeInTheDocument();
+  });
+
+  test('"Book a Stay" jumps straight into the booking flow', async () => {
+    render(<App />);
+    openMenu();
+    fireEvent.click(screen.getByText('Book a Stay'));
+    expect(await screen.findByText('Owner Information')).toBeInTheDocument();
+  });
+
+  test('"Admin" opens the same password-gated admin login as the ?admin URL', async () => {
+    render(<App />);
+    openMenu();
+    fireEvent.click(screen.getByText('Admin'));
+    expect(await screen.findByText('Admin Access')).toBeInTheDocument();
+  });
+
+  test('is available from the About page and the Contact page too, not just the landing page', async () => {
+    render(<App />);
+    fireEvent.click(screen.getByText(/Learn more/));
+    await screen.findByText('Dog Paradise Above Loch Lomond');
+    expect(screen.getByLabelText('Open menu')).toBeInTheDocument();
+    openMenu();
+    fireEvent.click(screen.getByText('Contact Us'));
+    await screen.findByText('Contact Us', { selector: 'h1' });
+    expect(screen.getByLabelText('Open menu')).toBeInTheDocument();
+  });
+});
+
+describe('Contact Us', () => {
+  function goToContact() {
+    render(<App />);
+    fireEvent.click(screen.getByLabelText('Open menu'));
+    fireEvent.click(screen.getByText('Contact Us'));
+  }
+
+  test('Send is disabled until name, message, and an email or phone are filled in', async () => {
+    goToContact();
+    await screen.findByText('Contact Us', { selector: 'h1' });
+    const send = screen.getByText('Send Message');
+    expect(send).toBeDisabled();
+    await userEvent.type(screen.getByPlaceholderText('Jane Smith'), 'Jane Owner');
+    expect(send).toBeDisabled();
+    await userEvent.type(screen.getByPlaceholderText('How can we help?'), 'Do you have room in October?');
+    expect(send).toBeDisabled(); // still no email or phone
+    await userEvent.type(screen.getByPlaceholderText('jane@email.com'), 'jane@test.com');
+    expect(send).not.toBeDisabled();
+  });
+
+  test('sends the message via send-contact and shows a confirmation', async () => {
+    goToContact();
+    await screen.findByText('Contact Us', { selector: 'h1' });
+    await userEvent.type(screen.getByPlaceholderText('Jane Smith'), 'Jane Owner');
+    await userEvent.type(screen.getByPlaceholderText('jane@email.com'), 'jane@test.com');
+    await userEvent.type(screen.getByPlaceholderText('How can we help?'), 'Do you have room in October?');
+    fireEvent.click(screen.getByText('Send Message'));
+
+    await waitFor(() => {
+      expect(supabase.functions.invoke).toHaveBeenCalledWith('send-contact', {
+        body: { name: 'Jane Owner', email: 'jane@test.com', phone: '', message: 'Do you have room in October?' },
+      });
+    });
+    expect(await screen.findByText('Message sent!')).toBeInTheDocument();
+    expect(screen.getByText(/Thanks, Jane/)).toBeInTheDocument();
+  });
+
+  test('shows an error and does not claim success if the send fails', async () => {
+    mockInvokeDefaults({ 'send-contact': async () => ({ data: null, error: { message: 'network down' } }) });
+    goToContact();
+    await screen.findByText('Contact Us', { selector: 'h1' });
+    await userEvent.type(screen.getByPlaceholderText('Jane Smith'), 'Jane Owner');
+    await userEvent.type(screen.getByPlaceholderText('jane@email.com'), 'jane@test.com');
+    await userEvent.type(screen.getByPlaceholderText('How can we help?'), 'Hi');
+    fireEvent.click(screen.getByText('Send Message'));
+    expect(await screen.findByText(/Something went wrong sending your message/)).toBeInTheDocument();
+    expect(screen.queryByText('Message sent!')).not.toBeInTheDocument();
+  });
+
+  test('Back returns to the landing page', async () => {
+    goToContact();
+    await screen.findByText('Contact Us', { selector: 'h1' });
+    fireEvent.click(screen.getByText('← Back'));
+    expect(await screen.findByText('Book My Stay')).toBeInTheDocument();
+  });
+});
+
 // ── Step 1: Owner Info (now also vet + Number of Dogs) ──────────────────────
 describe('Step 1 — Owner Info', () => {
   test('Continue is disabled (greyed out) on an empty form, and does nothing if clicked anyway', async () => {
@@ -508,6 +729,11 @@ describe('Step 1 — Owner Info', () => {
   test('advances to Dog 1 when all required fields filled', async () => {
     await fillStep1();
     expect(screen.getByText('Dog 1')).toBeInTheDocument();
+  });
+
+  test('shows a first-timer note explaining to fill out every field', async () => {
+    await goToOwnerStep();
+    expect(screen.getByText(/First time boarding with us/)).toBeInTheDocument();
   });
 
   test('vet defaults to the "Select a Vet" placeholder', async () => {
@@ -1141,7 +1367,7 @@ describe('Admin login', () => {
     expect(await screen.findByText('Bayview Boarding — Admin')).toBeInTheDocument();
   });
 
-  test('has no visible Admin button anywhere in the normal booking flow', async () => {
+  test('Admin is not shown directly - only inside the collapsed nav menu (or the ?admin URL)', async () => {
     render(<App />);
     expect(screen.queryByText('Admin')).not.toBeInTheDocument();
     fireEvent.click(screen.getByText('Book My Stay'));

@@ -35,8 +35,19 @@ Kim Miller and Estee Fletter at 210 Bayview Drive, San Rafael, CA.
 - Admin panel: browse by dog, each with its always-current profile and full
   stay history (each past stay shows its own frozen declared/signed
   snapshot, not just the dog's latest profile — see Data model below), a
-  "Send Billing Text" control on every stay. Reached only via a bookmarked
-  URL (?admin) — no visible Admin button in the UI
+  "Send Billing Text" control on every stay. Reached via the nav menu's
+  "Admin" item (Sept 16, 2026 — reversed the earlier "no visible entry
+  point" decision on request) or the bookmarked ?admin URL; either way
+  it's still fully password-gated server-side
+- "Learn more about us" page (content from the Bayview Boarding Rover
+  profile — bio, home characteristics, photos, all 5-star reviews with
+  dates linking out to Rover, an approximate-location map). Reached via
+  a real link on the landing page, clicking the "Bayview Boarding" title/
+  header, or the nav menu (Sept 16, 2026)
+- Hamburger nav menu (every screen): About Us, Contact Us, Book a Stay,
+  Admin (Sept 16, 2026)
+- "Contact Us" page — relays a name/email-or-phone/message submission to
+  Kim & Estee by SMS via send-contact (Sept 16, 2026)
 
 ## Data model (Sept 14, 2026 reorg)
 `owners` (by phone) → `dogs` (owner's always-current profile) → `stays`
@@ -88,7 +99,9 @@ call itself is dropped, not for a routine secret rotation.
 - src/App.js — main app
 - src/settings.js — all configurable values (rates, vets, messages, packing list)
 - src/waiver.js — full waiver text
-- src/App.test.js — 109 passing tests (TDD), Supabase mocked via src/__mocks__/supabase.js
+- src/App.test.js — 131 passing tests (TDD), Supabase mocked via src/__mocks__/supabase.js
+- supabase/functions/send-contact/index.ts — public Contact Us form handler: relays name/email-or-phone/message to Kim & Estee by SMS (reuses KIM_PHONE/ESTEE_PHONE). Deployed normally (no --no-verify-jwt) since it's called via the Supabase JS client like settings/lookup-client/submit-booking
+- public/img/about/ — the 6 numbered photos on the About page, served from the public folder (not bundled) and referenced via process.env.PUBLIC_URL since the app is hosted at a subpath
 - supabase/functions/send-reminders/index.ts — daily cron target (pg_cron + pg_net, see the migration): finds stays checking in tomorrow, texts each via send-confirmation, marks reminder_sent_at. Deployed with `--no-verify-jwt`; checks its own CRON_SECRET instead (see Data model for how that secret is set up without ever being committed)
 - supabase/functions/settings/index.ts — public read / password-gated write of day rate, multi-dog discount, holiday upcharge, vet list
 - supabase/functions/submit-booking/index.ts — handles booking submission: find-or-create owner (by phone) and each dog (by owner+name), inserts the stay + stay_dogs snapshot links (service role key)
@@ -118,8 +131,9 @@ call itself is dropped, not for a routine secret rotation.
 
 ## Current priorities (v1.5)
 See FIXES.txt for the live list - nothing outstanding here as of Sept
-16, 2026 beyond that file's own items (currently just revoking the
-debug Twilio API key, whenever that's actually needed).
+16, 2026 beyond that file's own items (revoking the debug Twilio API key
+whenever that's actually needed, and setting up a staging environment
+next time a DB/RLS change is made against production).
 
 ## Rules
 - Always run tests before committing (npm test -- --watchAll=false)

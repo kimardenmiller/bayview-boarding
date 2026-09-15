@@ -1,6 +1,6 @@
 BAYVIEW BOARDING — FIX LIST
 ============================
-Last updated: September 16, 2026 (added staging-environment backlog item)
+Last updated: September 16, 2026 (About Us page, nav menu, Contact form)
 
 NEXT CHANGE LIST (v1.5)
 -----------------------
@@ -63,6 +63,65 @@ TWILIO STATUS
 
 COMPLETED
 ---------
+- Sept 16, 2026 (2): New "Learn more about us" About page, content adapted
+  from the Bayview Boarding Rover profile (rover.com couldn't be scraped
+  directly - 403s all bot traffic including archive.org's cache - so Kim
+  pasted the bio/schedule/home-characteristics text and all 18 reviews
+  directly, and supplied the 6 numbered photos from Dropbox in order). Bio
+  rewritten in "we" throughout (was a mix of "I"/"we" from the single-host
+  Rover copy); dropped the "males only, neutered" line per request. All 17
+  five-star reviews shown with their original dates in a scrollable list
+  (the one 4-star, mixed review is deliberately excluded as not glowing);
+  the "21 ratings" line links out to the actual Rover reviews (with a
+  Chrome-style #:~:text= fragment aimed at Rover's own "View all" text -
+  this can only scroll/highlight that text on Rover's page, it cannot
+  actually click "View all" open, since URL fragments can't trigger JS on
+  a page we don't control). An approximate-location Google Map (neighborhood-
+  level query, "Loch Lomond, San Rafael, CA" - deliberately not the exact
+  street address, matching how Rover itself only shows approximate location)
+  was added under a new "Location" section.
+
+  Reached three ways now: a real, underlined "New? Learn more →" link on
+  the landing page (classic link blue, #0000EE) separate from the
+  decorative title; clicking the "Bayview Boarding" title/wordmark itself
+  (landing page and the booking flow's header, both now real click targets);
+  and "About Us" in the new nav menu (below). Originally considered making
+  ONLY the title clickable - rejected as undiscoverable, since page-title
+  text has no link affordance and nobody taps a business's own name
+  expecting it to navigate.
+
+  New hamburger nav menu (top-right, every screen) with About Us, Contact
+  Us, Book a Stay, and Admin. Admin being in a menu again is a deliberate
+  reversal of v1.5.13's "no visible Admin entry point" decision, made on
+  explicit request - it's still fully password-gated server-side (AdminView/
+  admin-data), so this only trades obscurity for convenience, not an actual
+  security control; the ?admin URL still works too.
+
+  New "Contact Us" page (name/email-or-phone/message) - relays the message
+  as an SMS to Kim & Estee via a new send-contact Edge Function, reusing the
+  KIM_PHONE/ESTEE_PHONE secrets already set up for receive-sms rather than
+  standing up a separate email service. Public/unauthenticated like
+  settings and lookup-client (deployed without --no-verify-jwt - the
+  Supabase JS client supplies its own anon JWT, unlike Twilio/pg_cron's
+  direct calls to receive-sms/send-reminders). Succeeds if either Kim's or
+  Estee's leg sends; only fails the whole request if neither does.
+
+  Tests: 8 new Deno tests for send-contact (method/validation checks, both
+  legs relay with the right combined message, succeeds on a partial
+  relay failure, only fails if both legs fail, CORS preflight). React: new
+  describe blocks for the About page content (gallery order, centered
+  title, "we"-only wording, dated/linked reviews, the location map not
+  leaking the real street address), the nav menu (all four destinations,
+  backdrop-click-to-close, available from every page), and the Contact
+  page (disabled-until-valid, successful send, failed send, Back). Updated
+  the old "no visible Admin button" test to reflect that Admin is now
+  reachable, just collapsed behind the menu until opened. 131 React + 71
+  Deno = 202/202 passing. Verified live (menu open/closed on every page,
+  all four destinations, title-click from both the landing page and
+  mid-booking, gallery images actually loading, review dates/link, map not
+  showing the real address) - did NOT actually submit the live Contact
+  form, since a real submission texts Kim & Estee's real phones; send-contact
+  itself is covered by the Deno suite in isolation instead.
 - Sept 16, 2026: Landing page - title moved again, now anchored to the
   top 1/3 of the page (was: higher, but still bottom-anchored above the
   button). Split into two independently-positioned blocks (title fixed

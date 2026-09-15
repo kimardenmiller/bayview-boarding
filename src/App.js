@@ -171,11 +171,11 @@ function calcCost(
 // multi-step form flows. No behavior change.
 export { formatDate, calcAge, calcCost, isHolidayNight, getHolidayWindows, todayISO, formatMoney, vetDropdownOptions };
 
-function Header() {
+function Header({ onTitleClick }) {
   return (
     <header className="header">
       <div className="header-inner">
-        <div className="wordmark">Bayview Boarding</div>
+        <button className="wordmark wordmark--link" onClick={onTitleClick}>Bayview Boarding</button>
         <div className="header-sub">San Rafael, California</div>
       </div>
     </header>
@@ -327,6 +327,11 @@ function StepOwner({ data, onChange, onNext, vetOptions, multiDogDiscount }) {
   return (
     <div className="step">
       <h2 className="step-title">Owner Information</h2>
+      <p className="step-intro">
+        First time boarding with us? Just fill out every field below and on
+        each dog's page that follows — we ask everything up front so nothing's
+        missing when you drop off.
+      </p>
       <Field label="Phone Number" hint="Returning client? Enter your number and click Look up to auto-fill." error={errors.ownerPhone}>
         <div className="email-row">
           <input value={data.ownerPhone} onChange={e => onChange('ownerPhone', e.target.value)} placeholder="(415) 555-0100" type="tel" />
@@ -926,17 +931,288 @@ function AdminView({
   );
 }
 
-function Landing({ onStart }) {
+function Landing({ onStart, onLearnMore }) {
   return (
     <div className="landing">
       <img className="landing-img" src={heroDog} alt="A happy dog boarding with Bayview Boarding on a Marin hillside trail" />
       <div className="landing-overlay">
         <div className="landing-top">
-          <h1 className="landing-title">Bayview Boarding</h1>
+          <h1 className="landing-title landing-title--link" onClick={onLearnMore}>Bayview Boarding</h1>
         </div>
         <div className="landing-bottom">
           <button className="landing-cta" onClick={onStart}>Book My Stay</button>
+          <button className="landing-learn-more" onClick={onLearnMore}>New? Learn more →</button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+// Every 5-star review from the Rover profile's 18 reviews, newest first -
+// the one 4-star review (Megan S., Aug 23 2023, a mixed "somewhat awkward
+// introductions" note) is deliberately left out since it isn't glowing.
+const ABOUT_REVIEWS = [
+  { author: 'Aiste B.', date: 'Jun 15, 2026', quote: "Kim and Estee were amazing! They took care of our boy Lincoln like he was their own and gave him all the love, patience and off leash time. We're very lucky to have found them and will definitely work with them again!" },
+  { author: 'Sue E.', date: 'Apr 30, 2026', quote: 'Great. Very flexible host easy to work with. Dog centric.' },
+  { author: 'Caitlin C.', date: 'Apr 06, 2026', quote: 'We are very particular with who we leave our dog with since he needs lots of exercise and attention to be his best self. Kim and Estee took great care of him - from long hikes from the house to playing with other dogs in their beautiful backyard, he got plenty of exercise. They have a great setup for hosting dogs and were very communicative - sending pictures during his stay and taking time before hand to learn his routines and preferences. We were very happy to find a wonderful place for Moxie to get such great care when we are away - thank you!' },
+  { author: 'Jordan & Kyle R.', date: 'Mar 14, 2026', quote: 'Took great care of our pup. Very communicative. Sent photos regularly. Would definitely have our pup board with Kim again. Thanks!' },
+  { author: 'Andi H.', date: 'Oct 24, 2025', quote: 'My dog wagged her tail from beginning to end. She loved going on off leash hikes in the trails right outside their door. Very friendly "dog people", just my kind of people.' },
+  { author: 'Ellie L.', date: 'Aug 15, 2025', quote: "Pemmy had the most fantastic time, and I was always at ease that she was being treated well. I feel okay about traveling now because I know she'll be cared for." },
+  { author: 'Christian M.', date: 'Apr 18, 2025', quote: "Can't recommend enough. Home was a dream for our Goldie." },
+  { author: 'Todd S.', date: 'Jan 08, 2025', quote: "We couldn't be happier with the care Kim provided for our dog, Boots! From the very start, during the initial meet and greet, we knew Boots was in excellent hands. Kim's calm and friendly demeanor immediately put us at ease, and Boots took to him right away. Throughout Boots' stay, Kim kept us updated with regular messages and adorable photos, which really helped us feel connected while we were away. Our travel plans unexpectedly changed, and Kim was incredibly accommodating, extending Boots' stay without hesitation. We wholeheartedly recommend Kim to anyone looking for a trustworthy, attentive, and compassionate dog sitter." },
+  { author: 'John K.', date: 'Dec 02, 2024', quote: 'Kim provided excellent care of our dog Jasper. We recommend him highly for your pets care and will not hesitate to use him ourselves when the need arises.' },
+  { author: 'Kristine Q.', date: 'Dec 05, 2023', quote: "Kim was an amazing Rover! He was very kind and communicative and clearly just has a deep love of all dogs. We really appreciated him taking great care of our pup (who isn't always the easiest dog to manage) and being so great throughout!" },
+  { author: 'Steve C.', date: 'Nov 27, 2023', quote: 'Great experience having Kim and Estee care for our dog this past week. Great care and our dog Tyson was happy playing with other well behaved dogs. Will be book again, no question.' },
+  { author: 'Avi D.', date: 'Nov 27, 2023', quote: 'Kim and Estee were great. Our Daisy seemed happy and well cared for and it sounded like she got lots of exercise doing long hikes during her stay. Very grateful to have found this option for when we travel. Will definitely book again.' },
+  { author: 'Jennifer G.', date: 'Oct 09, 2023', quote: 'Our dog had an immediate connection with them and seemed happy and at ease when we picked her up from her short stay. Communication was easy. We will definitely book another stay.' },
+  { author: 'Stephen D.', date: 'Sep 29, 2023', quote: 'Our pup had a great time with Kim and his wife! They went for a few local hikes and hung out by the pool. Communication was super easy. Happy to have Kim watch our pup again anytime.' },
+  { author: 'Peter S.', date: 'Aug 17, 2023', quote: 'Kim was great with our Buddy. We had another sitter fall through about a week before our trip and found Kim just in the nick of time. Kim and Estee were warm and welcoming to us and to Buddy. Throughout the stay Kim was communicative and shared photos of their hiking adventures. We will definitely be booking with Kim again!' },
+  { author: 'Megan O.', date: 'Nov 29, 2022', quote: 'Kim was wonderful. They have a very comfortable and welcoming home. He sent several pictures with my puppy, so that I could be updated on his well-being. Overall; I would highly recommend Kim!' },
+  { author: 'Rennie G.', date: 'Nov 18, 2022', quote: "We are very happy with Kim's care of Dusty for this one night stay. Kim was very attentive and kept us informed. We are comfortable leaving Dusty in Kim's care and will be boarding Dusty for longer stays with Kim in the near future." },
+];
+
+// Photos supplied directly (public/img/about/) - filenames were numbered by
+// Kim to set the display order; served from the public folder (not
+// imported/bundled) since there are several of them and some are sizeable.
+const ABOUT_PHOTOS = [
+  { src: `${process.env.PUBLIC_URL}/img/about/1-choco.jpeg`, alt: 'Choco' },
+  { src: `${process.env.PUBLIC_URL}/img/about/2-milo.jpeg`, alt: 'Milo' },
+  { src: `${process.env.PUBLIC_URL}/img/about/3-china-camp-shoreline-trail.jpg`, alt: 'China Camp shoreline trail' },
+  { src: `${process.env.PUBLIC_URL}/img/about/4-bayview-dog-room.jpg`, alt: 'The dog room at Bayview' },
+  { src: `${process.env.PUBLIC_URL}/img/about/5-bayview-acre.jpg`, alt: 'The acre at Bayview' },
+  { src: `${process.env.PUBLIC_URL}/img/about/6-china-camp-bay-line.jpg`, alt: 'China Camp, along the bay' },
+];
+
+// "Learn more about us" (content adapted from the Bayview Boarding Rover
+// profile) - a real, underlined link on the landing page itself (not the
+// decorative title text, which has no link affordance and nobody would
+// think to tap) so first-time visitors can see who they're trusting with
+// their dog BEFORE they commit to starting the booking flow, rather than
+// after.
+function AboutUs({ onBack, onStart }) {
+  return (
+    <div className="about">
+      <div className="about-hero">
+        <img className="about-hero-img" src={heroDog} alt="A dog on a hike with Bayview Boarding" />
+        <button className="about-back" onClick={onBack}>← Back</button>
+      </div>
+      <div className="about-content">
+        <h1 className="about-title about-title--center">Dog Paradise Above Loch Lomond</h1>
+        <p>
+          We specialize in providing a consistent family experience for your
+          dog to come back to time and again. Our home sits on the China Camp
+          State Park trailhead, a favorite location for dogs to take every
+          kind of walk from short walks to vigorous hikes all the way up to
+          the top.
+        </p>
+        <p>
+          Being retired, we look after dogs for the love of dogs and nothing
+          more. We do best with well-trained dogs who thrive on long,
+          off-leash hikes. Generally we like to build long-term relationships
+          where we can get to know your lovely family member and be the
+          country home your pup comes back to again and again.
+        </p>
+
+        <div className="about-gallery">
+          {ABOUT_PHOTOS.map((p, i) => (
+            <img key={i} className="about-gallery-img" src={p.src} alt={p.alt} loading="lazy" />
+          ))}
+        </div>
+
+        <h2 className="about-subhead">Where your pet will stay</h2>
+        <ul className="about-facts">
+          <li>Lives in a house</li>
+          <li>Has a fenced yard</li>
+          <li>Non-smoking household</li>
+          <li>Has no pets</li>
+          <li>No children present</li>
+          <li>Dogs not allowed on bed</li>
+          <li>Dogs not allowed on furniture</li>
+          <li>Potty breaks every 0-2 hours</li>
+        </ul>
+
+        <h3 className="about-subhead about-subhead--minor">Safety, trust &amp; environment</h3>
+        <p>
+          Our mid-century modern home is perched over the Bay and has a
+          special dog room that is also our office - so we are with your dog
+          the whole time. The dog room has access to the outdoors if your dog is
+          smaller and can be kept in with fencing, or closed off for larger
+          dogs if necessary.
+        </p>
+
+        <h2 className="about-subhead">A typical day</h2>
+        <p>
+          We will go on frequent walks, including more vigorous walks if
+          appropriate, in the adjacent 1,500-acre China Camp State Park that
+          is steps from our home.
+        </p>
+
+        <h2 className="about-subhead">Location</h2>
+        <p>
+          We're in the Loch Lomond neighborhood of San Rafael, right at the
+          China Camp State Park trailhead - map below shows the general area,
+          not our exact address; we'll share that once your stay is booked.
+        </p>
+        <div className="about-map">
+          <iframe
+            title="Approximate location - Loch Lomond, San Rafael, CA"
+            src="https://maps.google.com/maps?q=Loch+Lomond,+San+Rafael,+CA&z=13&output=embed"
+            loading="lazy"
+            referrerPolicy="no-referrer-when-downgrade"
+          />
+        </div>
+
+        <h2 className="about-subhead">Schedule</h2>
+        <p>
+          We are home throughout the week, early risers, and readily
+          available to care for your dog with walks, play time, and fetch.
+        </p>
+
+        <div className="about-rating">
+          ★★★★★ <strong>5.0</strong> ·{' '}
+          <a
+            className="link-blue"
+            href="https://www.rover.com/members/kim-m-dog-paradise-above-loch-lomond/#:~:text=be%20cared%20for.-,View,-all"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            21 ratings on Rover
+          </a>
+        </div>
+        <div className="about-reviews">
+          {ABOUT_REVIEWS.map((r, i) => (
+            <div className="about-review" key={i}>
+              <p className="about-review-quote">"{r.quote}"</p>
+              <p className="about-review-author">— {r.author} · {r.date}</p>
+            </div>
+          ))}
+        </div>
+
+        <button className="landing-cta" onClick={onStart}>Book My Stay</button>
+      </div>
+    </div>
+  );
+}
+
+// Hamburger nav - one instance, rendered by App itself on every screen
+// (landing, about, contact, and the booking flow), rather than duplicated
+// per page. Fixed-position, dark translucent pill (same treatment as
+// AboutUs's "← Back" button) so it reads over both the hero photo and
+// plain white pages without needing per-page theming.
+// Admin is back in this menu (Sept 2026), a deliberate reversal of the
+// earlier "no visible Admin entry point" decision (v1.5.13) per explicit
+// request - it's still fully password-gated server-side (see AdminView),
+// so this trades obscurity for convenience, not security.
+function NavMenu({ onAbout, onContact, onBookStay, onAdmin }) {
+  const [open, setOpen] = useState(false);
+
+  function go(handler) {
+    setOpen(false);
+    handler();
+  }
+
+  return (
+    <div className="nav-menu">
+      <button
+        className="nav-menu-toggle"
+        aria-label={open ? 'Close menu' : 'Open menu'}
+        aria-expanded={open}
+        onClick={() => setOpen(o => !o)}
+      >
+        {open ? '✕' : '☰'}
+      </button>
+      {open && (
+        <>
+          <div className="nav-menu-backdrop" onClick={() => setOpen(false)} />
+          <div className="nav-menu-panel">
+            <button className="nav-menu-item" onClick={() => go(onAbout)}>About Us</button>
+            <button className="nav-menu-item" onClick={() => go(onContact)}>Contact Us</button>
+            <button className="nav-menu-item" onClick={() => go(onBookStay)}>Book a Stay</button>
+            <button className="nav-menu-item" onClick={() => go(onAdmin)}>Admin</button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+// Public contact form - relayed via SMS to Kim & Estee by the send-contact
+// Edge Function (reuses the KIM_PHONE/ESTEE_PHONE secrets already set up
+// for receive-sms, rather than standing up a separate email service).
+function ContactUs({ onBack }) {
+  const [form, setForm] = useState({ name: '', email: '', phone: '', message: '' });
+  const [errors, setErrors] = useState({});
+  const [status, setStatus] = useState('idle'); // idle | sending | sent | error
+
+  function update(key, val) { setForm(f => ({ ...f, [key]: val })); }
+
+  // Pure - no state writes - so it can drive the Send button's disabled
+  // state on every render (see the established getErrors/validate split
+  // used throughout the booking flow).
+  function getErrors() {
+    const e = {};
+    if (!form.name.trim()) e.name = 'Required';
+    if (!form.message.trim()) e.message = 'Required';
+    if (!form.email.trim() && !form.phone.trim()) e.contact = 'Enter an email or phone number';
+    return e;
+  }
+
+  const canSend = Object.keys(getErrors()).length === 0;
+
+  async function handleSend() {
+    const e = getErrors();
+    setErrors(e);
+    if (Object.keys(e).length > 0) return;
+    setStatus('sending');
+    const { data, error } = await supabase.functions.invoke('send-contact', { body: form });
+    if (error || data?.error) {
+      setStatus('error');
+      return;
+    }
+    setStatus('sent');
+  }
+
+  if (status === 'sent') {
+    return (
+      <div className="about">
+        <div className="about-content">
+          <button className="back-btn" onClick={onBack}>← Back</button>
+          <h1 className="about-title about-title--center" style={{ marginTop: 20 }}>Message sent!</h1>
+          <p style={{ textAlign: 'center' }}>Thanks, {form.name.split(' ')[0]} — we'll get back to you soon.</p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="about">
+      <div className="about-content">
+        <button className="back-btn" onClick={onBack}>← Back</button>
+        <h1 className="about-title about-title--center" style={{ marginTop: 20 }}>Contact Us</h1>
+        <p>
+          Questions about a stay, availability, or anything else - send us a
+          message and we'll get back to you.
+        </p>
+        <Field label="Your Name" error={errors.name}>
+          <input value={form.name} onChange={e => update('name', e.target.value)} placeholder="Jane Smith" />
+        </Field>
+        <Field label="Email" error={errors.contact}>
+          <input value={form.email} onChange={e => update('email', e.target.value)} placeholder="jane@email.com" type="email" />
+        </Field>
+        <Field label="Phone (optional if email given)">
+          <input value={form.phone} onChange={e => update('phone', e.target.value)} placeholder="(415) 555-0100" type="tel" />
+        </Field>
+        <Field label="Message" error={errors.message}>
+          <textarea value={form.message} onChange={e => update('message', e.target.value)} placeholder="How can we help?" rows={5} />
+        </Field>
+        {status === 'error' && (
+          <div className="field-error" style={{ marginBottom: 12 }}>
+            Something went wrong sending your message. Please try again, or text us directly.
+          </div>
+        )}
+        <button className="landing-cta" style={{ width: '100%', boxShadow: 'none' }} disabled={!canSend || status === 'sending'} onClick={handleSend}>
+          {status === 'sending' ? 'Sending...' : 'Send Message'}
+        </button>
       </div>
     </div>
   );
@@ -944,6 +1220,8 @@ function Landing({ onStart }) {
 
 export default function App() {
   const [showLanding, setShowLanding] = useState(true);
+  const [showAbout, setShowAbout] = useState(false);
+  const [showContact, setShowContact] = useState(false);
   const [step, setStep] = useState(0);
   // Admin has no visible entry point in the UI anymore - reached only via a
   // bookmarked URL (?admin), e.g. https://.../bayview-boarding/?admin
@@ -1066,58 +1344,78 @@ export default function App() {
     vets, setVets,
   };
 
-  if (showLanding) {
-    return (
-      <div className="app">
-        <Landing onStart={() => setShowLanding(false)} />
-        {showAdmin && <AdminView {...adminProps} />}
-      </div>
+  // Mutually-exclusive top-level views. Each nav function clears the
+  // others explicitly rather than relying on ordering, so there's no way
+  // to land on two views at once regardless of which one was previously
+  // showing.
+  function goToLanding() { setShowLanding(true); setShowAbout(false); setShowContact(false); }
+  function goToAbout() { setShowAbout(true); setShowLanding(false); setShowContact(false); }
+  function goToContact() { setShowContact(true); setShowLanding(false); setShowAbout(false); }
+  function goToBooking() { setShowLanding(false); setShowAbout(false); setShowContact(false); }
+
+  const navMenu = (
+    <NavMenu onAbout={goToAbout} onContact={goToContact} onBookStay={goToBooking} onAdmin={() => setShowAdmin(true)} />
+  );
+
+  let pageContent;
+  if (showAbout) {
+    pageContent = <AboutUs onBack={goToLanding} onStart={goToBooking} />;
+  } else if (showContact) {
+    pageContent = <ContactUs onBack={goToLanding} />;
+  } else if (showLanding) {
+    pageContent = <Landing onStart={goToBooking} onLearnMore={goToAbout} />;
+  } else {
+    pageContent = (
+      <>
+        <Header onTitleClick={goToAbout} />
+        <main className="main">
+          {!submitted ? (
+            <>
+              <Progress step={step} numberOfDogs={form.dogs.length} />
+              {step === 0 && (
+                <StepOwner
+                  data={form}
+                  onChange={update}
+                  onNext={() => setStep(1)}
+                  vetOptions={vetDropdownOptions(vets)}
+                  multiDogDiscount={multiDogDiscount}
+                />
+              )}
+              {step >= 1 && step <= form.dogs.length && (
+                <StepDogPage
+                  data={form}
+                  onChange={update}
+                  index={step - 1}
+                  onNext={() => setStep(step + 1)}
+                  onBack={() => setStep(step - 1)}
+                />
+              )}
+              {step === form.dogs.length + 1 && (
+                <StepDates
+                  data={form}
+                  onChange={update}
+                  onNext={() => setStep(step + 1)}
+                  onBack={() => setStep(step - 1)}
+                  rate={rate}
+                  multiDogDiscount={multiDogDiscount}
+                  holidayUpcharge={holidayUpcharge}
+                />
+              )}
+              {step === form.dogs.length + 2 && <StepWaiver onNext={() => setStep(step + 1)} onBack={() => setStep(step - 1)} />}
+              {step === form.dogs.length + 3 && <StepSign data={form} onChange={update} onSubmit={handleSubmit} onBack={() => setStep(step - 1)} ownerName={form.ownerName} submitting={submitting} />}
+            </>
+          ) : (
+            <Confirmation stay={currentStay} onNewBooking={reset} />
+          )}
+        </main>
+      </>
     );
   }
 
   return (
     <div className="app">
-      <Header />
-      <main className="main">
-        {!submitted ? (
-          <>
-            <Progress step={step} numberOfDogs={form.dogs.length} />
-            {step === 0 && (
-              <StepOwner
-                data={form}
-                onChange={update}
-                onNext={() => setStep(1)}
-                vetOptions={vetDropdownOptions(vets)}
-                multiDogDiscount={multiDogDiscount}
-              />
-            )}
-            {step >= 1 && step <= form.dogs.length && (
-              <StepDogPage
-                data={form}
-                onChange={update}
-                index={step - 1}
-                onNext={() => setStep(step + 1)}
-                onBack={() => setStep(step - 1)}
-              />
-            )}
-            {step === form.dogs.length + 1 && (
-              <StepDates
-                data={form}
-                onChange={update}
-                onNext={() => setStep(step + 1)}
-                onBack={() => setStep(step - 1)}
-                rate={rate}
-                multiDogDiscount={multiDogDiscount}
-                holidayUpcharge={holidayUpcharge}
-              />
-            )}
-            {step === form.dogs.length + 2 && <StepWaiver onNext={() => setStep(step + 1)} onBack={() => setStep(step - 1)} />}
-            {step === form.dogs.length + 3 && <StepSign data={form} onChange={update} onSubmit={handleSubmit} onBack={() => setStep(step - 1)} ownerName={form.ownerName} submitting={submitting} />}
-          </>
-        ) : (
-          <Confirmation stay={currentStay} onNewBooking={reset} />
-        )}
-      </main>
+      {pageContent}
+      {navMenu}
       {showAdmin && <AdminView {...adminProps} />}
     </div>
   );
