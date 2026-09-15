@@ -1,18 +1,20 @@
 BAYVIEW BOARDING — FIX LIST
 ============================
-Last updated: September 16, 2026 (packing list/SMS templates/waiver snapshot now admin-editable; map/nav polish)
+Last updated: September 16, 2026 (Twilio A2P 10DLC campaign now APPROVED)
 
 NEXT CHANGE LIST (v1.5)
 -----------------------
-1. SECURITY: revoke the Twilio API key Kim shared in chat for
-   debugging (SK... SID). Still active as of Sept 15, 2026 - used
-   successfully that day to check A2P campaign status via the API
-   (IN_PROGRESS, no errors, brand APPROVED - just still queued at TCR).
-   Kim explicitly said to keep it live for now rather than revoke it
-   after that check. Go to Twilio Console > Account > API keys & tokens
-   to delete it whenever we're actually done needing API debugging
-   access - it has full account access and shouldn't stay live
-   indefinitely once that's no longer true.
+1. SECURITY: revoke the Twilio debug API key(s) Kim has shared in chat.
+   Used again Sept 16, 2026 (a key named "debug_attempt_3_persit",
+   possibly a freshly-created one - SID shared didn't match the one on
+   file from Sept 15) to confirm A2P finally APPROVED via the API - see
+   TWILIO STATUS. That was the whole reason this key was being kept
+   live; now that the actual goal (approval) is confirmed, this is a
+   natural point to actually revoke it rather than keep deferring -
+   worth asking Kim directly next round rather than assuming. Go to
+   Twilio Console > Account > API keys & tokens to delete whichever
+   key(s) are still listed - full account access, shouldn't stay live
+   indefinitely.
 2. Set up a staging environment now that real client PII/bookings are
    flowing through production (discussed Sept 16, 2026). Recommended
    shape: same repo, a `staging` branch deployed to a second GitHub
@@ -65,9 +67,15 @@ TWILIO STATUS
   populated, not just a stale duplicate email) from vetting that ran
   before these fixes were live. Resubmitted after — confirmed
   campaign_status: IN_PROGRESS, errors: [] as of September 13, 2026.
+- ✅ APPROVED, September 16, 2026 - confirmed via the Messaging
+  Compliance API: campaign_status VERIFIED (errors: []), brand status
+  APPROVED, identity_status VERIFIED. Real SMS sends (confirmation,
+  reminder, billing) should now actually go through to clients - this
+  was the last blocker (previously silently failing with error 30034
+  while the campaign was pending carrier review).
 - Twilio account: see src/settings.js PHONE
-- Confirmation SMS wired up and tested (pending A2P approval)
-- Reminder and billing SMS templates ready in settings.js
+- Confirmation, reminder, and billing SMS are wired up, tested, and (as
+  of today) no longer blocked on A2P approval
 
 COMPLETED
 ---------
