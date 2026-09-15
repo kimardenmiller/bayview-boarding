@@ -16,6 +16,12 @@ const DEFAULT_HOLIDAY_UPCHARGE = SETTINGS.HOLIDAY_UPCHARGE;
 // The editable vet clinic list, without the structural placeholder/"Other"
 // entries the app always adds itself (see vetDropdownOptions).
 const DEFAULT_VETS = SETTINGS.SAN_RAFAEL_VETS.slice(1, -1);
+const DEFAULT_PACKING_LIST = SETTINGS.PACKING_LIST;
+const DEFAULT_SMS_TEMPLATES = {
+  confirmation: SETTINGS.SMS_CONFIRMATION,
+  reminder: SETTINGS.SMS_REMINDER,
+  billing: SETTINGS.SMS_BILLING,
+};
 
 function vetDropdownOptions(vets) {
   return ['Select a Vet', ...vets, 'Other — see notes'];
@@ -641,6 +647,7 @@ function Confirmation({ stay, onNewBooking }) {
 function AdminView({
   onClose, rate, setRate, multiDogDiscount, setMultiDogDiscount,
   holidayUpcharge, setHolidayUpcharge, vets, setVets,
+  packingList, setPackingList, smsTemplates, setSmsTemplates,
 }) {
   const [pw, setPw] = useState('');
   const [authed, setAuthed] = useState(false);
@@ -655,6 +662,9 @@ function AdminView({
   const [editHolidayUpcharge, setEditHolidayUpcharge] = useState(String(holidayUpcharge * 100));
   const [editVets, setEditVets] = useState(vets);
   const [newVetText, setNewVetText] = useState('');
+  const [editPackingList, setEditPackingList] = useState(packingList);
+  const [newPackingItemText, setNewPackingItemText] = useState('');
+  const [editSms, setEditSms] = useState(smsTemplates);
   const [settingsError, setSettingsError] = useState('');
   const [savingSettings, setSavingSettings] = useState(false);
   // Billing SMS is admin-triggered (not auto-sent at pickup time) - the
@@ -665,6 +675,10 @@ function AdminView({
   // billable.
   const [billingDrafts, setBillingDrafts] = useState({});
   const [billingStatus, setBillingStatus] = useState({});
+  // Which stay's signed waiver snapshot is currently expanded, if any -
+  // one at a time, collapsed by default so the stay history doesn't turn
+  // into a wall of legal text.
+  const [expandedWaiver, setExpandedWaiver] = useState(null);
 
   function billingDraftFor(s) {
     if (s.id in billingDrafts) return billingDrafts[s.id];
@@ -689,6 +703,7 @@ function AdminView({
         // every dog on a shared stay.
         dog_name: selected.name,
         final_cost: finalCost,
+        message_template: smsTemplates.billing,
       },
     });
     if (fnError || data?.error) {
@@ -724,6 +739,8 @@ function AdminView({
     setEditMultiDogDiscount(String(multiDogDiscount * 100));
     setEditHolidayUpcharge(String(holidayUpcharge * 100));
     setEditVets(vets);
+    setEditPackingList(packingList);
+    setEditSms(smsTemplates);
   }
 
   // Shared save path for every settings field below - persists to
@@ -749,6 +766,19 @@ function AdminView({
     setEditMultiDogDiscount(String(data.multiDogDiscount * 100));
     setEditHolidayUpcharge(String(data.holidayUpcharge * 100));
     setEditVets(data.vets);
+    if (data.packingList) {
+      setPackingList(data.packingList);
+      setEditPackingList(data.packingList);
+    }
+    if (data.smsConfirmation || data.smsReminder || data.smsBilling) {
+      const next = {
+        confirmation: data.smsConfirmation ?? smsTemplates.confirmation,
+        reminder: data.smsReminder ?? smsTemplates.reminder,
+        billing: data.smsBilling ?? smsTemplates.billing,
+      };
+      setSmsTemplates(next);
+      setEditSms(next);
+    }
     return true;
   }
 
@@ -761,6 +791,17 @@ function AdminView({
 
   function removeVet(index) {
     setEditVets(v => v.filter((_, i) => i !== index));
+  }
+
+  function addPackingItem() {
+    const item = newPackingItemText.trim();
+    if (!item) return;
+    setEditPackingList(l => [...l, item]);
+    setNewPackingItemText('');
+  }
+
+  function removePackingItem(index) {
+    setEditPackingList(l => l.filter((_, i) => i !== index));
   }
 
   if (!authed) {
@@ -817,6 +858,27 @@ function AdminView({
                 {s.notes && <div className="stay-notes">"{s.notes}"</div>}
                 {s.aggression_history === 'yes' && <div className="stay-flag">⚠ Aggression noted: {s.aggression_detail}</div>}
                 {s.health_concerns === 'yes' && <div className="stay-flag">⚕ Health note: {s.health_detail}</div>}
+                {Array.isArray(s.waiver_snapshot) && s.waiver_snapshot.length > 0 && (
+                  <div style={{ marginTop: 6 }}>
+                    <button
+                      className="back-btn"
+                      style={{ fontSize: '0.78rem' }}
+                      onClick={() => setExpandedWaiver(w => (w === s.id ? null : s.id))}
+                    >
+                      {expandedWaiver === s.id ? 'Hide waiver as signed' : 'View waiver as signed'}
+                    </button>
+                    {expandedWaiver === s.id && (
+                      <div className="waiver-scroll" style={{ marginTop: 8, maxHeight: 260 }}>
+                        {s.waiver_snapshot.map((section, si) => (
+                          <div className="waiver-section" key={si}>
+                            <div className="waiver-section-title">{section.title}</div>
+                            <p>{section.body}</p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
                 <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 8 }}>
                   <span style={{ fontSize: '0.85rem' }}>$</span>
                   <input
@@ -883,7 +945,7 @@ function AdminView({
           <div style={{ fontSize: '0.75rem', color: '#6B7A8A', marginTop: 4 }}>On holiday nights (New Year's, MLK, Ski Week, etc.) · Current: {holidayUpcharge * 100}%</div>
         </div>
 
-        <div className="rate-setting">
+        <div className="rate-setting vet-editor">
           <label className="field-label">Vet Clinics (booking form dropdown)</label>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 8 }}>
             {editVets.map((v, i) => (
@@ -906,6 +968,61 @@ function AdminView({
           <div style={{ marginTop: 8 }}>
             <button className="btn-primary" style={{ padding: '6px 14px' }} disabled={savingSettings} onClick={() => saveSettings({ vets: editVets })}>Save Vet List</button>
           </div>
+        </div>
+
+        <div className="rate-setting packing-editor">
+          <label className="field-label">Packing List (shown in reminder texts)</label>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 8 }}>
+            {editPackingList.map((item, i) => (
+              <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: '0.85rem' }}>
+                <span style={{ flex: 1 }}>{item}</span>
+                <button className="btn-secondary" style={{ padding: '4px 10px', fontSize: '0.78rem' }} onClick={() => removePackingItem(i)}>Remove</button>
+              </div>
+            ))}
+          </div>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <input
+              placeholder="Item to bring"
+              value={newPackingItemText}
+              onChange={e => setNewPackingItemText(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && addPackingItem()}
+              style={{ flex: 1, padding: '6px 10px', border: '1.5px solid #D5D9DE', borderRadius: 6, fontSize: '0.9rem' }}
+            />
+            <button className="btn-secondary" style={{ padding: '6px 14px' }} onClick={addPackingItem}>Add</button>
+          </div>
+          <div style={{ marginTop: 8 }}>
+            <button className="btn-primary" style={{ padding: '6px 14px' }} disabled={savingSettings} onClick={() => saveSettings({ packingList: editPackingList })}>Save Packing List</button>
+          </div>
+        </div>
+
+        <div className="rate-setting sms-editor">
+          <label className="field-label">SMS Message Templates</label>
+          <div style={{ fontSize: '0.72rem', color: '#6B7A8A', marginBottom: 10 }}>
+            Placeholders: {'{firstName} {dogName} {dropDate} {dropTime} {pickDate} {pickTime} {estimatedCost} {finalCost} {packingList} {kimPhone} {esteePhone}'}
+          </div>
+          {[
+            { key: 'confirmation', label: 'Booking Confirmation' },
+            { key: 'reminder', label: 'Stay Reminder' },
+            { key: 'billing', label: 'Billing / Pickup' },
+          ].map(({ key, label }) => (
+            <div key={key} style={{ marginBottom: 12 }}>
+              <div style={{ fontSize: '0.8rem', fontWeight: 500, color: '#2C3E50', marginBottom: 4 }}>{label}</div>
+              <textarea
+                value={editSms[key]}
+                onChange={e => setEditSms(s => ({ ...s, [key]: e.target.value }))}
+                rows={3}
+                style={{ width: '100%', padding: '8px 10px', border: '1.5px solid #D5D9DE', borderRadius: 6, fontSize: '0.82rem', fontFamily: 'inherit' }}
+              />
+              <button
+                className="btn-primary"
+                style={{ padding: '6px 14px', marginTop: 6 }}
+                disabled={savingSettings}
+                onClick={() => saveSettings({ [`sms${key.charAt(0).toUpperCase()}${key.slice(1)}`]: editSms[key] })}
+              >
+                Save {label} Text
+              </button>
+            </div>
+          ))}
         </div>
         {settingsError && <div className="field-error" style={{ marginBottom: 12 }}>{settingsError}</div>}
 
@@ -983,6 +1100,18 @@ const ABOUT_PHOTOS = [
   { src: `${process.env.PUBLIC_URL}/img/about/6-china-camp-bay-line.jpg`, alt: 'China Camp, along the bay' },
 ];
 
+// Approximate-location map (About page "Location" section). Deliberately a
+// neighborhood-level query, not the real street address - see the note in
+// that section's own text. Kept as one shared query string so the embed
+// (iframe) and the click-through link (the whole map area opens full
+// Google Maps in a new tab - iframes otherwise swallow clicks for their
+// own embedded UI instead of navigating anywhere) always point at the same
+// place.
+const ABOUT_MAP_QUERY = 'Loch Lomond, San Rafael, CA';
+const ABOUT_MAP_QUERY_ENCODED = ABOUT_MAP_QUERY.replace(/, /g, ',+').replace(/ /g, '+');
+const ABOUT_MAP_EMBED_URL = `https://maps.google.com/maps?q=${ABOUT_MAP_QUERY_ENCODED}&z=13&output=embed`;
+const ABOUT_MAP_LINK_URL = `https://www.google.com/maps/search/?api=1&query=${ABOUT_MAP_QUERY_ENCODED}`;
+
 // "Learn more about us" (content adapted from the Bayview Boarding Rover
 // profile) - a real, underlined link on the landing page itself (not the
 // decorative title text, which has no link affordance and nobody would
@@ -1056,9 +1185,16 @@ function AboutUs({ onBack, onStart }) {
         <div className="about-map">
           <iframe
             title="Approximate location - Loch Lomond, San Rafael, CA"
-            src="https://maps.google.com/maps?q=Loch+Lomond,+San+Rafael,+CA&z=13&output=embed"
+            src={ABOUT_MAP_EMBED_URL}
             loading="lazy"
             referrerPolicy="no-referrer-when-downgrade"
+          />
+          <a
+            className="about-map-overlay"
+            href={ABOUT_MAP_LINK_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label="Open this location in Google Maps"
           />
         </div>
 
@@ -1069,7 +1205,7 @@ function AboutUs({ onBack, onStart }) {
         </p>
 
         <div className="about-rating">
-          ★★★★★ <strong>5.0</strong> ·{' '}
+          <span className="stars-inline">★★★★★</span> <strong>5.0</strong> ·{' '}
           <a
             className="link-blue"
             href="https://www.rover.com/members/kim-m-dog-paradise-above-loch-lomond/#:~:text=be%20cared%20for.-,View,-all"
@@ -1234,11 +1370,14 @@ export default function App() {
   const [multiDogDiscount, setMultiDogDiscount] = useState(DEFAULT_MULTI_DOG_DISCOUNT);
   const [holidayUpcharge, setHolidayUpcharge] = useState(DEFAULT_HOLIDAY_UPCHARGE);
   const [vets, setVets] = useState(DEFAULT_VETS);
+  const [packingList, setPackingList] = useState(DEFAULT_PACKING_LIST);
+  const [smsTemplates, setSmsTemplates] = useState(DEFAULT_SMS_TEMPLATES);
 
   // Admin-configurable settings (day rate, multi-dog discount, holiday
-  // upcharge, vet list) are persisted in Supabase now, not hardcoded -
-  // every visitor needs the current values to see correct pricing and
-  // the current vet list, so this is a public, unauthenticated read (see
+  // upcharge, vet list, packing list, SMS templates - Sept 16, 2026 added
+  // the last two) are persisted in Supabase now, not hardcoded - every
+  // visitor needs the current values to see correct pricing and the
+  // current vet list, so this is a public, unauthenticated read (see
   // supabase/functions/settings/index.ts), not gated behind admin login.
   // The hook-declared defaults above are just what's shown until this
   // resolves.
@@ -1249,6 +1388,14 @@ export default function App() {
       if (typeof data.multiDogDiscount === 'number') setMultiDogDiscount(data.multiDogDiscount);
       if (typeof data.holidayUpcharge === 'number') setHolidayUpcharge(data.holidayUpcharge);
       if (Array.isArray(data.vets)) setVets(data.vets);
+      if (Array.isArray(data.packingList)) setPackingList(data.packingList);
+      if (data.smsConfirmation || data.smsReminder || data.smsBilling) {
+        setSmsTemplates({
+          confirmation: data.smsConfirmation ?? DEFAULT_SMS_TEMPLATES.confirmation,
+          reminder: data.smsReminder ?? DEFAULT_SMS_TEMPLATES.reminder,
+          billing: data.smsBilling ?? DEFAULT_SMS_TEMPLATES.billing,
+        });
+      }
     }).catch(() => {}); // network hiccup - keep the defaults, don't crash the page
   }, []);
 
@@ -1294,6 +1441,11 @@ export default function App() {
       estimatedCost: cost ? parseFloat(cost) : null,
       signature: form.signature,
       clientTimezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+      // Exactly what was shown and agreed to at StepWaiver, captured at
+      // submission time so a later edit to src/waiver.js can never
+      // retroactively change what this client is on record as having
+      // signed (Sept 16, 2026) - see the migration for the full rationale.
+      waiverSnapshot: WAIVER_SECTIONS,
     };
     const { data: result, error } = await supabase.functions.invoke('submit-booking', { body: payload });
     setSubmitting(false);
@@ -1322,6 +1474,7 @@ export default function App() {
             drop_time: confirmation.drop_time,
             pickup_time: confirmation.pickup_time,
             estimated_cost: confirmation.estimated_cost,
+            message_template: smsTemplates.confirmation,
           }
         });
       } catch (textErr) {
@@ -1343,6 +1496,8 @@ export default function App() {
     multiDogDiscount, setMultiDogDiscount,
     holidayUpcharge, setHolidayUpcharge,
     vets, setVets,
+    packingList, setPackingList,
+    smsTemplates, setSmsTemplates,
   };
 
   // Mutually-exclusive top-level views. Each nav function clears the

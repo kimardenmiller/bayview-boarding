@@ -7,52 +7,89 @@ const TWILIO_FROM = Deno.env.get("TWILIO_PHONE")!;
 const KIM_PHONE = Deno.env.get("KIM_PHONE")!;
 const ESTEE_PHONE = Deno.env.get("ESTEE_PHONE")!;
 
-const PACKING_LIST = [
+// Fallback only - used if a caller doesn't pass packing_list (e.g. an old
+// client bundle before this was wired through, or a direct/manual call).
+// The real, admin-editable value lives in the `settings` table now (Sept
+// 16, 2026) - callers (App.js, send-reminders) fetch it themselves and
+// pass it through, since this function has no DB access of its own.
+const DEFAULT_PACKING_LIST = [
   "Food",
   "Leash & doggy bags",
   "Bed & favorite blanket",
   "Favorite treats",
   "Favorite toys",
   "Favorite food bowl (we provide a water bowl)",
-  "Written special instructions including vet name, address & phone",
+  "Written special instructions including vet name, address, and phone",
 ].join(", ");
 
-serve(async (req) => {
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+};
+
+function json(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "Content-Type": "application/json", ...corsHeaders },
+  });
+}
+
+// Replaces {placeholders} in a template with the matching value from vars -
+// left as-is (unfilled) if a key isn't provided, rather than silently
+// producing "undefined" in an actual outbound text.
+export function fillTemplate(template: string, vars: Record<string, string>): string {
+  return template.replace(/\{(\w+)\}/g, (match, key) => (key in vars ? vars[key] : match));
+}
+
+// Exported (rather than only passed inline to serve()) so it can be unit
+// tested directly with a constructed Request - no live server needed.
+export async function handleRequest(req: Request): Promise<Response> {
   try {
     if (req.method === "OPTIONS") {
-      return new Response("ok", {
-        headers: {
-          "Access-Control-Allow-Origin": "*",
-          "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-        },
-      });
+      return new Response("ok", { headers: corsHeaders });
     }
 
     const text = await req.text();
-    if (!text) return new Response(JSON.stringify({ error: "Empty body" }), { status: 400 });
+    if (!text) return json({ error: "Empty body" }, 400);
 
-    const { type, owner_name, owner_phone, dog_name, check_in, check_out, drop_time, pickup_time, estimated_cost, final_cost } = JSON.parse(text);
+    const {
+      type, owner_name, owner_phone, dog_name, check_in, check_out,
+      drop_time, pickup_time, estimated_cost, final_cost,
+      message_template, packing_list,
+    } = JSON.parse(text);
 
     const firstName = owner_name?.split(" ")[0] || "there";
     const dropDate = check_in ? new Date(check_in + "T12:00:00").toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" }) : "";
     const pickDate = check_out ? new Date(check_out + "T12:00:00").toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" }) : "";
     const dropTimeStr = drop_time ? drop_time.slice(0, 5) : "";
     const pickTimeStr = pickup_time ? pickup_time.slice(0, 5) : "";
+    const packingListStr = Array.isArray(packing_list) ? packing_list.join(", ") : (packing_list || DEFAULT_PACKING_LIST);
 
     let message = "";
 
-    if (type === "reminder") {
-      message = `Hi ${firstName}! Just a reminder that ${dog_name}'s stay at Bayview Boarding starts tomorrow at ${dropTimeStr}. Please bring: ${PACKING_LIST}. See you then! Reply STOP to opt out. — Kim & Estee`;
+    if (message_template) {
+      // The admin-editable template (settings.sms_confirmation/reminder/
+      // billing) already bakes in the "replies aren't monitored" footer via
+      // {kimPhone}/{esteePhone}, so appendContactNote is NOT also called
+      // here - that would duplicate it.
+      message = fillTemplate(message_template, {
+        firstName, dogName: dog_name || "", dropDate, dropTime: dropTimeStr,
+        pickDate, pickTime: pickTimeStr,
+        estimatedCost: estimated_cost != null ? String(estimated_cost) : "",
+        finalCost: final_cost != null ? String(final_cost) : "",
+        packingList: packingListStr, kimPhone: KIM_PHONE, esteePhone: ESTEE_PHONE,
+      });
+    } else if (type === "reminder") {
+      message = `Hi ${firstName}! Just a reminder that ${dog_name}'s stay at Bayview Boarding starts tomorrow at ${dropTimeStr}. Please bring: ${packingListStr}. See you then! Reply STOP to opt out. — Kim & Estee`;
+      message = appendContactNote(message, KIM_PHONE, ESTEE_PHONE);
     } else if (type === "billing") {
       message = `Hi ${firstName}! ${dog_name} is ready for pickup. Your total for this stay is $${final_cost}. Thanks for choosing Bayview Boarding! Reply STOP to opt out. — Kim & Estee`;
+      message = appendContactNote(message, KIM_PHONE, ESTEE_PHONE);
     } else {
       // Default: confirmation
       message = `Hi ${firstName}! ${dog_name}'s stay at Bayview Boarding is confirmed. Drop-off: ${dropDate} at ${dropTimeStr}. Pick-up: ${pickDate} at ${pickTimeStr}. Estimated cost: $${estimated_cost}. — Kim & Estee`;
+      message = appendContactNote(message, KIM_PHONE, ESTEE_PHONE);
     }
-
-    // Every outbound message ends with how to actually reach us, since
-    // replies to this number aren't monitored (see receive-sms).
-    message = appendContactNote(message, KIM_PHONE, ESTEE_PHONE);
 
     const toNumber = owner_phone.replace(/\D/g, "");
     const formattedTo = toNumber.startsWith("1") ? `+${toNumber}` : `+1${toNumber}`;
@@ -77,24 +114,16 @@ serve(async (req) => {
     console.log("Twilio response:", JSON.stringify(result));
 
     if (!response.ok) {
-      return new Response(JSON.stringify({ error: result }), {
-        status: 500,
-        headers: { "Access-Control-Allow-Origin": "*" },
-      });
+      return json({ error: result }, 500);
     }
 
-    return new Response(JSON.stringify({ success: true, sid: result.sid }), {
-      headers: {
-        "Content-Type": "application/json",
-        "Access-Control-Allow-Origin": "*",
-      },
-    });
-
+    return json({ success: true, sid: result.sid });
   } catch (err) {
     console.error("Function error:", err);
-    return new Response(JSON.stringify({ error: err.message }), {
-      status: 500,
-      headers: { "Access-Control-Allow-Origin": "*" },
-    });
+    return json({ error: (err as Error).message }, 500);
   }
-});
+}
+
+if (import.meta.main) {
+  serve(handleRequest);
+}

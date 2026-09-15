@@ -106,6 +106,7 @@ function validBooking(overrides: Record<string, unknown> = {}) {
     notes: '',
     estimatedCost: 210,
     signature: 'Kim Miller',
+    waiverSnapshot: [{ title: 'Risks & Releases', body: 'Test waiver text.' }],
     ...overrides,
   };
 }
@@ -138,6 +139,31 @@ Deno.test('rejects a booking missing required fields, without touching the datab
     assert(data.error.includes('dogs'));
     assert(data.error.includes('checkIn'));
     assertEquals(stub.calls.length, 0);
+  } finally {
+    stub.restore();
+  }
+});
+
+Deno.test('rejects a booking with no waiver snapshot, without touching the database', async () => {
+  const stub = stubSupabase();
+  try {
+    const res = await handleRequest(postRequest(validBooking({ waiverSnapshot: undefined })));
+    assertEquals(res.status, 400);
+    const data = await res.json();
+    assert(data.error.includes('waiverSnapshot'));
+    assertEquals(stub.calls.length, 0);
+  } finally {
+    stub.restore();
+  }
+});
+
+Deno.test('rejects a booking with an empty waiver snapshot array', async () => {
+  const stub = stubSupabase();
+  try {
+    const res = await handleRequest(postRequest(validBooking({ waiverSnapshot: [] })));
+    assertEquals(res.status, 400);
+    const data = await res.json();
+    assert(data.error.includes('waiverSnapshot'));
   } finally {
     stub.restore();
   }
@@ -267,6 +293,10 @@ Deno.test('a new owner with a new dog creates one owner, one dog, one stay, one 
     assertEquals(stub.db.stayDogs.length, 1);
     assertEquals(stub.db.owners[0].vet_name, 'Marin Pet Hospital');
     assertEquals(stub.db.stays[0].number_of_dogs, 1);
+    // the waiver snapshot is stored verbatim, exactly as submitted - not
+    // re-derived from the current waiver.js at read time (see the
+    // migration for why that distinction matters)
+    assertEquals(stub.db.stays[0].waiver_snapshot, [{ title: 'Risks & Releases', body: 'Test waiver text.' }]);
 
     assertEquals(data.stay.owner_name, 'Kim Miller');
     assertEquals(data.stay.dog_names, ['Rex']);

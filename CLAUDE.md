@@ -20,9 +20,10 @@ Kim Miller and Estee Fletter at 210 Bayview Drive, San Rafael, CA.
 - Cost estimate based on drop-off/pick-up times at an admin-configurable
   day rate (default $105/day), holiday upcharge (default +30%), and
   multi-dog discount (default 10% off each additional dog's nightly rate,
-  uncapped) — all three, plus the vet clinic list, are loaded from
-  Supabase on every page load (public read) and editable in the admin
-  panel (Sept 15 (4) — see Data model below)
+  uncapped) — all three, plus the vet clinic list, the packing list, and
+  the 3 SMS message templates, are loaded from Supabase on every page load
+  (public read) and editable in the admin panel (Sept 15 (4), packing
+  list/SMS templates added Sept 16 (5) — see Data model below)
 - Past check-in dates are rejected, client-side (StepDates) and
   server-side (submit-booking, the actual boundary); a same-day stay's
   pick-up must be after its drop-off (no such constraint across days)
@@ -35,10 +36,11 @@ Kim Miller and Estee Fletter at 210 Bayview Drive, San Rafael, CA.
 - Admin panel: browse by dog, each with its always-current profile and full
   stay history (each past stay shows its own frozen declared/signed
   snapshot, not just the dog's latest profile — see Data model below), a
-  "Send Billing Text" control on every stay. Reached via the nav menu's
-  "Admin" item (Sept 16, 2026 — reversed the earlier "no visible entry
-  point" decision on request) or the bookmarked ?admin URL; either way
-  it's still fully password-gated server-side
+  "Send Billing Text" control and a "View waiver as signed" toggle (Sept
+  16 (5) — see waiver_snapshot below) on every stay. Reached via the nav
+  menu's "Admin" item (Sept 16, 2026 — reversed the earlier "no visible
+  entry point" decision on request) or the bookmarked ?admin URL; either
+  way it's still fully password-gated server-side
 - "Learn more about us" page (content from the Bayview Boarding Rover
   profile — bio, home characteristics, photos, all 5-star reviews with
   dates linking out to Rover, an approximate-location map). Reached via
@@ -63,17 +65,35 @@ Since find-or-create-by-phone/name needs a SELECT anon doesn't have, all
 booking writes go through submit-booking (service role key) instead of a
 direct client insert — see supabase/functions/submit-booking/index.ts.
 
-`settings` (Sept 15 (4)) is a singleton row (day rate, multi-dog
-discount, holiday upcharge, vet clinic list) - the admin-configurable
-values calcCost and the vet dropdown actually use, replacing hardcoded
-constants. Reads are public/unauthenticated (every visitor needs current
+`settings` (Sept 15 (4); packing_list/sms_confirmation/sms_reminder/
+sms_billing added Sept 16 (5)) is a singleton row (day rate, multi-dog
+discount, holiday upcharge, vet clinic list, packing list, 3 SMS
+templates) - the admin-configurable values calcCost/the vet dropdown/
+send-confirmation actually use, replacing hardcoded constants (the SMS
+templates and packing list used to be duplicated - once as a "reference
+copy" in src/settings.js, once for real inside send-confirmation/
+index.ts - and had already started to drift; now there's one source of
+truth). Reads are public/unauthenticated (every visitor needs current
 pricing and the vet list to use the booking form at all); writes need the
 admin password - both go through supabase/functions/settings/index.ts,
 same RLS-locked-with-zero-policies pattern as everything else.
+Kim/Estee's phone numbers deliberately stay OUT of this table even
+though they're conceptually "business info" - settings reads are public,
+so putting personal cell numbers there would leak them to every visitor.
+They remain KIM_PHONE/ESTEE_PHONE Supabase secrets, changed via
+`supabase secrets set` rather than through the admin UI.
 
 `stays.reminder_sent_at` (Sept 16, 2026) marks a stay's reminder text as
 already sent, so the daily cron job can't double-text someone on a
 retried or overlapping run.
+
+`stays.waiver_snapshot` (Sept 16 (5), jsonb) captures the exact
+WAIVER_SECTIONS content (array of {title, body}) as shown and signed at
+submission time - deliberately NOT admin-editable (unlike everything
+else in this section): the whole point is that a later edit to
+src/waiver.js can never retroactively change what a past client is on
+record as having agreed to. submit-booking requires a non-empty array;
+admin can view it per-stay via a collapsed-by-default toggle.
 
 **Reproducing the reminder cron's secret** (Sept 16, 2026): the cron job
 (supabase/migrations/20260916000000_stay_reminders_cron.sql) calls
@@ -99,13 +119,13 @@ call itself is dropped, not for a routine secret rotation.
 - src/App.js — main app
 - src/settings.js — all configurable values (rates, vets, messages, packing list)
 - src/waiver.js — full waiver text
-- src/App.test.js — 131 passing tests (TDD), Supabase mocked via src/__mocks__/supabase.js
+- src/App.test.js — 137 passing tests (TDD), Supabase mocked via src/__mocks__/supabase.js
 - supabase/functions/send-contact/index.ts — public Contact Us form handler: relays name/email-or-phone/message to Kim & Estee by SMS (reuses KIM_PHONE/ESTEE_PHONE). Deployed normally (no --no-verify-jwt) since it's called via the Supabase JS client like settings/lookup-client/submit-booking
 - public/img/about/ — the 6 numbered photos on the About page, served from the public folder (not bundled) and referenced via process.env.PUBLIC_URL since the app is hosted at a subpath
-- supabase/functions/send-reminders/index.ts — daily cron target (pg_cron + pg_net, see the migration): finds stays checking in tomorrow, texts each via send-confirmation, marks reminder_sent_at. Deployed with `--no-verify-jwt`; checks its own CRON_SECRET instead (see Data model for how that secret is set up without ever being committed)
-- supabase/functions/settings/index.ts — public read / password-gated write of day rate, multi-dog discount, holiday upcharge, vet list
-- supabase/functions/submit-booking/index.ts — handles booking submission: find-or-create owner (by phone) and each dog (by owner+name), inserts the stay + stay_dogs snapshot links (service role key)
-- supabase/functions/send-confirmation/index.ts — Twilio SMS function (outbound); handles all 3 message types (confirmation/reminder/billing) via a `type` field - called directly by the client at booking time, and by send-reminders and the admin panel for the other two
+- supabase/functions/send-reminders/index.ts — daily cron target (pg_cron + pg_net, see the migration): finds stays checking in tomorrow, fetches the current sms_reminder template + packing_list from `settings`, texts each via send-confirmation, marks reminder_sent_at. Deployed with `--no-verify-jwt`; checks its own CRON_SECRET instead (see Data model for how that secret is set up without ever being committed) - be careful to keep that flag on every redeploy (a plain `supabase functions deploy send-reminders` silently re-enables JWT verification and would break the cron, same bug class as the receive-sms incident)
+- supabase/functions/settings/index.ts — public read / password-gated write of day rate, multi-dog discount, holiday upcharge, vet list, packing list, and the 3 SMS templates
+- supabase/functions/submit-booking/index.ts — handles booking submission: find-or-create owner (by phone) and each dog (by owner+name), inserts the stay (incl. waiver_snapshot) + stay_dogs snapshot links (service role key)
+- supabase/functions/send-confirmation/index.ts — Twilio SMS function (outbound); accepts an optional message_template (the admin-edited settings text, with {placeholders} filled by fillTemplate) + packing_list from the caller; falls back to its own hardcoded 3-message-type logic if no template is given. Called directly by the client at booking time, and by send-reminders and the admin panel for the other two - has its own Deno test suite (index.test.ts) now, added Sept 16 (5)
 - supabase/functions/receive-sms/index.ts — inbound SMS webhook: auto-reply + relay to Kim/Estee. Deploy with `--no-verify-jwt` (see comment at top of file) or Twilio's webhook calls silently fail
 - supabase/functions/_shared/contact.ts — pure text builders + Twilio signature validator, shared by send-confirmation and receive-sms, unit-tested via `deno test`
 - supabase/functions/admin-data/index.ts — server-side admin password check + every dog (profile + owner + stay history) (service role key, never exposed to client)
@@ -132,16 +152,21 @@ call itself is dropped, not for a routine secret rotation.
 ## Current priorities (v1.5)
 See FIXES.txt for the live list - nothing outstanding here as of Sept
 16, 2026 beyond that file's own items (revoking the debug Twilio API key
-whenever that's actually needed, and setting up a staging environment
-next time a DB/RLS change is made against production).
+whenever that's actually needed, setting up a staging environment next
+time a DB/RLS change is made against production, and placing the About
+page's map pin 300 yards past the real address once Kim sends exact
+coordinates).
 
 ## Rules
 - Always run tests before committing (npm test -- --watchAll=false)
-- Non-business-rule config (business info, SMS templates, packing list)
-  goes in src/settings.js. Business rules an admin should be able to
-  change (day rate, multi-dog discount, holiday upcharge, vet list) live
-  in Supabase's `settings` table instead (see Data model) - settings.js
-  still holds the fallback defaults for those, used before the fetch
-  resolves or if it fails, but is not the source of truth for them.
+- Non-business-rule config (business name/address, the Twilio public
+  number) goes in src/settings.js. Business rules an admin should be able
+  to change (day rate, multi-dog discount, holiday upcharge, vet list,
+  packing list, SMS templates) live in Supabase's `settings` table instead
+  (see Data model) - settings.js still holds the fallback defaults for
+  those, used before the fetch resolves or if it fails, but is not the
+  source of truth for them. Exception: Kim/Estee's personal phone numbers
+  are business-relevant but stay as Supabase secrets, never in `settings`
+  (which is publicly readable) - see the Data model note on why.
 - Follow TDD — write tests before new features
 - Commit messages use format: "v1.x - description"

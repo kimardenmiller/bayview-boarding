@@ -12,6 +12,10 @@ const DEFAULT_ROW = {
   multi_dog_discount: 0.10,
   holiday_upcharge: 0.30,
   vets: ['Marin Pet Hospital — (415) 479-8387', 'VCA Marin Animal Hospital — (415) 454-5225'],
+  packing_list: ['Food', 'Leash & doggy bags'],
+  sms_confirmation: 'Hi {firstName}! confirmed.',
+  sms_reminder: 'Hi {firstName}! reminder, bring: {packingList}.',
+  sms_billing: 'Hi {firstName}! total: ${finalCost}.',
 };
 
 function stubSupabase(initial: typeof DEFAULT_ROW = DEFAULT_ROW) {
@@ -68,6 +72,10 @@ Deno.test('a plain read requires no password (public)', async () => {
     assertEquals(data, {
       dayRate: 105, multiDogDiscount: 0.10, holidayUpcharge: 0.30,
       vets: DEFAULT_ROW.vets,
+      packingList: DEFAULT_ROW.packing_list,
+      smsConfirmation: DEFAULT_ROW.sms_confirmation,
+      smsReminder: DEFAULT_ROW.sms_reminder,
+      smsBilling: DEFAULT_ROW.sms_billing,
     });
     assertEquals(stub.calls[0].method, 'GET');
   } finally {
@@ -213,6 +221,74 @@ Deno.test('rejects a vet list with a case-insensitive duplicate', async () => {
     assertEquals(res.status, 400);
     const data = await res.json();
     assert(data.error.includes('duplicate'));
+    assertEquals(stub.calls.length, 0);
+  } finally {
+    stub.restore();
+  }
+});
+
+Deno.test('updates the packing list, trimming each entry', async () => {
+  const stub = stubSupabase();
+  try {
+    const res = await handleRequest(postRequest({
+      password: ADMIN_PASSWORD,
+      updates: { packingList: ['  Food  ', 'Leash'] },
+    }));
+    assertEquals(res.status, 200);
+    const data = await res.json();
+    assertEquals(data.packingList, ['Food', 'Leash']);
+  } finally {
+    stub.restore();
+  }
+});
+
+Deno.test('rejects an empty packing list, without touching the database', async () => {
+  const stub = stubSupabase();
+  try {
+    const res = await handleRequest(postRequest({ password: ADMIN_PASSWORD, updates: { packingList: [] } }));
+    assertEquals(res.status, 400);
+    assertEquals(stub.calls.length, 0);
+  } finally {
+    stub.restore();
+  }
+});
+
+Deno.test('rejects a packing list with a blank entry', async () => {
+  const stub = stubSupabase();
+  try {
+    const res = await handleRequest(postRequest({
+      password: ADMIN_PASSWORD, updates: { packingList: ['Food', '   '] },
+    }));
+    assertEquals(res.status, 400);
+    assertEquals(stub.calls.length, 0);
+  } finally {
+    stub.restore();
+  }
+});
+
+Deno.test('updates an SMS template, trimming it', async () => {
+  const stub = stubSupabase();
+  try {
+    const res = await handleRequest(postRequest({
+      password: ADMIN_PASSWORD,
+      updates: { smsReminder: '  New reminder text {firstName}  ' },
+    }));
+    assertEquals(res.status, 200);
+    const data = await res.json();
+    assertEquals(data.smsReminder, 'New reminder text {firstName}');
+    assertEquals(data.smsConfirmation, DEFAULT_ROW.sms_confirmation); // unchanged
+  } finally {
+    stub.restore();
+  }
+});
+
+Deno.test('rejects a blank SMS template, without touching the database', async () => {
+  const stub = stubSupabase();
+  try {
+    const confirmation = await handleRequest(postRequest({ password: ADMIN_PASSWORD, updates: { smsConfirmation: '   ' } }));
+    assertEquals(confirmation.status, 400);
+    const billing = await handleRequest(postRequest({ password: ADMIN_PASSWORD, updates: { smsBilling: '' } }));
+    assertEquals(billing.status, 400);
     assertEquals(stub.calls.length, 0);
   } finally {
     stub.restore();

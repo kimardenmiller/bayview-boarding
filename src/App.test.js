@@ -24,6 +24,10 @@ const DEFAULT_STAY = {
 const DEFAULT_SETTINGS = {
   dayRate: 105, multiDogDiscount: 0.10, holidayUpcharge: 0.30,
   vets: ['Marin Pet Hospital — (415) 479-8387'],
+  packingList: ['Food', 'Leash & doggy bags'],
+  smsConfirmation: 'Hi {firstName}! confirmed.',
+  smsReminder: 'Hi {firstName}! reminder, bring {packingList}.',
+  smsBilling: 'Hi {firstName}! total ${finalCost}.',
 };
 
 function mockInvokeDefaults(overrides = {}) {
@@ -171,6 +175,7 @@ const SAMPLE_DOGS = [
         id: 'stay-1', check_in: '2026-09-01', check_out: '2026-09-03', drop_time: '09:00:00', pickup_time: '17:00:00',
         estimated_cost: 210, submitted_at: '2026-08-30T10:00:00Z', notes: 'Loves belly rubs', number_of_dogs: 1,
         dob: '2020-01-01', aggression_history: 'no', aggression_detail: '', health_concerns: 'no', health_detail: '',
+        waiver_snapshot: [{ title: 'Risks & Releases', body: 'Test waiver body text.' }],
       },
       {
         id: 'stay-3', check_in: '2026-06-01', check_out: '2026-06-02', drop_time: '09:00:00', pickup_time: '17:00:00',
@@ -518,6 +523,18 @@ describe('Landing — Learn more about us', () => {
     expect(map.getAttribute('src')).toContain('Loch+Lomond');
     // the exact street address must never appear on this public page
     expect(screen.queryByText(/210 Bayview Drive/)).not.toBeInTheDocument();
+  });
+
+  test('clicking anywhere on the map opens Google Maps in a new tab, at the same place as the embed', async () => {
+    render(<App />);
+    fireEvent.click(screen.getByText(/Learn more/));
+    await screen.findByText('Dog Paradise Above Loch Lomond');
+    const overlay = document.querySelector('.about-map-overlay');
+    expect(overlay.tagName).toBe('A');
+    expect(overlay).toHaveAttribute('target', '_blank');
+    expect(overlay).toHaveAttribute('rel', expect.stringContaining('noopener'));
+    expect(overlay.getAttribute('href')).toContain('google.com/maps');
+    expect(overlay.getAttribute('href')).toContain('Loch+Lomond');
   });
 
   test('About page shows a Schedule section, written in "we" not "I"', async () => {
@@ -1242,6 +1259,10 @@ describe('Step 5 — Signature', () => {
         dogs: [expect.objectContaining({ name: 'Rex', breed: 'Labrador' })],
         checkIn: '2026-10-01',
         checkOut: '2026-10-05',
+        // captured verbatim at submission (Sept 16, 2026) so a later edit
+        // to waiver.js can never retroactively change what this client is
+        // on record as having signed
+        waiverSnapshot: expect.arrayContaining([expect.objectContaining({ title: expect.any(String), body: expect.any(String) })]),
       }),
     });
     expect(supabase.functions.invoke).toHaveBeenCalledWith('send-confirmation', expect.any(Object));
@@ -1419,6 +1440,25 @@ describe('Admin — logged in', () => {
     expect(screen.getByText(/Health note: Mild hip dysplasia/)).toBeInTheDocument();
   });
 
+  test('a stay with a waiver snapshot offers to show it, collapsed by default; one without shows no such control', async () => {
+    await loginAsAdmin();
+    fireEvent.click(screen.getByText('Bud'));
+    await screen.findByRole('heading', { name: 'Bud' });
+    const budCards = document.querySelectorAll('.stay-card');
+
+    // stay-1 (Sept) has a waiver_snapshot in the fixture; stay-3 (June) does not
+    expect(within(budCards[0]).getByText('View waiver as signed')).toBeInTheDocument();
+    expect(within(budCards[1]).queryByText('View waiver as signed')).not.toBeInTheDocument();
+    expect(within(budCards[0]).queryByText('Test waiver body text.')).not.toBeInTheDocument();
+
+    fireEvent.click(within(budCards[0]).getByText('View waiver as signed'));
+    expect(within(budCards[0]).getByText('Risks & Releases')).toBeInTheDocument();
+    expect(within(budCards[0]).getByText('Test waiver body text.')).toBeInTheDocument();
+
+    fireEvent.click(within(budCards[0]).getByText('Hide waiver as signed'));
+    expect(within(budCards[0]).queryByText('Test waiver body text.')).not.toBeInTheDocument();
+  });
+
   test('Billing SMS: final cost defaults to the estimate, and Send calls send-confirmation with type billing', async () => {
     await loginAsAdmin();
     fireEvent.click(screen.getByText('Bud'));
@@ -1436,6 +1476,7 @@ describe('Admin — logged in', () => {
         owner_phone: '6505551111',
         dog_name: 'Bud',
         final_cost: 210,
+        message_template: expect.any(String), // the admin-editable billing template (settings.sms_billing)
       },
     }));
     expect(await within(budCards[0]).findByText('✓ Sent')).toBeInTheDocument();
@@ -1559,20 +1600,22 @@ describe('Admin — logged in', () => {
     // only 1 entry, distinct from that fallback, so this only passes if
     // the real fetched value is what's shown.
     await loginAsAdmin();
-    expect(screen.getByText('Marin Pet Hospital — (415) 479-8387')).toBeInTheDocument();
-    expect(screen.queryByText('VCA Marin Animal Hospital — (415) 454-5225')).not.toBeInTheDocument();
-    expect(screen.getAllByText('Remove')).toHaveLength(1);
+    const vetEditor = within(document.querySelector('.vet-editor'));
+    expect(vetEditor.getByText('Marin Pet Hospital — (415) 479-8387')).toBeInTheDocument();
+    expect(vetEditor.queryByText('VCA Marin Animal Hospital — (415) 454-5225')).not.toBeInTheDocument();
+    expect(vetEditor.getAllByText('Remove')).toHaveLength(1);
   });
 
   test('adds a vet clinic to the list, then removes it, before saving', async () => {
     await loginAsAdmin();
-    expect(screen.getByText('Marin Pet Hospital — (415) 479-8387')).toBeInTheDocument();
+    const vetEditor = within(document.querySelector('.vet-editor'));
+    expect(vetEditor.getByText('Marin Pet Hospital — (415) 479-8387')).toBeInTheDocument();
 
-    await userEvent.type(screen.getByPlaceholderText(/Clinic Name/), 'New Clinic — (415) 555-0100');
-    fireEvent.click(screen.getByText('Add'));
-    expect(screen.getByText('New Clinic — (415) 555-0100')).toBeInTheDocument();
+    await userEvent.type(vetEditor.getByPlaceholderText(/Clinic Name/), 'New Clinic — (415) 555-0100');
+    fireEvent.click(vetEditor.getByText('Add'));
+    expect(vetEditor.getByText('New Clinic — (415) 555-0100')).toBeInTheDocument();
 
-    fireEvent.click(screen.getByText('Save Vet List'));
+    fireEvent.click(vetEditor.getByText('Save Vet List'));
     await waitFor(() => expect(supabase.functions.invoke).toHaveBeenCalledWith('settings', {
       body: { password: 'correct-password', updates: { vets: ['Marin Pet Hospital — (415) 479-8387', 'New Clinic — (415) 555-0100'] } },
     }));
@@ -1580,8 +1623,55 @@ describe('Admin — logged in', () => {
 
   test('removes a vet clinic from the list before saving', async () => {
     await loginAsAdmin();
-    const removeButtons = screen.getAllByText('Remove');
-    fireEvent.click(removeButtons[0]);
-    expect(screen.queryByText('Marin Pet Hospital — (415) 479-8387')).not.toBeInTheDocument();
+    const vetEditor = within(document.querySelector('.vet-editor'));
+    fireEvent.click(vetEditor.getAllByText('Remove')[0]);
+    expect(vetEditor.queryByText('Marin Pet Hospital — (415) 479-8387')).not.toBeInTheDocument();
+  });
+
+  test('shows the packing list actually fetched from settings, not the hardcoded fallback', async () => {
+    await loginAsAdmin();
+    const packingEditor = within(document.querySelector('.packing-editor'));
+    expect(packingEditor.getByText('Food')).toBeInTheDocument();
+    expect(packingEditor.getByText('Leash & doggy bags')).toBeInTheDocument();
+    expect(packingEditor.queryByText('Bed & favorite blanket')).not.toBeInTheDocument();
+  });
+
+  test('adds a packing-list item, then saves it', async () => {
+    await loginAsAdmin();
+    const packingEditor = within(document.querySelector('.packing-editor'));
+    await userEvent.type(packingEditor.getByPlaceholderText('Item to bring'), 'Medication');
+    fireEvent.click(packingEditor.getByText('Add'));
+    expect(packingEditor.getByText('Medication')).toBeInTheDocument();
+
+    fireEvent.click(packingEditor.getByText('Save Packing List'));
+    await waitFor(() => expect(supabase.functions.invoke).toHaveBeenCalledWith('settings', {
+      body: { password: 'correct-password', updates: { packingList: ['Food', 'Leash & doggy bags', 'Medication'] } },
+    }));
+  });
+
+  test('removes a packing-list item before saving', async () => {
+    await loginAsAdmin();
+    const packingEditor = within(document.querySelector('.packing-editor'));
+    fireEvent.click(packingEditor.getAllByText('Remove')[0]);
+    expect(packingEditor.queryByText('Food')).not.toBeInTheDocument();
+  });
+
+  test('shows the SMS templates actually fetched from settings, editable and independently saveable', async () => {
+    await loginAsAdmin();
+    const smsEditor = within(document.querySelector('.sms-editor'));
+    expect(smsEditor.getByDisplayValue('Hi {firstName}! confirmed.')).toBeInTheDocument();
+    expect(smsEditor.getByDisplayValue('Hi {firstName}! reminder, bring {packingList}.')).toBeInTheDocument();
+    expect(smsEditor.getByDisplayValue('Hi {firstName}! total ${finalCost}.')).toBeInTheDocument();
+
+    const reminderBox = smsEditor.getByDisplayValue('Hi {firstName}! reminder, bring {packingList}.');
+    fireEvent.change(reminderBox, { target: { value: 'New reminder wording {firstName}' } });
+    fireEvent.click(smsEditor.getByText('Save Stay Reminder Text'));
+    await waitFor(() => expect(supabase.functions.invoke).toHaveBeenCalledWith('settings', {
+      body: { password: 'correct-password', updates: { smsReminder: 'New reminder wording {firstName}' } },
+    }));
+    // saving the reminder template shouldn't touch the other two
+    expect(supabase.functions.invoke).not.toHaveBeenCalledWith('settings', {
+      body: expect.objectContaining({ updates: expect.objectContaining({ smsConfirmation: expect.anything() }) }),
+    });
   });
 });

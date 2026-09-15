@@ -70,6 +70,10 @@ interface BookingInput {
   estimatedCost?: number | null;
   signature?: string;
   clientTimezone?: string | null;
+  // Exact WAIVER_SECTIONS content as shown/signed at submission time - see
+  // the Sept 16, 2026 migration for why this is captured verbatim rather
+  // than just trusting the current src/waiver.js at read time.
+  waiverSnapshot?: unknown;
 }
 
 function validate(body: BookingInput): string[] {
@@ -99,6 +103,7 @@ function validate(body: BookingInput): string[] {
     errors.push("pickupTime (must be after dropTime for a same-day stay)");
   }
   if (!body.signature?.trim()) errors.push("signature");
+  if (!Array.isArray(body.waiverSnapshot) || body.waiverSnapshot.length === 0) errors.push("waiverSnapshot");
   return errors;
 }
 
@@ -188,6 +193,7 @@ export async function handleRequest(req: Request): Promise<Response> {
       number_of_dogs: body.dogs!.length,
       signature: body.signature!.trim(),
       client_timezone: body.clientTimezone || null,
+      waiver_snapshot: body.waiverSnapshot,
     }).select("id, check_in, check_out, drop_time, pickup_time, estimated_cost, submitted_at");
     if (stayErr) throw stayErr;
     const stay = insertedStays[0];

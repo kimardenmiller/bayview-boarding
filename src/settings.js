@@ -17,6 +17,10 @@ export const SETTINGS = {
   APP_URL: 'https://kimardenmiller.github.io/bayview-boarding',
 
   // ── Packing List ──────────────────────────────────────────────────────────
+  // Fallback default only (Sept 16, 2026) - the real, admin-editable value
+  // now lives in Supabase's `settings` table (packing_list column), same
+  // pattern as day rate/vets. This is just what's shown before that fetch
+  // resolves, or if it fails.
   PACKING_LIST: [
     'Food',
     'Leash & doggy bags',
@@ -28,10 +32,12 @@ export const SETTINGS = {
   ],
 
   // ── SMS Message Templates ─────────────────────────────────────────────────
-  // Reference copies only — the actual send logic lives in
-  // supabase/functions/send-confirmation/index.ts (Deno, can't import this
-  // client-bundled file) and supabase/functions/_shared/contact.ts. Keep
-  // these in sync by hand when that logic changes.
+  // Fallback defaults only (Sept 16, 2026) - the real, admin-editable
+  // values now live in Supabase's `settings` table (sms_confirmation/
+  // sms_reminder/sms_billing columns). App.js fetches them and passes the
+  // resolved template to send-confirmation as message_template; this file
+  // is just what's used before that fetch resolves, or if it fails - no
+  // more hand-syncing two copies.
   //
   // Variables: {firstName}, {dogName}, {dropDate}, {dropTime}, {pickDate},
   //            {pickTime}, {estimatedCost}, {packingList}, {kimPhone},

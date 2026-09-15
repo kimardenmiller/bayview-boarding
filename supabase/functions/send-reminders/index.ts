@@ -57,6 +57,18 @@ export async function handleRequest(req: Request): Promise<Response> {
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
     const tomorrow = tomorrowInBusinessTimezone();
 
+    // The reminder wording and packing list are admin-editable (settings
+    // table, Sept 16, 2026) - fetched once per run rather than per stay,
+    // and passed through to send-confirmation, which has no DB access of
+    // its own. Falls back to send-confirmation's own hardcoded defaults
+    // if this read fails for some reason, rather than blocking reminders
+    // entirely over a settings hiccup.
+    const { data: settingsRow } = await supabase
+      .from("settings")
+      .select("sms_reminder, packing_list")
+      .eq("id", true)
+      .maybeSingle();
+
     const { data: dueStays, error: queryErr } = await supabase
       .from("stays")
       .select("id, check_in, drop_time, owners(name, phone), stay_dogs(name)")
@@ -87,6 +99,8 @@ export async function handleRequest(req: Request): Promise<Response> {
           owner_phone: owner.phone,
           dog_name: dogNames,
           drop_time: stay.drop_time,
+          message_template: settingsRow?.sms_reminder,
+          packing_list: settingsRow?.packing_list,
         }),
       });
 

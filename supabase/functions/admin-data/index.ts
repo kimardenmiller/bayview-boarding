@@ -79,7 +79,7 @@ export async function handleRequest(req: Request): Promise<Response> {
 
     const [dogsResult, staysResult] = await Promise.all([
       supabase.from("dogs").select(
-        "id, name, breed, dob, spay_neuter, aggression_history, aggression_detail, health_concerns, health_detail, owner:owners(name, phone, email), stay_dogs(name, breed, dob, spay_neuter, aggression_history, aggression_detail, health_concerns, health_detail, stay:stays(id, check_in, check_out, drop_time, pickup_time, notes, estimated_cost, number_of_dogs, submitted_at))"
+        "id, name, breed, dob, spay_neuter, aggression_history, aggression_detail, health_concerns, health_detail, owner:owners(name, phone, email), stay_dogs(name, breed, dob, spay_neuter, aggression_history, aggression_detail, health_concerns, health_detail, stay:stays(id, check_in, check_out, drop_time, pickup_time, notes, estimated_cost, number_of_dogs, submitted_at, waiver_snapshot))"
       ),
       // Total signed agreements on file is a count of stays (bookings),
       // not of dogs - a 2-dog booking is still one signature.

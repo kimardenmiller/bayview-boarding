@@ -1,6 +1,6 @@
 BAYVIEW BOARDING — FIX LIST
 ============================
-Last updated: September 16, 2026 (About page polish; admin-editable-values scan)
+Last updated: September 16, 2026 (packing list/SMS templates/waiver snapshot now admin-editable; map/nav polish)
 
 NEXT CHANGE LIST (v1.5)
 -----------------------
@@ -23,6 +23,14 @@ NEXT CHANGE LIST (v1.5)
    maintain. Not urgent by itself; do this the next time a DB schema or
    RLS change is about to be made against production, rather than
    testing it live the way this session's changes have been.
+3. Move the About page's map pin from the current neighborhood-level
+   query ("Loch Lomond, San Rafael, CA") to the specific spot 300 yards
+   past the actual address, per Kim's request Sept 16, 2026 - waiting on
+   Kim to send exact lat/lng coordinates (dropped a pin in Google Maps
+   and copy the numbers) since an estimated GPS offset near a private
+   address risks landing somewhere meaningfully wrong. Once given, update
+   ABOUT_MAP_QUERY in src/App.js (or switch it to a lat,lng pair) - both
+   the embed and the click-through link already share that one constant.
 
 DEFERRED (revisit only if it actually blocks something)
 ---------------------------------------------------------
@@ -63,6 +71,76 @@ TWILIO STATUS
 
 COMPLETED
 ---------
+- Sept 16, 2026 (5): Followed up on the admin-editable-values scan (item 4
+  below): packing list and the 3 SMS templates (confirmation/reminder/
+  billing) moved from hardcoded (settings.js + a second, already-slightly-
+  drifted copy inside send-confirmation/index.ts) into the `settings`
+  table, same public-read/password-gated-write pattern as day rate/vets -
+  new admin UI sections (add/remove packing items; 3 textareas with
+  {placeholder} hints, each independently saveable). send-confirmation now
+  accepts an optional message_template + packing_list and fills
+  placeholders itself (fillTemplate helper) - if no template is passed
+  (an old/direct caller), it falls back to its previous hardcoded logic
+  unchanged. App.js, send-reminders, and the admin billing-send call all
+  now fetch/pass the real template and packing list instead of relying on
+  send-confirmation's own hardcoded copies. send-confirmation gained a
+  proper Deno test suite for the first time (it had none before, despite
+  every other function having one).
+
+  Also added stays.waiver_snapshot (jsonb): the exact WAIVER_SECTIONS
+  content is now captured verbatim at submission time, alongside the
+  existing per-dog stay_dogs snapshot - this is deliberately NOT admin-
+  editable, since the whole point is that a later edit to src/waiver.js
+  can never retroactively change what a past client is on record as
+  having read and signed. submit-booking now requires a non-empty
+  waiverSnapshot array. Admin can view (collapsed by default) exactly
+  what was signed on any past stay via a new "View waiver as signed"
+  toggle on each stay card.
+
+  Deliberately NOT touched (flagged during the scan, needs its own
+  design rather than the settings-table pattern): Kim & Estee's phone
+  numbers - the settings table is publicly readable, so adding them there
+  the way rate/vets were done would leak personal cell numbers to every
+  visitor; they stay as Supabase secrets, changed via `supabase secrets
+  set` on request.
+
+  Tests: 8 new Deno tests for send-confirmation (fillTemplate, default
+  vs. templated message building, packing_list array vs. string, no
+  double contact-note, Twilio failure handling); settings gained tests
+  for packingList/sms* validation and updates; send-reminders updated to
+  fetch+pass the template/packing_list, with a new test for its fallback
+  if that read fails; submit-booking gained waiverSnapshot required/
+  stored tests; admin-data now selects waiver_snapshot too. React: new
+  admin tests for the packing-list editor, the SMS-template editor (each
+  saves independently), and the waiver-snapshot view/hide toggle; the
+  successful-submission test now checks waiverSnapshot is actually sent.
+  136 React + 89 Deno = 225/225 passing. Verified live end to end
+  (packing list/SMS template edits actually persisting and round-
+  tripping through the admin UI; the reminder cron's own auth gate
+  re-checked after redeploying send-reminders without --no-verify-jwt by
+  accident on the first pass - caught and fixed before it could have
+  silently broken the daily cron, same class of bug as the receive-sms
+  incident earlier this session).
+- Sept 16, 2026 (4): About page polish, round 2 - "New? Learn more" link
+  sized down further (0.85rem -> 0.76rem). All star icons (aggregate
+  rating + every review card) recolored blue (#0000EE) per request -
+  surfaced and fixed a real, pre-existing CSS specificity bug in the
+  process: .about-review-stars/-quote/-author (single class, specificity
+  0-1-0) were being silently overridden by the earlier, more specific
+  .about-content p rule (0-1-1) for color AND font-size - the review
+  author line, for instance, had never actually been rendering in its
+  intended smaller/muted style. Fixed by qualifying all three selectors
+  with both the class and the element (.about-content p.about-review-*).
+  The whole map area is now a click-through to full Google Maps in a new
+  tab (an overlay <a>, since an iframe otherwise swallows clicks for its
+  own embedded UI instead of navigating anywhere) - shares one query
+  constant with the embed so both always point at the same place. Placing
+  the pin 300 yards past the actual address (rather than the current
+  neighborhood-level query) is pending Kim sending exact coordinates -
+  asked rather than guessed, since an estimated GPS offset near a private
+  address risks being meaningfully wrong. 137/137 React passing (Deno
+  unchanged). Verified live (font sizes, computed star colors, map
+  overlay href/target).
 - Sept 16, 2026 (3): About page polish - "New? Learn more" link recolored
   to a brighter sky blue (#6EA8FE) instead of classic #0000EE, since the
   dark navy hero overlay it sits on made the darker shade hard to read

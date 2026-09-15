@@ -24,7 +24,7 @@
    darker classic blue hard to read; this stays clearly "blue" while
    actually contrasting against that background (unlike .link-blue above,
    used on plain white where the classic shade reads fine). */
-.landing-learn-more { display: block; margin: 14px auto 0; background: none; border: none; color: #6EA8FE; font-size: 0.85rem; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+.landing-learn-more { display: block; margin: 14px auto 0; background: none; border: none; color: #6EA8FE; font-size: 0.76rem; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
 .landing-learn-more:hover { opacity: 0.85; }
 
 .about { min-height: 100vh; min-height: 100dvh; background: #fff; }
@@ -43,7 +43,8 @@
 .about-facts { list-style: none; display: flex; flex-wrap: wrap; gap: 8px; padding: 0; margin: 0 0 16px; }
 .about-facts li { background: #F0F7EF; border: 1px solid #A8C4A2; color: #2C3E50; font-size: 0.8rem; padding: 5px 12px; border-radius: 20px; }
 .about-map { position: relative; width: 100%; padding-top: 56%; border-radius: 8px; overflow: hidden; margin-bottom: 16px; }
-.about-map iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
+.about-map iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; pointer-events: none; }
+.about-map-overlay { position: absolute; inset: 0; display: block; cursor: pointer; }
 
 .wordmark--link { border: none; background: none; padding: 0; font: inherit; cursor: pointer; text-align: left; }
 .landing-title--link { cursor: pointer; }
@@ -58,11 +59,12 @@
 .about-content p { font-size: 0.95rem; color: #1A2530; line-height: 1.7; margin-bottom: 16px; }
 .about-rating { font-size: 0.85rem; color: #2C3E50; letter-spacing: 1px; margin-bottom: 14px; }
 .about-rating strong { letter-spacing: normal; }
+.stars-inline { color: #0000EE; }
 .about-reviews { display: flex; flex-direction: column; gap: 12px; max-height: 420px; overflow-y: auto; border: 1.5px solid #EAE3D6; border-radius: 6px; padding: 14px; margin-bottom: 24px; background: #F5F0E8; -webkit-overflow-scrolling: touch; }
 .about-review { background: #fff; border-radius: 8px; padding: 14px 16px; }
-.about-review-stars { color: #E0A100; font-size: 0.8rem; letter-spacing: 1px; margin-bottom: 4px; }
-.about-review-quote { font-size: 0.88rem; color: #1A2530; line-height: 1.55; font-style: italic; margin-bottom: 6px; }
-.about-review-author { font-size: 0.78rem; color: #6B7A8A; }
+.about-content p.about-review-stars { color: #0000EE; font-size: 0.8rem; letter-spacing: 1px; margin-bottom: 4px; }
+.about-content p.about-review-quote { font-size: 0.88rem; color: #1A2530; line-height: 1.55; font-style: italic; margin-bottom: 6px; }
+.about-content p.about-review-author { font-size: 0.78rem; color: #6B7A8A; }
 .about-content .landing-cta { display: block; width: 100%; text-align: center; margin-top: 8px; box-shadow: none; }
 
 /* ── Confirmation blocks (v1.3 fix) ─────────────────────────────────────── */

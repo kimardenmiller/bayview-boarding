@@ -21,10 +21,18 @@ interface StayRow {
 // Fakes both the Supabase REST API (stays select/update) and the
 // function-to-function call this function makes to send-confirmation -
 // distinguished by pathname, since both go through the same global fetch.
-function stubEnvironment(stays: StayRow[], opts: { confirmationFails?: boolean } = {}) {
+function stubEnvironment(
+  stays: StayRow[],
+  opts: { confirmationFails?: boolean; settings?: { sms_reminder: string; packing_list: string[] } | null } = {},
+) {
   const db = { stays: stays.map((s) => ({ ...s })) };
   const confirmationCalls: unknown[] = [];
   const original = globalThis.fetch;
+  // Defaults to a settings row present (the common case) unless a test
+  // explicitly opts into simulating it missing/unreadable.
+  const settingsRow = opts.settings === undefined
+    ? { sms_reminder: 'Hi {firstName}! bring {packingList}', packing_list: ['Food', 'Leash'] }
+    : opts.settings;
 
   globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
     const url = new URL(String(input instanceof Request ? input.url : input));
@@ -35,6 +43,11 @@ function stubEnvironment(stays: StayRow[], opts: { confirmationFails?: boolean }
       confirmationCalls.push(body);
       if (opts.confirmationFails) return new Response(JSON.stringify({ error: 'twilio down' }), { status: 500 });
       return new Response(JSON.stringify({ success: true, sid: 'SMtest' }), { status: 200 });
+    }
+
+    if (url.pathname.endsWith('/settings') && method === 'GET') {
+      // .maybeSingle() expects a single object (or null), not an array.
+      return new Response(settingsRow ? JSON.stringify(settingsRow) : 'null', { status: 200 });
     }
 
     if (url.pathname.endsWith('/stays')) {
@@ -113,6 +126,7 @@ Deno.test('sends a reminder for a stay checking in tomorrow, then marks it sent'
     assertEquals(stub.confirmationCalls[0], {
       type: 'reminder', owner_name: 'Kim Miller', owner_phone: '4155550100',
       dog_name: 'Rex', drop_time: '09:00:00',
+      message_template: 'Hi {firstName}! bring {packingList}', packing_list: ['Food', 'Leash'],
     });
     assertEquals(stub.db.stays[0].reminder_sent_at !== null, true);
   } finally {
@@ -129,6 +143,7 @@ Deno.test('joins multiple dog names on a shared stay with " & "', async () => {
     assertEquals(stub.confirmationCalls[0], {
       type: 'reminder', owner_name: 'Kim Miller', owner_phone: '4155550100',
       dog_name: 'Rex & Fido', drop_time: '09:00:00',
+      message_template: 'Hi {firstName}! bring {packingList}', packing_list: ['Food', 'Leash'],
     });
   } finally {
     time.restore();
@@ -191,6 +206,22 @@ Deno.test('processes several due stays independently in one run', async () => {
     assertEquals(data.sent, 2);
     assertEquals(stub.confirmationCalls.length, 2);
     assertEquals(stub.db.stays.every((s) => s.reminder_sent_at !== null), true);
+  } finally {
+    time.restore();
+    stub.restore();
+  }
+});
+
+Deno.test('still sends (via send-confirmation\'s own fallback) if the settings row is missing', async () => {
+  const time = new FakeTime('2026-10-01T18:00:00Z');
+  const stub = stubEnvironment([stayDueTomorrow({}, time)], { settings: null });
+  try {
+    const res = await handleRequest(cronRequest());
+    const data = await res.json();
+    assertEquals(data.sent, 1);
+    const call = stub.confirmationCalls[0] as Record<string, unknown>;
+    assertEquals(call.message_template, undefined);
+    assertEquals(call.packing_list, undefined);
   } finally {
     time.restore();
     stub.restore();

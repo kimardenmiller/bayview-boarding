@@ -30,7 +30,14 @@ interface SettingsRow {
   multi_dog_discount: number;
   holiday_upcharge: number;
   vets: string[];
+  packing_list: string[];
+  sms_confirmation: string;
+  sms_reminder: string;
+  sms_billing: string;
 }
+
+const SETTINGS_COLUMNS =
+  "day_rate, multi_dog_discount, holiday_upcharge, vets, packing_list, sms_confirmation, sms_reminder, sms_billing";
 
 function toClientShape(row: SettingsRow) {
   return {
@@ -38,6 +45,10 @@ function toClientShape(row: SettingsRow) {
     multiDogDiscount: row.multi_dog_discount,
     holidayUpcharge: row.holiday_upcharge,
     vets: row.vets,
+    packingList: row.packing_list,
+    smsConfirmation: row.sms_confirmation,
+    smsReminder: row.sms_reminder,
+    smsBilling: row.sms_billing,
   };
 }
 
@@ -46,6 +57,34 @@ interface UpdatesInput {
   multiDogDiscount?: number;
   holidayUpcharge?: number;
   vets?: string[];
+  packingList?: string[];
+  smsConfirmation?: string;
+  smsReminder?: string;
+  smsBilling?: string;
+}
+
+// Shared by vets/packingList - both are "non-empty list of non-blank,
+// non-duplicate strings", just with different field names in error text.
+function validateStringList(list: unknown, fieldName: string): string[] {
+  const errors: string[] = [];
+  if (!Array.isArray(list) || list.length === 0) {
+    errors.push(`${fieldName} must be a non-empty list`);
+    return errors;
+  }
+  if (list.some((v) => typeof v !== "string" || !v.trim())) {
+    errors.push(`${fieldName} must not contain blank entries`);
+    return errors;
+  }
+  const seen = new Set<string>();
+  for (const v of list as string[]) {
+    const key = v.trim().toLowerCase();
+    if (seen.has(key)) {
+      errors.push(`${fieldName} contains a duplicate: "${v.trim()}"`);
+      break;
+    }
+    seen.add(key);
+  }
+  return errors;
 }
 
 // Only the fields actually present in `updates` are validated/applied -
@@ -75,21 +114,19 @@ function validateUpdates(updates: UpdatesInput): string[] {
     }
   }
   if (updates.vets !== undefined) {
-    if (!Array.isArray(updates.vets) || updates.vets.length === 0) {
-      errors.push("vets must be a non-empty list");
-    } else if (updates.vets.some((v) => typeof v !== "string" || !v.trim())) {
-      errors.push("vets must not contain blank entries");
-    } else {
-      const seen = new Set<string>();
-      for (const v of updates.vets) {
-        const key = v.trim().toLowerCase();
-        if (seen.has(key)) {
-          errors.push(`vets contains a duplicate: "${v.trim()}"`);
-          break;
-        }
-        seen.add(key);
-      }
-    }
+    errors.push(...validateStringList(updates.vets, "vets"));
+  }
+  if (updates.packingList !== undefined) {
+    errors.push(...validateStringList(updates.packingList, "packingList"));
+  }
+  if (updates.smsConfirmation !== undefined && !updates.smsConfirmation?.trim()) {
+    errors.push("smsConfirmation must not be blank");
+  }
+  if (updates.smsReminder !== undefined && !updates.smsReminder?.trim()) {
+    errors.push("smsReminder must not be blank");
+  }
+  if (updates.smsBilling !== undefined && !updates.smsBilling?.trim()) {
+    errors.push("smsBilling must not be blank");
   }
 
   return errors;
@@ -124,13 +161,17 @@ export async function handleRequest(req: Request): Promise<Response> {
       if (updates.multiDogDiscount !== undefined) patch.multi_dog_discount = updates.multiDogDiscount;
       if (updates.holidayUpcharge !== undefined) patch.holiday_upcharge = updates.holidayUpcharge;
       if (updates.vets !== undefined) patch.vets = updates.vets.map((v) => v.trim());
+      if (updates.packingList !== undefined) patch.packing_list = updates.packingList.map((v) => v.trim());
+      if (updates.smsConfirmation !== undefined) patch.sms_confirmation = updates.smsConfirmation.trim();
+      if (updates.smsReminder !== undefined) patch.sms_reminder = updates.smsReminder.trim();
+      if (updates.smsBilling !== undefined) patch.sms_billing = updates.smsBilling.trim();
       patch.updated_at = new Date().toISOString();
 
       const { data, error } = await supabase
         .from("settings")
         .update(patch)
         .eq("id", true)
-        .select("day_rate, multi_dog_discount, holiday_upcharge, vets");
+        .select(SETTINGS_COLUMNS);
       if (error) throw error;
 
       return json(toClientShape(data[0] as SettingsRow));
@@ -139,7 +180,7 @@ export async function handleRequest(req: Request): Promise<Response> {
     // A plain read - public, no password needed.
     const { data, error } = await supabase
       .from("settings")
-      .select("day_rate, multi_dog_discount, holiday_upcharge, vets")
+      .select(SETTINGS_COLUMNS)
       .eq("id", true)
       .limit(1);
     if (error) throw error;
