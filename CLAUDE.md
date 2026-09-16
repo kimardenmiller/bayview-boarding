@@ -49,11 +49,13 @@ Kim Miller and Estee Fletter at 210 Bayview Drive, San Rafael, CA.
   wrong by pickup). A2P 10DLC is APPROVED (confirmed via the API Sept
   16, 2026) - real sends actually go through. The billing text correctly
   pluralizes for a shared multi-dog stay ("Don & Bob are ready for
-  pickup", not "is" - dogVerb(), Sept 18, 2026) and formats every dollar
-  amount with commas and 2 decimals ("$1,795.50", not "$1795.5" -
-  formatDollars()); "Reply STOP to opt out." sits below the "— Kim &
-  Estee" signature line (with a blank line before it) in both the
-  billing and drop-off-reminder texts, not directly above it
+  pickup", not "is" - dogVerb(), Sept 18, 2026) and every dollar amount
+  is a whole dollar with commas, rounded up at exactly .50 ("$1,796",
+  not "$1795.5" - formatDollars(); briefly showed cents earlier the same
+  day before this same-day follow-up dropped them again on request);
+  "Reply STOP to opt out." sits below the "— Kim & Estee" signature line
+  (with a blank line before it) in both the billing and drop-off-
+  reminder texts, not directly above it
 - Admin panel, top to bottom (reordered Sept 17 (2)(4), math/grouping
   Sept 18): an "Unbilled Stays" review list — every never-billed stay at
   all, past, in-progress, or future, sorted earliest check-in first
@@ -62,8 +64,11 @@ Kim Miller and Estee Fletter at 210 Bayview Drive, San Rafael, CA.
   details plus "Edit" (reveals correctable dates/times, and Daily
   Rate/Holiday Upcharge % fields defaulting to the site's own settings -
   Recalculate shows the full line-item math, not just the final number:
-  nights × rate × dog multiplier, + holiday-night upcharge if any,
-  = total - see calcCostBreakdown) and "Send Billing Text" (works with
+  nights × rate × dog multiplier (labeled with the actual discount %,
+  not just "× N dogs" as if it were a flat multiply - that bare label
+  read as a math error once a 2nd-dog discount was actually applied,
+  fixed Sept 18, 2026), + holiday-night upcharge if any, = total - see
+  calcCostBreakdown) and "Send Billing Text" (works with
   or without opening Edit first - see billed_at below). Below that,
   "Past Stays" — grouped by OWNER now, not by dog (Sept 18, 2026 - an
   owner with 2 dogs used to get 2 rows), scoped to fully billed stays

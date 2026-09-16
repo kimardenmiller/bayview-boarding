@@ -43,20 +43,16 @@ function formatDate(iso) {
   return `${m}/${d}/${y}`;
 }
 
-// Adds thousands separators without otherwise changing the number's
-// existing textual form - "199.50" stays "199.50", a bare 1420 becomes
-// "1,420", "1199.50" becomes "1,199.50". Deliberately string-based
-// (rather than always normalizing to 2 decimals) so it stays a drop-in
-// wrapper around each call site's own already-correct formatting instead
-// of also changing how many decimal places show up there.
+// Rounds to the nearest whole dollar (ties round up - same as Math.round
+// for a positive amount) and adds thousands commas - no cents anywhere
+// (Sept 18, 2026, on request: "drop cents on all dollar amounts,
+// rounding up at .5 dollars" - previously this just added commas while
+// preserving whatever decimal form the caller already had).
 function formatMoney(amount) {
   if (amount === null || amount === undefined || amount === '') return amount;
-  const str = String(amount);
-  const n = Number(str);
+  const n = Number(amount);
   if (Number.isNaN(n)) return amount;
-  const [whole, decimal] = str.split('.');
-  const withCommas = whole.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
-  return decimal !== undefined ? `${withCommas}.${decimal}` : withCommas;
+  return Math.round(n).toLocaleString('en-US');
 }
 
 // NOT `new Date().toISOString().slice(0,10)` - toISOString() is always
@@ -1122,7 +1118,7 @@ function AdminView({
                 <div className="stay-meta">
                   {s.billed_at ? 'Billed cost' : 'Estimated cost'}: {(() => {
                     const fc = billingFieldFor(s, 'finalCost', s.estimated_cost != null ? String(s.estimated_cost) : '');
-                    return fc ? `$${formatMoney(Number(fc).toFixed(2))}` : '—';
+                    return fc ? `$${formatMoney(fc)}` : '—';
                   })()}
                 </div>
                 {s.perDog && s.perDog.map((pd, i) => (
@@ -1187,11 +1183,13 @@ function AdminView({
                 </div>
                 {breakdown && (
                   <div className="stay-meta" style={{ marginTop: 4, marginBottom: 4 }}>
-                    {breakdown.nights} night{breakdown.nights !== 1 ? 's' : ''} × ${formatMoney(breakdown.rate.toFixed(2))}{breakdown.dogs > 1 ? ` × ${breakdown.dogs} dogs` : ''} = ${formatMoney(breakdown.subtotal.toFixed(2))}
+                    {breakdown.nights} night{breakdown.nights !== 1 ? 's' : ''} × ${formatMoney(breakdown.rate)}
+                    {breakdown.dogs > 1 && ` × ${breakdown.dogs} dogs (${multiDogDiscount * 100}% off each additional)`}
+                    {' '}= ${formatMoney(breakdown.subtotal)}
                     {breakdown.holidayNights > 0 && (
-                      <><br />+ Holiday upcharge ({breakdown.holidayNights} night{breakdown.holidayNights !== 1 ? 's' : ''}): ${formatMoney(breakdown.holidayExtra.toFixed(2))}</>
+                      <><br />+ Holiday upcharge ({breakdown.holidayNights} night{breakdown.holidayNights !== 1 ? 's' : ''}): ${formatMoney(breakdown.holidayExtra)}</>
                     )}
-                    <br />= ${formatMoney(breakdown.total.toFixed(2))}
+                    <br />= ${formatMoney(breakdown.total)}
                   </div>
                 )}
                 <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 8, flexWrap: 'wrap' }}>

@@ -1,6 +1,6 @@
 BAYVIEW BOARDING — FIX LIST
 ============================
-Last updated: September 18, 2026 (Admin: full billing math + Past Stays by owner; billing SMS grammar/formatting fixes)
+Last updated: September 18, 2026 (2) (fix multi-dog discount label bug; whole-dollar amounts everywhere)
 
 NEXT CHANGE LIST (v1.5)
 -----------------------
@@ -79,6 +79,51 @@ TWILIO STATUS
 
 COMPLETED
 ---------
+- Sept 18, 2026 (2): Feedback on (1) below, same day:
+
+  1. BUG FIX: the Stay Editing breakdown label said "x 2 dogs" next to a
+  total that already had the 2nd-dog discount baked in (e.g. "10 nights
+  x $105.00 x 2 dogs = $1,995.00" - correct total, since 2 dogs at 10%
+  off the 2nd is a 1.9x multiplier, not 2x, but the label read like a
+  flat doubling and made the total look wrong). Fixed by naming the
+  discount in the label itself: "x 2 dogs (10% off each additional)".
+
+  2. Dollar amounts now show whole dollars everywhere, no cents, rounding
+  up at exactly .50 (Math.round's own behavior for a positive amount) -
+  on request, reversing yesterday's "always show cents" fix from the
+  same day it shipped. formatMoney (App.js, used by the client-facing
+  cost estimate and every admin $ display) and formatDollars
+  (send-confirmation, used by every SMS $ placeholder) both changed from
+  "add commas, keep whatever decimals were already there" / "always 2
+  decimals" to "round to the nearest dollar, then add commas". Nothing
+  about the underlying stored precision changed (calcCost/estimated_cost
+  still carry cents internally) - only what's rendered/texted.
+
+  3. Investigated (not a bug): "View waiver as signed" only shows on 1
+  of the 4 real stays in production. Confirmed via a read-only query -
+  3 stays were submitted Sept 14, 2 days before waiver_snapshot existed
+  as a column/requirement (added Sept 16); only the 4th, submitted Sept
+  16, has one. The toggle is correctly gated on the data actually being
+  there - it'll show on every stay booked from here forward, since
+  submit-booking has required a non-empty waiver_snapshot since Sept 16.
+
+  Tests: formatMoney's describe block rewritten for the new rounding
+  behavior; every test asserting a "$X.00"/"$X,XXX.XX"-shaped string
+  (booking-flow cost estimate, admin "Billed cost" display) updated to
+  the whole-dollar form; the Unbilled Stays Daily-Rate/breakdown test
+  gained an assertion on the corrected discount label; send-confirmation's
+  formatDollars tests and full-string SMS assertions updated to whole
+  dollars. 168 React + 136 Deno = 304/304 passing (same counts as the
+  previous round - fixes and rewrites, no net-new tests here beyond the
+  one new label assertion).
+
+  Verified live: send-confirmation redeployed and invoked directly
+  against production with a $1,795.50 billing payload (should now
+  render as "$1,796" per the Deno suite, which is the only way to
+  confirm exact wording without Twilio credentials - same limitation as
+  every prior SMS verification here); deployed JS bundle confirmed to
+  contain the new formatMoney (whole-dollar, no decimal-preserving
+  branch) rather than the previous version.
 - Sept 18, 2026: Five related pieces, all from the same follow-up
   request to the Unbilled/Past Stays split below (4):
 

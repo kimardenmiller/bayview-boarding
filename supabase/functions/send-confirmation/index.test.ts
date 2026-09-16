@@ -35,11 +35,12 @@ Deno.test('fillTemplate: leaves a placeholder untouched if no matching var was g
   assertEquals(result, 'Hi Kim, {missing}');
 });
 
-Deno.test('formatDollars: adds a thousands comma and always 2 decimals', () => {
-  assertEquals(formatDollars(1795.5), '1,795.50');
-  assertEquals(formatDollars('1795.5'), '1,795.50');
-  assertEquals(formatDollars(210), '210.00');
-  assertEquals(formatDollars(1000), '1,000.00');
+Deno.test('formatDollars: whole dollars only, rounding up at exactly .50, with a thousands comma', () => {
+  assertEquals(formatDollars(1795.5), '1,796');
+  assertEquals(formatDollars('1795.5'), '1,796');
+  assertEquals(formatDollars(1795.49), '1,795');
+  assertEquals(formatDollars(210), '210');
+  assertEquals(formatDollars(1000), '1,000');
 });
 
 Deno.test('formatDollars: passes through empty/non-numeric input unchanged', () => {
@@ -75,7 +76,7 @@ Deno.test('with no message_template: builds the default confirmation message and
     assertEquals(res.status, 200);
     assertEquals(
       stub.calls[0].body,
-      "Hi Kim! Rex's stay at Bayview Boarding is confirmed. Drop-off: Thu, Oct 1 at 09:00. Pick-up: Sat, Oct 3 at 10:00. Estimated cost: $210.00. — Kim & Estee\nReplies to this number aren't monitored. For questions, please group-text Kim 4155550101 & Estee 4155550102.",
+      "Hi Kim! Rex's stay at Bayview Boarding is confirmed. Drop-off: Thu, Oct 1 at 09:00. Pick-up: Sat, Oct 3 at 10:00. Estimated cost: $210. — Kim & Estee\nReplies to this number aren't monitored. For questions, please group-text Kim 4155550101 & Estee 4155550102.",
     );
   } finally {
     stub.restore();
@@ -86,11 +87,11 @@ Deno.test('with no message_template, type billing: "is" for one dog, formatted c
   const stub = stubTwilio();
   try {
     await handleRequest(sendRequest({
-      type: 'billing', owner_name: 'Kim Miller', owner_phone: '4155550199', dog_name: 'Rex', final_cost: 1795.5,
+      type: 'billing', owner_name: 'Kim Miller', owner_phone: '4155550199', dog_name: 'Rex', final_cost: 1795.5, // rounds up to $1,796
     }));
     assertEquals(
       stub.calls[0].body,
-      "Hi Kim! Rex is ready for pickup. Your total for this stay is $1,795.50. Thanks for choosing Bayview Boarding! — Kim & Estee\n\nReply STOP to opt out.\nReplies to this number aren't monitored. For questions, please group-text Kim 4155550101 & Estee 4155550102.",
+      "Hi Kim! Rex is ready for pickup. Your total for this stay is $1,796. Thanks for choosing Bayview Boarding! — Kim & Estee\n\nReply STOP to opt out.\nReplies to this number aren't monitored. For questions, please group-text Kim 4155550101 & Estee 4155550102.",
     );
   } finally {
     stub.restore();
@@ -154,7 +155,7 @@ Deno.test('with a message_template: substitutes placeholders including kimPhone/
     }));
     assertEquals(
       stub.calls[0].body,
-      'Hi Kim! Rex confirmed $210.00. Text Kim 4155550101 or Estee 4155550102.',
+      'Hi Kim! Rex confirmed $210. Text Kim 4155550101 or Estee 4155550102.',
     );
     // exactly one contact note's worth of phone numbers - not duplicated
     assertEquals((stub.calls[0].body.match(/4155550101/g) || []).length, 1);
@@ -184,7 +185,7 @@ Deno.test('with a message_template: fills {finalCost} for a billing send', async
       type: 'billing', owner_name: 'Kim Miller', owner_phone: '4155550199', dog_name: 'Rex',
       final_cost: 315, message_template: 'Total due: ${finalCost}',
     }));
-    assertEquals(stub.calls[0].body, 'Total due: $315.00');
+    assertEquals(stub.calls[0].body, 'Total due: $315');
   } finally {
     stub.restore();
   }

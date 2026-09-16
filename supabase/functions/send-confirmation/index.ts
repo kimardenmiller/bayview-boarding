@@ -41,16 +41,18 @@ export function fillTemplate(template: string, vars: Record<string, string>): st
   return template.replace(/\{(\w+)\}/g, (match, key) => (key in vars ? vars[key] : match));
 }
 
-// Comma-separated, always 2 decimals - "1795.5" -> "1,795.50" (Sept 18,
-// 2026 - a bare `${amount}` was going out in real texts as "$1795.5").
-// Non-numeric input (including "") passes through unchanged rather than
-// becoming "NaN" in a real message.
+// Whole dollars only, comma-separated - "1795.5" -> "1,796" (rounds up
+// at exactly .50, same as a plain Math.round for a positive amount).
+// Sept 18, 2026: a bare `${amount}` was originally going out in real
+// texts as "$1795.5"; cents were then added ("$1,795.50") before this
+// same-day follow-up dropped them again in favor of whole dollars
+// everywhere. Non-numeric input (including "") passes through unchanged
+// rather than becoming "NaN" in a real message.
 export function formatDollars(amount: unknown): string {
   if (amount === null || amount === undefined || amount === "") return "";
   const n = Number(amount);
   if (Number.isNaN(n)) return String(amount);
-  const [whole, decimal] = n.toFixed(2).split(".");
-  return `${whole.replace(/\B(?=(\d{3})+(?!\d))/g, ",")}.${decimal}`;
+  return Math.round(n).toLocaleString("en-US");
 }
 
 // "Don" -> "is", "Don & Bob" -> "are" - the billing text names every dog on

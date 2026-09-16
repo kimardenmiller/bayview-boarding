@@ -555,16 +555,17 @@ describe('getHolidayWindows', () => {
 });
 
 describe('formatMoney', () => {
-  test('leaves amounts under 1,000 unchanged', () => {
-    expect(formatMoney('199.50')).toBe('199.50');
+  test('drops cents, rounding up at exactly .50', () => {
+    expect(formatMoney('199.50')).toBe('200'); // rounds up
+    expect(formatMoney('199.49')).toBe('199'); // rounds down
     expect(formatMoney(420)).toBe('420');
   });
 
-  test('adds a thousands comma above 999, preserving the existing decimal form', () => {
-    expect(formatMoney('1199.50')).toBe('1,199.50');
+  test('adds a thousands comma above 999', () => {
+    expect(formatMoney('1199.50')).toBe('1,200');
     expect(formatMoney(1420)).toBe('1,420');
-    expect(formatMoney('999.99')).toBe('999.99'); // right at the boundary, no comma yet
-    expect(formatMoney('1000.00')).toBe('1,000.00');
+    expect(formatMoney('999.99')).toBe('1,000'); // rounds up and over the boundary
+    expect(formatMoney('1000.00')).toBe('1,000');
   });
 
   test('adds multiple commas for larger amounts', () => {
@@ -634,7 +635,7 @@ describe('Live settings (day rate, discount %, holiday %, vet list)', () => {
     fireEvent.change(timeInputs[0], { target: { value: '09:00' } });
     fireEvent.change(timeInputs[1], { target: { value: '09:00' } });
     // 2 nights @ $100/night, fetched rate - confirms dayRate loaded too
-    expect(await screen.findByText('$200.00')).toBeInTheDocument();
+    expect(await screen.findByText('$200')).toBeInTheDocument();
   });
 
   test('keeps the hardcoded defaults if the settings fetch fails, rather than crashing', async () => {
@@ -1422,20 +1423,20 @@ describe('Step 3 — Stay Dates', () => {
     const timeInputs = document.querySelectorAll('input[type="time"]');
     fireEvent.change(timeInputs[0], { target: { value: '09:00' } });
     fireEvent.change(timeInputs[1], { target: { value: '09:00' } });
-    expect(await screen.findByText('$210.00')).toBeInTheDocument();
+    expect(await screen.findByText('$210')).toBeInTheDocument();
   });
 
   test('formats the estimate with a thousands comma once it crosses $999', async () => {
     await fillStep1();
     await fillStep2();
     const dateInputs = document.querySelectorAll('input[type="date"]');
-    // 10 nights @ $105/night = $1,050.00
+    // 10 nights @ $105/night = $1,050
     fireEvent.change(dateInputs[0], { target: { value: '2026-10-01' } });
     fireEvent.change(dateInputs[1], { target: { value: '2026-10-11' } });
     const timeInputs = document.querySelectorAll('input[type="time"]');
     fireEvent.change(timeInputs[0], { target: { value: '09:00' } });
     fireEvent.change(timeInputs[1], { target: { value: '09:00' } });
-    expect(await screen.findByText('$1,050.00')).toBeInTheDocument();
+    expect(await screen.findByText('$1,050')).toBeInTheDocument();
   });
 
   test('accepts free-text notes', async () => {
@@ -1469,8 +1470,9 @@ describe('Step 3 — Stay Dates', () => {
     const timeInputs = document.querySelectorAll('input[type="time"]');
     fireEvent.change(timeInputs[0], { target: { value: '09:00' } });
     fireEvent.change(timeInputs[1], { target: { value: '09:00' } });
-    // 1 night @ $105: dog 1 = $105, dog 2 = $105 * 0.9 = $94.50 -> $199.50
-    expect(await screen.findByText('$199.50')).toBeInTheDocument();
+    // 1 night @ $105: dog 1 = $105, dog 2 = $105 * 0.9 = $94.50 -> $199.50,
+    // which rounds UP to $200 (exactly .50 rounds up)
+    expect(await screen.findByText('$200')).toBeInTheDocument();
     expect(screen.getByText(/10% off each additional dog/)).toBeInTheDocument();
   });
 
@@ -1800,6 +1802,13 @@ describe('Admin — logged in — Unbilled Stays', () => {
     const dayRateInput = within(card).getByDisplayValue('105'); // defaults to the global day rate
     within(card).getByDisplayValue('30'); // defaults to the global holiday upcharge %
 
+    // The breakdown line must show the multi-dog discount is being
+    // applied, not just say "x 2 dogs" as if it were a flat doubling
+    // (that label used to be shown even though the total underneath it
+    // already had the 10% 2nd-dog discount baked in, which read as a
+    // math error - Sept 18, 2026 fix).
+    expect(within(card).getByText(/× 2 dogs \(10% off each additional\)/)).toBeInTheDocument();
+
     fireEvent.change(dayRateInput, { target: { value: '200' } });
     fireEvent.click(within(card).getByText('Recalculate'));
 
@@ -1992,7 +2001,7 @@ describe('Admin — logged in', () => {
 
     // collapsed by default - click to expand
     fireEvent.click(within(budCards[0]).getByText(/Bud — Kim/));
-    expect(within(budCards[0]).getByText(/Billed cost: \$210\.00/)).toBeInTheDocument();
+    expect(within(budCards[0]).getByText(/Billed cost: \$210/)).toBeInTheDocument();
     expect(within(budCards[0]).getByText(/Loves belly rubs/)).toBeInTheDocument();
     expect(within(budCards[0]).getByText(/DOB:/)).toBeInTheDocument();
 
