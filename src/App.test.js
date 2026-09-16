@@ -145,11 +145,14 @@ async function goToOwnerStep() {
   await screen.findByText('Owner Information');
 }
 
-// Fills Owner Information (name/phone/email/vet) and advances to Dog 1.
-// Vet lives here now, not on the dog pages. The form always starts with
-// exactly 1 dog (see emptyForm), so this clicks "+ Add Dog" the rest of
-// the way to numberOfDogs (Sept 17, 2026 - replaced the old "Number of
-// Dogs" number input entirely).
+// Fills Owner Information (name/phone/email/vet) AND every dog's own
+// profile (opened in place via each row's Edit button, filled, then
+// "Done" returns to the list), then clicks Continue - which now goes
+// straight to Stay Dates, dogs no longer being forced sequential
+// top-level steps (Sept 17, 2026). The form always starts with exactly
+// 1 dog (see emptyForm), so this clicks "+ Add Dog" (which itself opens
+// the new dog's edit page automatically) the rest of the way to
+// numberOfDogs.
 async function fillStep1(phone = '4155550100', name = 'Kim Miller', email = 'kim@test.com', numberOfDogs = 1) {
   render(<App />);
   fireEvent.click(screen.getByText('Book My Stay'));
@@ -157,14 +160,18 @@ async function fillStep1(phone = '4155550100', name = 'Kim Miller', email = 'kim
   await userEvent.type(screen.getByPlaceholderText('Jane Smith'), name);
   await userEvent.type(screen.getByPlaceholderText('jane@email.com'), email);
   fireEvent.change(screen.getByDisplayValue('Select a Vet'), { target: { value: 'Marin Pet Hospital — (415) 479-8387' } });
-  for (let i = 1; i < numberOfDogs; i++) fireEvent.click(screen.getByText('+ Add Dog'));
+  fireEvent.click(screen.getByText('Edit'));
+  await fillDogPage();
+  for (let i = 1; i < numberOfDogs; i++) {
+    fireEvent.click(screen.getByText('+ Add Dog'));
+    await fillDogPage();
+  }
   fireEvent.click(screen.getByText('Continue'));
-  await screen.findByText('Dog 1');
+  await screen.findByText('Stay Dates');
 }
 
-// Fills whichever dog page is currently showing and clicks Continue.
-// Does not assert where it lands - the caller checks ("Dog 2" for an
-// earlier dog, "Stay Dates" for the last one).
+// Fills whichever dog's edit page is currently showing and clicks Done,
+// returning to the owner page's dog list.
 async function fillDogPage({ name = 'Rex', breed = 'Labrador', dob = '2020-01-01' } = {}) {
   await userEvent.type(screen.getByPlaceholderText('Buddy'), name);
   await userEvent.type(screen.getByPlaceholderText('Golden Retriever'), breed);
@@ -173,13 +180,15 @@ async function fillDogPage({ name = 'Rex', breed = 'Labrador', dob = '2020-01-01
   fireEvent.change(selects[0], { target: { value: 'yes' } }); // spayNeuter
   fireEvent.change(selects[1], { target: { value: 'no' } });  // aggression
   fireEvent.change(selects[2], { target: { value: 'no' } });  // health
-  fireEvent.click(screen.getByText('Continue'));
+  fireEvent.click(screen.getByText('Done'));
+  await screen.findByText('Owner Information');
 }
 
-// Single-dog case (the default form state) - fills Dog 1 and lands on
-// Stay Dates. Multi-dog flows call fillDogPage() directly per dog.
+// fillStep1 now fills every dog itself and lands directly on Stay Dates
+// (Sept 17, 2026) - kept as a no-op passthrough purely so the many
+// existing `await fillStep1(); await fillStep2();` call sites don't all
+// need individually touching.
 async function fillStep2() {
-  await fillDogPage();
   await screen.findByText('Stay Dates');
 }
 
@@ -218,17 +227,22 @@ const SAMPLE_DOGS = [
     spay_neuter: 'yes', aggression_history: 'no', aggression_detail: '',
     health_concerns: 'no', health_detail: '',
     owner: { name: 'Kim', phone: '6505551111', email: 'kim@test.com' },
+    // billed_at set on every stay here - Past Stays (see Admin — logged
+    // in) only lists fully billed stays, and every "browse by dog" test
+    // in that block reaches Bud/Choco through that lookup (Sept 17,
+    // 2026). Unbilled-stay behavior has its own dedicated UNBILLED_DOGS
+    // fixture below instead.
     stays: [
       {
         id: 'stay-1', check_in: '2026-09-01', check_out: '2026-09-03', drop_time: '09:00:00', pickup_time: '17:00:00',
         estimated_cost: 210, submitted_at: '2026-08-30T10:00:00Z', notes: 'Loves belly rubs', number_of_dogs: 1,
         dob: '2020-01-01', aggression_history: 'no', aggression_detail: '', health_concerns: 'no', health_detail: '',
-        waiver_snapshot: [{ title: 'Risks & Releases', body: 'Test waiver body text.' }],
+        waiver_snapshot: [{ title: 'Risks & Releases', body: 'Test waiver body text.' }], billed_at: '2026-09-04T00:00:00Z',
       },
       {
         id: 'stay-3', check_in: '2026-06-01', check_out: '2026-06-02', drop_time: '09:00:00', pickup_time: '17:00:00',
         estimated_cost: 105, submitted_at: '2026-05-30T10:00:00Z', notes: '', number_of_dogs: 1,
-        dob: null, aggression_history: 'no', aggression_detail: '', health_concerns: 'no', health_detail: '',
+        dob: null, aggression_history: 'no', aggression_detail: '', health_concerns: 'no', health_detail: '', billed_at: '2026-06-03T00:00:00Z',
       },
     ],
   },
@@ -242,7 +256,7 @@ const SAMPLE_DOGS = [
         id: 'stay-2', check_in: '2026-09-05', check_out: '2026-09-06', drop_time: '10:00:00', pickup_time: '12:00:00',
         estimated_cost: null, submitted_at: '2026-08-31T10:00:00Z', notes: '', number_of_dogs: 1,
         dob: null, aggression_history: 'yes', aggression_detail: 'Barks at mail carrier',
-        health_concerns: 'yes', health_detail: 'Mild hip dysplasia',
+        health_concerns: 'yes', health_detail: 'Mild hip dysplasia', billed_at: '2026-09-07T00:00:00Z',
       },
     ],
   },
@@ -914,7 +928,7 @@ describe('Step 1 — Owner Info', () => {
     expect(screen.getByText('Owner Information')).toBeInTheDocument();
   });
 
-  test('Continue enables once every required field (name/phone/email/vet) is filled - dog count already defaults to 1', async () => {
+  test('Continue enables once every required field (name/phone/email/vet) AND the default dog is filled', async () => {
     await goToOwnerStep();
     const button = screen.getByText('Continue');
     await userEvent.type(screen.getByPlaceholderText('(415) 555-0100'), '4155550100');
@@ -924,12 +938,15 @@ describe('Step 1 — Owner Info', () => {
     await userEvent.type(screen.getByPlaceholderText('jane@email.com'), 'kim@test.com');
     expect(button).toBeDisabled(); // vet still unset
     fireEvent.change(screen.getByDisplayValue('Select a Vet'), { target: { value: 'Marin Pet Hospital — (415) 479-8387' } });
-    expect(button).not.toBeDisabled();
+    expect(button).toBeDisabled(); // owner fields alone aren't enough - the default dog still needs its own profile
+    fireEvent.click(screen.getByText('Edit'));
+    await fillDogPage();
+    expect(screen.getByText('Continue')).not.toBeDisabled();
   });
 
-  test('advances to Dog 1 when all required fields filled', async () => {
+  test('Continue advances straight to Stay Dates once owner info and every dog are filled', async () => {
     await fillStep1();
-    expect(screen.getByText('Dog 1')).toBeInTheDocument();
+    expect(screen.getByText('Stay Dates')).toBeInTheDocument();
   });
 
   test('shows a first-timer note explaining to fill out every field', async () => {
@@ -942,39 +959,69 @@ describe('Step 1 — Owner Info', () => {
     expect(screen.getByDisplayValue('Select a Vet')).toBeInTheDocument();
   });
 
-  test('starts with exactly one dog ("Dog 1"), no Remove button, and no discount note', async () => {
+  test('starts with exactly one dog, labeled "Dog 1" until named, with an Edit button but no Delete button, and no discount note', async () => {
     await goToOwnerStep();
     expect(screen.getByText('Dog 1')).toBeInTheDocument();
     expect(screen.queryByText('Dog 2')).not.toBeInTheDocument();
-    expect(screen.queryByText('Remove')).not.toBeInTheDocument(); // can't remove the only dog
+    expect(screen.getByText('Edit')).toBeInTheDocument();
+    expect(screen.queryByText('Delete')).not.toBeInTheDocument(); // can't delete the only dog
     expect(screen.queryByText(/off each additional dog/)).not.toBeInTheDocument();
   });
 
-  test('"+ Add Dog" adds another dog, each with its own Remove button, and shows the discount note', async () => {
+  test('"+ Add Dog" opens the new dog\'s own edit page directly', async () => {
     await goToOwnerStep();
     fireEvent.click(screen.getByText('+ Add Dog'));
+    expect(await screen.findByText('Dog 2')).toBeInTheDocument(); // the new dog's edit-page title
+    expect(screen.getByPlaceholderText('Buddy')).toHaveValue('');
+  });
+
+  test('back on the owner page, a 2nd dog gets its own row with a Delete button, and the discount note appears', async () => {
+    await goToOwnerStep();
+    fireEvent.click(screen.getByText('+ Add Dog'));
+    await screen.findByText('Dog 2');
+    fireEvent.click(screen.getByText('← Back to Dogs'));
+    await screen.findByText('Owner Information');
     expect(screen.getByText('Dog 1')).toBeInTheDocument();
     expect(screen.getByText('Dog 2')).toBeInTheDocument();
-    expect(screen.getAllByText('Remove')).toHaveLength(2);
-    expect(await screen.findByText(/10% off each additional dog/)).toBeInTheDocument();
+    expect(screen.getAllByText('Delete')).toHaveLength(2);
+    expect(screen.getByText(/10% off each additional dog/)).toBeInTheDocument();
   });
 
-  test('Remove takes a dog off the list, hiding Remove again once only one is left', async () => {
+  test('a named dog shows its real name instead of "Dog N" on the owner page\'s list', async () => {
+    await goToOwnerStep();
+    fireEvent.click(screen.getByText('Edit'));
+    await userEvent.type(screen.getByPlaceholderText('Buddy'), 'Rex');
+    fireEvent.click(screen.getByText('← Back to Dogs'));
+    await screen.findByText('Owner Information');
+    expect(screen.getByText('Rex')).toBeInTheDocument();
+    expect(screen.queryByText('Dog 1')).not.toBeInTheDocument();
+  });
+
+  test('Delete removes a dog from the list, hiding Delete again once only one is left', async () => {
     await goToOwnerStep();
     fireEvent.click(screen.getByText('+ Add Dog'));
-    fireEvent.click(screen.getAllByText('Remove')[0]);
+    await screen.findByText('Dog 2');
+    fireEvent.click(screen.getByText('← Back to Dogs'));
+    await screen.findByText('Owner Information');
+    fireEvent.click(screen.getAllByText('Delete')[0]);
     expect(screen.queryByText('Dog 2')).not.toBeInTheDocument();
     expect(screen.getByText('Dog 1')).toBeInTheDocument();
-    expect(screen.queryByText('Remove')).not.toBeInTheDocument();
+    expect(screen.queryByText('Delete')).not.toBeInTheDocument();
     expect(screen.queryByText(/off each additional dog/)).not.toBeInTheDocument();
   });
 
-  test('adding several dogs lists each one and lets any of them be removed independently', async () => {
+  test('adding several dogs lists each one and lets any of them be deleted independently', async () => {
     await goToOwnerStep();
     fireEvent.click(screen.getByText('+ Add Dog'));
+    await screen.findByText('Dog 2');
+    fireEvent.click(screen.getByText('← Back to Dogs'));
+    await screen.findByText('Owner Information');
     fireEvent.click(screen.getByText('+ Add Dog'));
+    await screen.findByText('Dog 3');
+    fireEvent.click(screen.getByText('← Back to Dogs'));
+    await screen.findByText('Owner Information');
     expect(screen.getByText('Dog 3')).toBeInTheDocument();
-    fireEvent.click(screen.getAllByText('Remove')[1]); // remove the middle one
+    fireEvent.click(screen.getAllByText('Delete')[1]); // remove the middle one
     expect(screen.getByText('Dog 1')).toBeInTheDocument();
     expect(screen.getByText('Dog 2')).toBeInTheDocument();
     expect(screen.queryByText('Dog 3')).not.toBeInTheDocument(); // re-labeled by position, not identity
@@ -996,7 +1043,7 @@ describe('Step 1 — Owner Info', () => {
     expect(supabase.functions.invoke).toHaveBeenCalledWith('lookup-client', { body: { phone: '4155550100' } });
   });
 
-  test('the same lookup also autofills the vet and dog profile, visible once advanced to Dog 1', async () => {
+  test('the same lookup also autofills the vet and dog profile, visible via Edit on the dog row it names', async () => {
     mockInvokeDefaults({
       'lookup-client': async () => ({
         data: {
@@ -1015,8 +1062,9 @@ describe('Step 1 — Owner Info', () => {
     fireEvent.click(screen.getByText('Look up'));
     await screen.findByText(/Info found/);
     expect(screen.getByDisplayValue('Marin Pet Hospital — (415) 479-8387')).toBeInTheDocument();
+    expect(screen.getByText('Rex')).toBeInTheDocument(); // the dog row itself is already renamed
 
-    fireEvent.click(screen.getByText('Continue'));
+    fireEvent.click(screen.getByText('Edit'));
     await screen.findByText('Dog 1');
     expect(screen.getByPlaceholderText('Buddy')).toHaveValue('Rex');
     expect(screen.getByPlaceholderText('Golden Retriever')).toHaveValue('Labrador');
@@ -1042,23 +1090,36 @@ describe('Step 1 — Owner Info', () => {
     await userEvent.type(screen.getByPlaceholderText('(415) 555-0100'), '4155550100');
     fireEvent.click(screen.getByText('Look up'));
     await screen.findByText(/Info found/);
-    expect(screen.getByText('Dog 2')).toBeInTheDocument(); // count grew to match, not left at 1
+    expect(screen.getByText('Rex')).toBeInTheDocument(); // count grew to match, not left at 1
+    expect(screen.getByText('Fido')).toBeInTheDocument();
     // this mock's client has no owner_name/owner_email - fill those
     // manually so Continue's own validation isn't what's under test here
     await userEvent.type(screen.getByPlaceholderText('Jane Smith'), 'Kim Miller');
     await userEvent.type(screen.getByPlaceholderText('jane@email.com'), 'kim@test.com');
 
-    fireEvent.click(screen.getByText('Continue'));
+    // lookup-client never returns aggression/health (re-confirmed fresh
+    // each stay, not carried forward) - still required before Continue
+    // will advance, so finish each dog's profile via Edit first
+    fireEvent.click(screen.getAllByText('Edit')[0]);
     await screen.findByText('Dog 1');
     expect(screen.getByPlaceholderText('Buddy')).toHaveValue('Rex');
-    // lookup-client never returns aggression/health (re-confirmed fresh
-    // each stay, not carried forward) - still required to advance
     let selects = document.querySelectorAll('select');
     fireEvent.change(selects[1], { target: { value: 'no' } });
     fireEvent.change(selects[2], { target: { value: 'no' } });
-    fireEvent.click(screen.getByText('Continue'));
+    fireEvent.click(screen.getByText('Done'));
+    await screen.findByText('Owner Information');
+
+    fireEvent.click(screen.getAllByText('Edit')[1]);
     await screen.findByText('Dog 2');
     expect(screen.getByPlaceholderText('Buddy')).toHaveValue('Fido');
+    selects = document.querySelectorAll('select');
+    fireEvent.change(selects[1], { target: { value: 'no' } });
+    fireEvent.change(selects[2], { target: { value: 'no' } });
+    fireEvent.click(screen.getByText('Done'));
+    await screen.findByText('Owner Information');
+
+    fireEvent.click(screen.getByText('Continue'));
+    await screen.findByText('Stay Dates');
   });
 
   test('does not autofill or show the banner when phone is not found', async () => {
@@ -1096,18 +1157,23 @@ describe('Step 1 — Owner Info', () => {
 });
 
 // ── Dog pages ────────────────────────────────────────────────────────────────
+// A dog's own page is now reached by clicking Edit on its row on the
+// owner page, rather than as a forced sequential top-level step (Sept
+// 17, 2026) - every test here opens it that way.
 describe('Dog pages', () => {
-  test('Continue is disabled on an empty dog page, and does nothing if clicked anyway', async () => {
-    await fillStep1();
-    const button = screen.getByText('Continue');
+  test('Done is disabled on an empty dog page, and does nothing if clicked anyway', async () => {
+    await goToOwnerStep();
+    fireEvent.click(screen.getByText('Edit'));
+    const button = screen.getByText('Done');
     expect(button).toBeDisabled();
     fireEvent.click(button);
-    expect(screen.queryByText('Stay Dates')).not.toBeInTheDocument();
+    expect(screen.getByText('Dog 1')).toBeInTheDocument(); // still on the dog's own page
   });
 
-  test('Continue only enables once every field - including aggression and health - is answered', async () => {
-    await fillStep1();
-    const button = screen.getByText('Continue');
+  test('Done only enables once every field - including aggression and health - is answered', async () => {
+    await goToOwnerStep();
+    fireEvent.click(screen.getByText('Edit'));
+    const button = screen.getByText('Done');
     await userEvent.type(screen.getByPlaceholderText('Buddy'), 'Rex');
     await userEvent.type(screen.getByPlaceholderText('Golden Retriever'), 'Labrador');
     fireEvent.change(document.querySelector('input[type="date"]'), { target: { value: '2020-01-01' } });
@@ -1121,14 +1187,16 @@ describe('Dog pages', () => {
   });
 
   test('calculates age from DOB', async () => {
-    await fillStep1();
+    await goToOwnerStep();
+    fireEvent.click(screen.getByText('Edit'));
     const dobInput = document.querySelector('input[type="date"]');
     fireEvent.change(dobInput, { target: { value: isoMonthsAgo(36) } });
     expect(await screen.findByText('Age: 3 years')).toBeInTheDocument();
   });
 
   test('reveals the aggression detail field when "Yes" is selected, and accepts text', async () => {
-    await fillStep1();
+    await goToOwnerStep();
+    fireEvent.click(screen.getByText('Edit'));
     const selects = document.querySelectorAll('select');
     fireEvent.change(selects[1], { target: { value: 'yes' } }); // aggression
     const detail = await screen.findByPlaceholderText(/known triggers/);
@@ -1137,7 +1205,8 @@ describe('Dog pages', () => {
   });
 
   test('reveals the health detail field when "Yes" is selected, and accepts text', async () => {
-    await fillStep1();
+    await goToOwnerStep();
+    fireEvent.click(screen.getByText('Edit'));
     const selects = document.querySelectorAll('select');
     fireEvent.change(selects[2], { target: { value: 'yes' } }); // health
     const detail = await screen.findByPlaceholderText(/conditions, limitations/);
@@ -1145,30 +1214,35 @@ describe('Dog pages', () => {
     expect(detail).toHaveValue('Mild arthritis');
   });
 
-  test('Back returns to Step 1 with owner info preserved', async () => {
-    await fillStep1('4155550100', 'Kim Miller', 'kim@test.com');
-    fireEvent.click(screen.getByText('Back'));
+  test('← Back to Dogs returns to the owner page with owner info preserved', async () => {
+    await goToOwnerStep();
+    await userEvent.type(screen.getByPlaceholderText('Jane Smith'), 'Kim Miller');
+    fireEvent.click(screen.getByText('Edit'));
+    fireEvent.click(screen.getByText('← Back to Dogs'));
     expect(await screen.findByText('Owner Information')).toBeInTheDocument();
     expect(screen.getByPlaceholderText('Jane Smith')).toHaveValue('Kim Miller');
   });
 
-  test('a 2nd dog gets its own page, titled "Dog 2"', async () => {
-    await fillStep1('4155550100', 'Kim Miller', 'kim@test.com', 2);
+  test('a 2nd dog added via "+ Add Dog" gets its own blank page, titled "Dog 2" - dog 1\'s data is untouched', async () => {
+    await goToOwnerStep();
+    fireEvent.click(screen.getByText('Edit'));
     await fillDogPage({ name: 'Rex', breed: 'Labrador' });
+    fireEvent.click(screen.getByText('+ Add Dog'));
     expect(await screen.findByText('Dog 2')).toBeInTheDocument();
-    expect(screen.queryByText('Dog 1')).not.toBeInTheDocument();
+    expect(screen.getByPlaceholderText('Buddy')).toHaveValue(''); // the new dog's own page, blank
     // dog 1's data isn't lost - just off-screen, verified via a later test
     // that submits a 2-dog booking and checks both dogs made it to the
     // payload (see Step 5 - Signature)
   });
 
-  test('Back from Dog 2 returns to Dog 1 with its data preserved', async () => {
-    await fillStep1('4155550100', 'Kim Miller', 'kim@test.com', 2);
+  test('re-opening Edit on a dog shows its previously entered data preserved', async () => {
+    await goToOwnerStep();
+    fireEvent.click(screen.getByText('Edit'));
     await fillDogPage({ name: 'Rex', breed: 'Labrador' });
-    await screen.findByText('Dog 2');
-    fireEvent.click(screen.getByText('Back'));
-    expect(await screen.findByText('Dog 1')).toBeInTheDocument();
+    fireEvent.click(screen.getByText('Edit'));
+    await screen.findByText('Dog 1');
     expect(screen.getByPlaceholderText('Buddy')).toHaveValue('Rex');
+    expect(screen.getByPlaceholderText('Golden Retriever')).toHaveValue('Labrador');
   });
 });
 
@@ -1334,13 +1408,14 @@ describe('Step 3 — Stay Dates', () => {
     await userEvent.type(screen.getByPlaceholderText('Jane Smith'), 'Kim Miller');
     await userEvent.type(screen.getByPlaceholderText('jane@email.com'), 'kim@test.com');
     fireEvent.change(screen.getByDisplayValue('Select a Vet'), { target: { value: 'Marin Pet Hospital — (415) 479-8387' } });
-    fireEvent.click(screen.getByText('+ Add Dog'));
-    fireEvent.click(screen.getByText('Continue'));
 
-    await screen.findByText('Dog 1');
+    fireEvent.click(screen.getByText('Edit'));
     await fillDogPage({ name: 'Rex', breed: 'Labrador', dob: '2020-01-01' });
+    fireEvent.click(screen.getByText('+ Add Dog'));
     await screen.findByText('Dog 2');
     await fillDogPage({ name: 'Fido', breed: 'Poodle', dob: '2021-06-01' });
+
+    fireEvent.click(screen.getByText('Continue'));
     await screen.findByText('Stay Dates');
 
     const dateInputs = document.querySelectorAll('input[type="date"]');
@@ -1354,11 +1429,11 @@ describe('Step 3 — Stay Dates', () => {
     expect(screen.getByText(/10% off each additional dog/)).toBeInTheDocument();
   });
 
-  test('Back returns to Dog 1', async () => {
+  test('Back returns to Owner Information', async () => {
     await fillStep1();
     await fillStep2();
     fireEvent.click(screen.getByText('Back'));
-    expect(await screen.findByText('Dog 1')).toBeInTheDocument();
+    expect(await screen.findByText('Owner Information')).toBeInTheDocument();
   });
 });
 
@@ -1480,13 +1555,15 @@ describe('Step 5 — Signature', () => {
     await userEvent.type(screen.getByPlaceholderText('Jane Smith'), 'Kim Miller');
     await userEvent.type(screen.getByPlaceholderText('jane@email.com'), 'kim@test.com');
     fireEvent.change(screen.getByDisplayValue('Select a Vet'), { target: { value: 'Marin Pet Hospital — (415) 479-8387' } });
-    fireEvent.click(screen.getByText('+ Add Dog'));
-    fireEvent.click(screen.getByText('Continue'));
 
-    await screen.findByText('Dog 1');
+    fireEvent.click(screen.getByText('Edit'));
     await fillDogPage({ name: 'Rex', breed: 'Labrador', dob: '2020-01-01' });
+    fireEvent.click(screen.getByText('+ Add Dog'));
     await screen.findByText('Dog 2');
     await fillDogPage({ name: 'Fido', breed: 'Poodle', dob: '2021-06-01' });
+
+    fireEvent.click(screen.getByText('Continue'));
+    await screen.findByText('Stay Dates');
     await fillStep3();
     await fillStep4();
 
@@ -1515,16 +1592,16 @@ describe('Admin login', () => {
     expect(supabase.functions.invoke).toHaveBeenCalledWith('admin-data', { body: { password: 'wrongpassword' } });
   });
 
-  test('accepts the correct password and shows the stay list', async () => {
+  test('accepts the correct password and shows Past Stays', async () => {
     await loginAsAdmin();
-    expect(screen.getByText('3 signed agreements on file')).toBeInTheDocument();
+    expect(screen.getByText('Past Stays')).toBeInTheDocument();
     expect(screen.getByText('Bud')).toBeInTheDocument();
     expect(screen.getByText('Choco')).toBeInTheDocument();
   });
 
-  test('shows the singular label for exactly one record', async () => {
+  test('shows the singular "stay" label for a dog with exactly one billed stay', async () => {
     await loginAsAdmin([{ ...SAMPLE_DOGS[0], stays: [SAMPLE_DOGS[0].stays[0]] }], 1);
-    expect(screen.getByText('1 signed agreement on file')).toBeInTheDocument();
+    expect(screen.getByText('1 stay')).toBeInTheDocument();
   });
 
   test('shows an empty state when there are no records', async () => {
@@ -1563,19 +1640,22 @@ const UNBILLED_DOGS = [
     aggression_history: 'no', aggression_detail: '', health_concerns: 'no', health_detail: '',
     owner: { name: 'Kim', phone: '6505551111', email: 'kim@test.com' },
     stays: [
-      // Already checked out, never billed - should show up.
+      // Checked out a while ago, never billed - earliest check-in, should
+      // sort first.
       {
-        id: 'stay-unbilled', check_in: daysFromToday(-4), check_out: daysFromToday(-2),
-        drop_time: '09:00:00', pickup_time: '17:00:00', estimated_cost: 210,
+        id: 'stay-earliest', check_in: daysFromToday(-10), check_out: daysFromToday(-8),
+        drop_time: '09:00:00', pickup_time: '09:00:00', estimated_cost: 105,
         number_of_dogs: 1, submitted_at: '2026-01-01T00:00:00Z', billed_at: null,
       },
       // Already billed - should NOT show up.
       {
-        id: 'stay-already-billed', check_in: daysFromToday(-10), check_out: daysFromToday(-8),
+        id: 'stay-already-billed', check_in: daysFromToday(-6), check_out: daysFromToday(-5),
         drop_time: '09:00:00', pickup_time: '09:00:00', estimated_cost: 105,
         number_of_dogs: 1, submitted_at: '2026-01-01T00:00:00Z', billed_at: '2026-01-05T00:00:00Z',
       },
-      // Still upcoming - should NOT show up (nothing to bill yet).
+      // Still upcoming, never billed - SHOULD show up (Sept 17, 2026 -
+      // Unbilled Stays used to exclude future/in-progress stays; not any
+      // more, it's every unbilled stay regardless of date).
       {
         id: 'stay-future', check_in: daysFromToday(3), check_out: daysFromToday(5),
         drop_time: '09:00:00', pickup_time: '09:00:00', estimated_cost: 210,
@@ -1588,9 +1668,9 @@ const UNBILLED_DOGS = [
     aggression_history: 'no', aggression_detail: '', health_concerns: 'no', health_detail: '',
     owner: { name: 'Kim', phone: '6505551111', email: 'kim@test.com' },
     stays: [
-      // Shares the same stay id as Bud's unbilled one below (a 2-dog
-      // booking) - the unbilled list must dedupe by stay id, not show
-      // it twice.
+      // Shares the same stay id as Bud's below (a 2-dog booking) - the
+      // unbilled list must dedupe by stay id, not show it twice. Check-in
+      // falls between stay-earliest and stay-future above.
       {
         id: 'stay-shared', check_in: daysFromToday(-4), check_out: daysFromToday(-2),
         drop_time: '09:00:00', pickup_time: '17:00:00', estimated_cost: 380,
@@ -1629,26 +1709,46 @@ async function loginAsAdminWithUnbilled(dogs = UNBILLED_DOGS) {
 }
 
 describe('Admin — logged in — Unbilled Stays', () => {
-  test('shows only stays that are checked out and not yet billed, deduping a shared multi-dog stay', async () => {
+  test('includes every unbilled stay - past, in-progress, and future - deduping a shared multi-dog stay, sorted earliest check-in first', async () => {
     await loginAsAdminWithUnbilled();
-    expect(screen.getByText('Fido & Bud — Kim')).toBeInTheDocument(); // the shared stay, once
-    // The already-billed and still-upcoming stays never render a card at all
-    expect(screen.getAllByText(/— Kim/).length).toBe(2); // stay-unbilled (Bud alone) + stay-shared (Bud & Fido)
+    const cards = document.querySelectorAll('.unbilled-section .stay-card');
+    expect(cards.length).toBe(3); // stay-earliest, stay-shared (once, not twice), stay-future
+    expect(within(cards[0]).getByText('Bud — Kim')).toBeInTheDocument(); // stay-earliest
+    expect(within(cards[1]).getByText('Fido & Bud — Kim')).toBeInTheDocument(); // stay-shared
+    expect(within(cards[2]).getByText('Bud — Kim')).toBeInTheDocument(); // stay-future
+    // The already-billed stay never renders a card at all
+    expect(cards.length).not.toBe(4);
   });
 
-  test('recalculates the estimate from the (editable) dates/times using the real cost logic', async () => {
+  test('clicking a stay expands it, showing details plus Edit and Send Billing Text buttons; clicking again collapses it', async () => {
+    await loginAsAdminWithUnbilled();
+    const header = screen.getByText('Fido & Bud — Kim');
+    const card = header.closest('.stay-card');
+    expect(within(card).queryByText('Edit')).not.toBeInTheDocument(); // collapsed by default
+    fireEvent.click(header);
+    expect(within(card).getByText('Edit')).toBeInTheDocument();
+    expect(within(card).getByText('Send Billing Text')).toBeInTheDocument();
+    expect(within(card).getByText(/Estimated cost/)).toBeInTheDocument();
+    fireEvent.click(header);
+    expect(within(card).queryByText('Edit')).not.toBeInTheDocument();
+  });
+
+  test('Edit reveals the editable dates/times/cost fields, and Recalculate updates the cost from the real cost logic', async () => {
     await loginAsAdminWithUnbilled();
     const card = screen.getByText('Fido & Bud — Kim').closest('.stay-card');
+    fireEvent.click(screen.getByText('Fido & Bud — Kim'));
+    fireEvent.click(within(card).getByText('Edit'));
     const costInput = within(card).getByDisplayValue('380');
     fireEvent.click(within(card).getByText('Recalculate'));
     // 2 nights, 2 dogs, default 10% off the 2nd -> matches calcCost's own math, just confirms it changed from the raw stored estimate
     await waitFor(() => expect(costInput.value).not.toBe(''));
   });
 
-  test('sends the bill (SMS first, then marks billed) and the stay drops off the list', async () => {
+  test('sends the bill (SMS first, then marks billed) and the stay drops off the list - no Edit click required first', async () => {
     await loginAsAdminWithUnbilled();
+    fireEvent.click(screen.getByText('Fido & Bud — Kim'));
     const card = screen.getByText('Fido & Bud — Kim').closest('.stay-card');
-    fireEvent.click(within(card).getByText('Send Bill'));
+    fireEvent.click(within(card).getByText('Send Billing Text'));
 
     await waitFor(() => expect(supabase.functions.invoke).toHaveBeenCalledWith('send-confirmation', {
       body: expect.objectContaining({ type: 'billing', dog_name: 'Fido & Bud', owner_phone: '6505551111', final_cost: 380 }),
@@ -1670,8 +1770,9 @@ describe('Admin — logged in — Unbilled Stays', () => {
     fireEvent.click(screen.getByText('Sign In'));
     await screen.findByText('Bayview Boarding — Admin');
 
+    fireEvent.click(screen.getByText('Fido & Bud — Kim'));
     const card = screen.getByText('Fido & Bud — Kim').closest('.stay-card');
-    fireEvent.click(within(card).getByText('Send Bill'));
+    fireEvent.click(within(card).getByText('Send Billing Text'));
     expect(await within(card).findByText('Failed to send. Please try again.')).toBeInTheDocument();
     expect(supabase.functions.invoke).not.toHaveBeenCalledWith('admin-data', expect.objectContaining({ body: expect.objectContaining({ action: 'billStay' }) }));
     expect(screen.getByText('Fido & Bud — Kim')).toBeInTheDocument(); // still there

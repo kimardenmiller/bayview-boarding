@@ -1,6 +1,6 @@
 BAYVIEW BOARDING — FIX LIST
 ============================
-Last updated: September 17, 2026 (Owner page: Add/Remove Dog replaces Number of Dogs)
+Last updated: September 17, 2026 (Dog editing moves off sequential steps; Admin: Unbilled/Past Stays split)
 
 NEXT CHANGE LIST (v1.5)
 -----------------------
@@ -79,6 +79,56 @@ TWILIO STATUS
 
 COMPLETED
 ---------
+- Sept 17, 2026 (4): Two related restructurings, both from the same
+  follow-up request to the Add/Remove Dog change below (3):
+
+  1. Booking flow - dog pages are no longer forced sequential top-level
+  wizard steps. The Owner Information page's dog list (from (3) below)
+  now shows each dog's actual name (falling back to "Dog N" only while
+  unnamed) with an "Edit" button (opens that dog's page inline, in place
+  of the owner page) alongside "Delete" (renamed from "Remove"). Editing
+  a dog ends with "Done" (renamed from "Continue") or "← Back to Dogs"
+  (renamed from "Back"), both returning to the list. Continue on the
+  owner page now requires every dog to pass the same required-field
+  check StepDogPage itself uses (dogIsComplete(), kept in sync by hand -
+  small enough that sharing the errors object back and forth wasn't
+  worth it) before it enables, then goes straight to Stay Dates - dog
+  pages no longer occupy their own step number at all. Progress bar
+  collapsed to a fixed 4 steps (Owner, Stay Dates, Agreement, Sign)
+  instead of growing with the dog count.
+
+  2. Admin panel - "Unbilled Stays" now includes every unbilled stay,
+  full stop, including future and in-progress ones (previously limited
+  to stays already checked out). Sorted earliest check-in first. Each
+  card is collapsed to a one-line summary by default; clicking it
+  expands to show the stay's details plus "Edit" (reveals the
+  correctable date/time/cost fields + Recalculate, same logic as
+  before) and "Send Billing Text" - the send button no longer requires
+  opening Edit first. Below that, a new "Past Stays" section holds the
+  admin search/dog-list lookup, now explicitly scoped to fully billed
+  stays only (both by dog list membership and by which of that dog's
+  stays it lists) - it's the direct counterpart to Unbilled Stays, so
+  together they cover every signed agreement on file, which is why the
+  old "{n} signed agreement(s) on file" summary line was deleted
+  outright rather than kept. "💡 Ideas & Bugs" / "📢 Testers" moved to
+  the very bottom of the panel, after every settings section.
+
+  Tests: Step 1/Dog pages describe blocks substantially rewritten for
+  the new edit-in-place flow (fillStep1/fillDogPage helpers now open
+  each dog via Edit and fill/Done in place, landing on Stay Dates
+  directly - fillStep2 kept as a no-op passthrough so the many existing
+  `fillStep1(); fillStep2();` call sites didn't all need touching).
+  Unbilled Stays tests rewritten for the click-to-expand interaction and
+  a 3rd (future) fixture stay that now correctly appears. SAMPLE_DOGS'
+  stays gained billed_at so the existing "browse by dog" tests still
+  find them under the now billed-only Past Stays lookup. 160 React + 129
+  Deno = 289/289 passing.
+
+  Verified live via the deployed JS bundle: "Past Stays", "Send Billing
+  Text", "Back to Dogs", and "Delete" all present; the old "signed
+  agreement(s) on file" summary text confirmed absent (the one remaining
+  "signed agreement" match in the bundle is the unrelated booking
+  confirmation screen's own wording, not this line).
 - Sept 17, 2026 (3): Owner Information page - removed the "Number of
   Dogs" number input entirely, replaced with a plain list of "Dog 1",
   "Dog 2", ... rows, each with its own Remove button, plus a "+ Add Dog"

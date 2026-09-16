@@ -5,13 +5,19 @@ A React web app for Bayview Boarding, a home-based dog boarding business run by
 Kim Miller and Estee Fletter at 210 Bayview Drive, San Rafael, CA.
 
 ## What it does
-- Client intake form, a dynamic number of steps: owner info (name/phone/
-  email/vet, plus "+ Add Dog"/Remove controls - a plain list of "Dog 1",
-  "Dog 2", ... rows, replacing the old "Number of Dogs" number input
-  Sept 17, 2026), one full-profile page per dog ("Dog 1", "Dog 2", ... —
-  breed/DOB/spay-neuter/aggression/health), stay dates, waiver,
-  signature. Vet and dog count are asked once on the owner page, not per
-  dog (Sept 14 reorg, moved off the dog page Sept 15)
+- Client intake form, a fixed 4 steps: owner info (name/phone/email/vet
+  + a dog list), stay dates, waiver, signature. Vet is asked once on the
+  owner page, not per dog (Sept 14 reorg, moved off the dog page Sept
+  15). The owner page's dog list (replacing the old "Number of Dogs"
+  number input Sept 17, 2026) shows each dog by name (falling back to
+  "Dog N" while unnamed), with "Edit" (opens that dog's own full-profile
+  page — breed/DOB/spay-neuter/aggression/health — inline, in place of
+  the owner page, ending with "Done"/"← Back to Dogs") and "Delete"
+  buttons, plus "+ Add Dog" (as many as you like, opens the new dog's
+  page directly). Continue only enables once every listed dog passes its
+  own required-field check, then goes straight to Stay Dates - dog pages
+  are edited in place from this list rather than forced sequential
+  top-level wizard steps (Sept 17, 2026 (4) reorg)
 - Aggression/health questions warn visibly if left blank (previously
   required to advance but silently so - no message ever showed)
 - Electronic waiver with e-signature (legally binding under E-SIGN / UETA)
@@ -37,21 +43,28 @@ Kim Miller and Estee Fletter at 210 Bayview Drive, San Rafael, CA.
   triggered, editable final cost, not auto-sent — the estimate can be
   wrong by pickup). A2P 10DLC is APPROVED (confirmed via the API Sept
   16, 2026) - real sends actually go through
-- Admin panel, top to bottom (reordered Sept 17, 2026 (2) - the dog list
-  used to be at the very bottom, settings first): an "Unbilled Stays"
-  review list (every checked-out, never-billed stay, editable dates/
-  times/cost before sending - see billed_at below); the owner search +
-  dog list; a "💡 Ideas & Bugs" section (Sept 16 (8) — see feedback
-  below) with an open-count badge and a "📢 Testers" section (Sept 17 —
-  see testers below) to maintain a tester list and broadcast a
-  personally-greeted SMS to all of them; then day rate/discount/holiday/
-  vet-list/packing-list/SMS-template settings. Each stay in a dog's
-  history also still shows a "Send Billing Text" control and a "View
-  waiver as signed" toggle (Sept 16 (5) — see waiver_snapshot below).
-  Reached via the nav menu's "Admin" item (Sept 16, 2026 — reversed the
-  earlier "no visible entry point" decision on request) or the
-  bookmarked ?admin URL; either way it's still fully password-gated
-  server-side
+- Admin panel, top to bottom (reordered Sept 17, 2026 (2) and (4)): an
+  "Unbilled Stays" review list — every never-billed stay at all, past,
+  in-progress, or future, sorted earliest check-in first (previously
+  limited to already-checked-out stays); each card is a one-line summary
+  until clicked, which expands it to show the stay's details plus "Edit"
+  (reveals the correctable dates/times/cost + Recalculate) and "Send
+  Billing Text" (works with or without opening Edit first - see
+  billed_at below). Below that, "Past Stays" — the owner search + dog
+  list, now scoped to fully billed stays only (the direct counterpart to
+  Unbilled Stays; together the two cover every signed agreement on file,
+  which is why the old running "{n} signed agreements on file" count was
+  deleted rather than kept). Then, at the very bottom, a "💡 Ideas &
+  Bugs" section (Sept 16 (8) — see feedback below) with an open-count
+  badge and a "📢 Testers" section (Sept 17 — see testers below) to
+  maintain a tester list and broadcast a personally-greeted SMS to all
+  of them, then day rate/discount/holiday/vet-list/packing-list/
+  SMS-template settings. Each stay in a dog's (billed) history also
+  still shows its own "Send Billing Text" control and a "View waiver as
+  signed" toggle (Sept 16 (5) — see waiver_snapshot below). Reached via
+  the nav menu's "Admin" item (Sept 16, 2026 — reversed the earlier "no
+  visible entry point" decision on request) or the bookmarked ?admin
+  URL; either way it's still fully password-gated server-side
 - "Learn more about us" page (content from the Bayview Boarding Rover
   profile — bio, home characteristics, photos, all 5-star reviews with
   dates linking out to Rover, an approximate-location map). Reached via
@@ -179,7 +192,7 @@ call itself is dropped, not for a routine secret rotation.
 - src/App.js — main app
 - src/settings.js — all configurable values (rates, vets, messages, packing list)
 - src/waiver.js — full waiver text
-- src/App.test.js — 157 passing tests (TDD), Supabase mocked via src/__mocks__/supabase.js
+- src/App.test.js — 160 passing tests (TDD), Supabase mocked via src/__mocks__/supabase.js
 - supabase/functions/send-contact/index.ts — public Contact Us form handler: relays name/email-or-phone/message to Kim & Estee by SMS (reuses KIM_PHONE/ESTEE_PHONE). Deployed normally (no --no-verify-jwt) since it's called via the Supabase JS client like settings/lookup-client/submit-booking
 - supabase/functions/feedback/index.ts — "Submit Idea": public submit (no password) + admin list/status-update (password) for the feedback queue
 - supabase/functions/testers/index.ts — tester broadcast list: entirely admin-password-gated list/add/remove/notify (no public branch at all); notify greets each active tester by their own first name

@@ -201,12 +201,11 @@ function Header({ onTitleClick }) {
 // Step count is dynamic: Owner + one page per dog + Dates + Agreement +
 // Sign, so the labels/total must be computed from numberOfDogs rather
 // than hardcoded.
-function Progress({ step, numberOfDogs }) {
-  const labels = [
-    'Your Info',
-    ...Array.from({ length: numberOfDogs }, (_, i) => `Dog ${i + 1}`),
-    'Stay Dates', 'Agreement', 'Sign',
-  ];
+// Fixed 4-step model (Sept 17, 2026 - dog pages moved off the top-level
+// wizard entirely and into an "Edit" sub-view launched from the owner
+// page's dog list, so they no longer add their own steps here).
+function Progress({ step }) {
+  const labels = ['Your Info', 'Stay Dates', 'Agreement', 'Sign'];
   const total = labels.length;
   return (
     <div className="progress-wrap">
@@ -237,6 +236,16 @@ function emptyDog() {
   };
 }
 
+// Same required fields as StepDogPage's own getErrors() - kept in sync by
+// hand (small enough that a shared helper would need passing the whole
+// errors shape back and forth for little benefit). Used by StepOwner to
+// know which dogs still need attention before Continue can advance past
+// the owner page at all (Sept 17, 2026 - dog editing moved off a forced
+// sequential per-dog flow and onto this "Edit" list instead).
+function dogIsComplete(dog) {
+  return !!(dog.name.trim() && dog.breed.trim() && dog.dob && dog.spayNeuter && dog.aggressionHistory && dog.healthConcerns);
+}
+
 // Owner info, the vet, and "Number of Dogs" are all asked once per
 // booking here (Sept 14 scope decision, moved off the dog page Sept 15)
 // - a returning-client lookup on this page autofills all of it, plus
@@ -245,6 +254,11 @@ function StepOwner({ data, onChange, onNext, vetOptions, multiDogDiscount }) {
   const [errors, setErrors] = useState({});
   const [looking, setLooking] = useState(false);
   const [found, setFound] = useState(false);
+  // Set while a dog's own page is open in place of the owner page's usual
+  // JSX (Sept 17, 2026 - dog editing moved off a forced sequential per-dog
+  // flow and onto this "Edit" list instead, so Continue here can go
+  // straight to Stay Dates once every dog on the list is complete).
+  const [editingDogIndex, setEditingDogIndex] = useState(null);
 
   async function lookupPhone() {
     if (!data.ownerPhone.trim()) return;
@@ -284,11 +298,13 @@ function StepOwner({ data, onChange, onNext, vetOptions, multiDogDiscount }) {
 
   // "Add Dog" / delete (Sept 17, 2026 - replaced the old "Number of Dogs"
   // number input entirely). Always keeps at least one dog - removeDog is
-  // a no-op at length 1, and the Remove button itself is hidden then, so
+  // a no-op at length 1, and the Delete button itself is hidden then, so
   // dogs.length can never reach 0 and there's no longer a "must be at
-  // least 1" error state to report.
+  // least 1" error state to report. A newly added dog opens straight into
+  // its own edit page, same as clicking Edit on an existing one.
   function addDog() {
     onChange('dogs', [...data.dogs, emptyDog()]);
+    setEditingDogIndex(data.dogs.length);
   }
 
   function removeDog(index) {
@@ -304,6 +320,7 @@ function StepOwner({ data, onChange, onNext, vetOptions, multiDogDiscount }) {
     if (!data.ownerName.trim()) e.ownerName = 'Required';
     if (!data.ownerEmail.trim()) e.ownerEmail = 'Required';
     if (!data.vetName || data.vetName === 'Select a Vet') e.vetName = 'Required';
+    if (!data.dogs.every(dogIsComplete)) e.dogs = 'Every dog needs its full profile filled in - click Edit on each one below.';
     return e;
   }
 
@@ -315,13 +332,25 @@ function StepOwner({ data, onChange, onNext, vetOptions, multiDogDiscount }) {
 
   const canContinue = Object.keys(getErrors()).length === 0;
 
+  if (editingDogIndex !== null) {
+    return (
+      <StepDogPage
+        data={data}
+        onChange={onChange}
+        index={editingDogIndex}
+        onNext={() => setEditingDogIndex(null)}
+        onBack={() => setEditingDogIndex(null)}
+      />
+    );
+  }
+
   return (
     <div className="step">
       <h2 className="step-title">Owner Information</h2>
       <p className="step-intro">
-        First time boarding with us? Just fill out every field below and on
-        each dog's page that follows — we ask everything up front so nothing's
-        missing when you drop off.
+        First time boarding with us? Fill out your info below, then click
+        Edit on each dog to fill out their profile — we ask everything up
+        front so nothing's missing when you drop off.
       </p>
       <Field label="Phone Number" hint="Returning client? Enter your number and click Look up to auto-fill." error={errors.ownerPhone}>
         <div className="email-row">
@@ -343,14 +372,17 @@ function StepOwner({ data, onChange, onNext, vetOptions, multiDogDiscount }) {
           {vetOptions.map((v, i) => <option key={i} value={v}>{v}</option>)}
         </select>
       </Field>
-      <Field label="Dogs">
+      <Field label="Dogs" error={errors.dogs}>
         <div className="dog-count-list">
-          {data.dogs.map((_, i) => (
+          {data.dogs.map((dog, i) => (
             <div className="dog-count-row" key={i}>
-              <span>Dog {i + 1}</span>
-              {data.dogs.length > 1 && (
-                <button type="button" className="btn-secondary" onClick={() => removeDog(i)}>Remove</button>
-              )}
+              <span>{dog.name.trim() || `Dog ${i + 1}`}</span>
+              <div style={{ display: 'flex', gap: 6 }}>
+                <button type="button" className="btn-secondary" onClick={() => setEditingDogIndex(i)}>Edit</button>
+                {data.dogs.length > 1 && (
+                  <button type="button" className="btn-secondary" onClick={() => removeDog(i)}>Delete</button>
+                )}
+              </div>
             </div>
           ))}
         </div>
@@ -445,8 +477,8 @@ function StepDogPage({ data, onChange, index, onNext, onBack }) {
         </Field>
       )}
       <div className="step-actions">
-        <button className="btn-secondary" onClick={onBack}>Back</button>
-        <button className="btn-primary" onClick={() => validate() && onNext()} disabled={!canContinue}>Continue</button>
+        <button className="btn-secondary" onClick={onBack}>← Back to Dogs</button>
+        <button className="btn-primary" onClick={() => validate() && onNext()} disabled={!canContinue}>Done</button>
       </div>
     </div>
   );
@@ -680,6 +712,11 @@ function AdminView({
   const [billingEdits, setBillingEdits] = useState({});
   const [unbilledStatus, setUnbilledStatus] = useState({});
   const [sendingBillId, setSendingBillId] = useState(null);
+  // Click-to-expand (Sept 17, 2026 - replaced "every field always visible
+  // inline" now that the list includes every unbilled stay, not just
+  // already-checked-out ones, and would otherwise be a wall of inputs).
+  const [expandedUnbilledId, setExpandedUnbilledId] = useState(null);
+  const [editingUnbilledId, setEditingUnbilledId] = useState(null);
   // Billing SMS is admin-triggered (not auto-sent at pickup time) - the
   // estimated cost can be wrong by pickup (early/late pickup, extra
   // services), so an admin reviews/adjusts the actual final amount before
@@ -968,22 +1005,19 @@ function AdminView({
     );
   }
 
-  const filtered = dogs.filter(d =>
-    d.name?.toLowerCase().includes(search.toLowerCase()) ||
-    d.owner?.name?.toLowerCase().includes(search.toLowerCase())
-  );
   const feedbackOpenCount = feedback.filter(f => f.status === 'open').length;
 
-  // Every dog's stay history already carries billed_at and check_out -
-  // no separate fetch needed, just flatten across dogs and dedupe by
-  // stay id (a shared multi-dog stay otherwise appears once per dog).
-  // "Unbilled" = already checked out (or checking out today) and never
-  // billed - a future stay doesn't need billing yet.
-  const today = todayISO();
+  // Every dog's stay history already carries billed_at - no separate
+  // fetch needed, just flatten across dogs and dedupe by stay id (a
+  // shared multi-dog stay otherwise appears once per dog). "Unbilled"
+  // means never billed, full stop - future and in-progress stays are
+  // included too (Sept 17, 2026 - previously limited to already-checked-
+  // out stays), sorted earliest check-in first so admin sees what's
+  // coming up, not just what's overdue.
   const unbilledByStayId = new Map();
   dogs.forEach(d => {
     (d.stays || []).forEach(s => {
-      if (!s.billed_at && s.check_out && s.check_out <= today) {
+      if (!s.billed_at) {
         if (unbilledByStayId.has(s.id)) {
           unbilledByStayId.get(s.id).dogNames.push(d.name);
         } else {
@@ -992,7 +1026,18 @@ function AdminView({
       }
     });
   });
-  const unbilledStays = Array.from(unbilledByStayId.values()).sort((a, b) => a.check_out.localeCompare(b.check_out));
+  const unbilledStays = Array.from(unbilledByStayId.values()).sort((a, b) => a.check_in.localeCompare(b.check_in));
+
+  // "Past Stays" = fully billed stays, the counterpart lookup to Unbilled
+  // Stays above - together the two sections cover every signed agreement
+  // on file, so there's no separate running total needed any more.
+  const pastStaysDogs = dogs
+    .map(d => ({ ...d, stays: (d.stays || []).filter(s => s.billed_at) }))
+    .filter(d => d.stays.length > 0);
+  const filtered = pastStaysDogs.filter(d =>
+    d.name?.toLowerCase().includes(search.toLowerCase()) ||
+    d.owner?.name?.toLowerCase().includes(search.toLowerCase())
+  );
 
   if (showFeedback) {
     return (
@@ -1206,81 +1251,111 @@ function AdminView({
           </label>
           {unbilledStays.length === 0 && <p className="empty" style={{ padding: '8px 0' }}>Nothing to bill right now.</p>}
           <div className="stay-history">
-            {unbilledStays.map(s => (
-              <div key={s.id} className="stay-card">
-                <div className="stay-dates">
-                  <span>{s.dogNames.join(' & ')} — {s.ownerName}</span>
-                </div>
-                <div className="stay-meta">{s.ownerPhone}</div>
-                <div className="field-row" style={{ marginTop: 8 }}>
-                  <Field label="Check-in">
-                    <input type="date" value={billingFieldFor(s, 'checkIn', s.check_in)} onChange={e => updateBillingField(s.id, 'checkIn', e.target.value)} />
-                  </Field>
-                  <Field label="Check-out">
-                    <input type="date" value={billingFieldFor(s, 'checkOut', s.check_out)} onChange={e => updateBillingField(s.id, 'checkOut', e.target.value)} />
-                  </Field>
-                </div>
-                <div className="field-row">
-                  <Field label="Drop-off time">
-                    <input type="time" value={billingFieldFor(s, 'dropTime', s.drop_time ? s.drop_time.slice(0, 5) : '')} onChange={e => updateBillingField(s.id, 'dropTime', e.target.value)} />
-                  </Field>
-                  <Field label="Pickup time">
-                    <input type="time" value={billingFieldFor(s, 'pickupTime', s.pickup_time ? s.pickup_time.slice(0, 5) : '')} onChange={e => updateBillingField(s.id, 'pickupTime', e.target.value)} />
-                  </Field>
-                </div>
-                <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 8, flexWrap: 'wrap' }}>
-                  <span style={{ fontSize: '0.85rem' }}>$</span>
-                  <input
-                    type="number"
-                    value={billingFieldFor(s, 'finalCost', s.estimated_cost != null ? String(s.estimated_cost) : '')}
-                    onChange={e => updateBillingField(s.id, 'finalCost', e.target.value)}
-                    style={{ width: 80, padding: '6px 10px', border: '1.5px solid #D5D9DE', borderRadius: 6, fontSize: '0.85rem' }}
-                  />
-                  <button className="btn-secondary" style={{ padding: '4px 10px', fontSize: '0.78rem' }} onClick={() => recalculateBilling(s)}>Recalculate</button>
-                  <button
-                    className="btn-primary"
-                    style={{ padding: '4px 10px', fontSize: '0.78rem' }}
-                    disabled={sendingBillId === s.id}
-                    onClick={() => sendBill(s)}
+            {unbilledStays.map(s => {
+              const isExpanded = expandedUnbilledId === s.id;
+              const isEditing = editingUnbilledId === s.id;
+              return (
+                <div key={s.id} className="stay-card">
+                  <div
+                    className="stay-dates"
+                    style={{ cursor: 'pointer' }}
+                    onClick={() => {
+                      setExpandedUnbilledId(isExpanded ? null : s.id);
+                      if (isExpanded) setEditingUnbilledId(null);
+                    }}
                   >
-                    {sendingBillId === s.id ? 'Sending...' : 'Send Bill'}
-                  </button>
-                  {unbilledStatus[s.id] && (
-                    <span className="field-error" style={{ fontSize: '0.78rem' }}>{unbilledStatus[s.id]}</span>
+                    <span>{s.dogNames.join(' & ')} — {s.ownerName}</span>
+                  </div>
+                  <div className="stay-meta">{formatDate(s.check_in)} – {formatDate(s.check_out)}</div>
+                  {isExpanded && (
+                    <div style={{ marginTop: 8 }}>
+                      <div className="stay-meta">{s.ownerPhone}</div>
+                      {!isEditing ? (
+                        <>
+                          <div className="stay-meta">
+                            Drop-off: {billingFieldFor(s, 'dropTime', s.drop_time ? s.drop_time.slice(0, 5) : '') || '—'} · Pickup: {billingFieldFor(s, 'pickupTime', s.pickup_time ? s.pickup_time.slice(0, 5) : '') || '—'}
+                          </div>
+                          <div className="stay-meta">
+                            Estimated cost: {(() => {
+                              const fc = billingFieldFor(s, 'finalCost', s.estimated_cost != null ? String(s.estimated_cost) : '');
+                              return fc ? formatMoney(Number(fc)) : '—';
+                            })()}
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <div className="field-row" style={{ marginTop: 8 }}>
+                            <Field label="Check-in">
+                              <input type="date" value={billingFieldFor(s, 'checkIn', s.check_in)} onChange={e => updateBillingField(s.id, 'checkIn', e.target.value)} />
+                            </Field>
+                            <Field label="Check-out">
+                              <input type="date" value={billingFieldFor(s, 'checkOut', s.check_out)} onChange={e => updateBillingField(s.id, 'checkOut', e.target.value)} />
+                            </Field>
+                          </div>
+                          <div className="field-row">
+                            <Field label="Drop-off time">
+                              <input type="time" value={billingFieldFor(s, 'dropTime', s.drop_time ? s.drop_time.slice(0, 5) : '')} onChange={e => updateBillingField(s.id, 'dropTime', e.target.value)} />
+                            </Field>
+                            <Field label="Pickup time">
+                              <input type="time" value={billingFieldFor(s, 'pickupTime', s.pickup_time ? s.pickup_time.slice(0, 5) : '')} onChange={e => updateBillingField(s.id, 'pickupTime', e.target.value)} />
+                            </Field>
+                          </div>
+                          <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 8, flexWrap: 'wrap' }}>
+                            <span style={{ fontSize: '0.85rem' }}>$</span>
+                            <input
+                              type="number"
+                              value={billingFieldFor(s, 'finalCost', s.estimated_cost != null ? String(s.estimated_cost) : '')}
+                              onChange={e => updateBillingField(s.id, 'finalCost', e.target.value)}
+                              style={{ width: 80, padding: '6px 10px', border: '1.5px solid #D5D9DE', borderRadius: 6, fontSize: '0.85rem' }}
+                            />
+                            <button className="btn-secondary" style={{ padding: '4px 10px', fontSize: '0.78rem' }} onClick={() => recalculateBilling(s)}>Recalculate</button>
+                          </div>
+                        </>
+                      )}
+                      <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 8, flexWrap: 'wrap' }}>
+                        <button className="btn-secondary" style={{ padding: '4px 10px', fontSize: '0.78rem' }} onClick={() => setEditingUnbilledId(isEditing ? null : s.id)}>
+                          {isEditing ? 'Done Editing' : 'Edit'}
+                        </button>
+                        <button
+                          className="btn-primary"
+                          style={{ padding: '4px 10px', fontSize: '0.78rem' }}
+                          disabled={sendingBillId === s.id}
+                          onClick={() => sendBill(s)}
+                        >
+                          {sendingBillId === s.id ? 'Sending...' : 'Send Billing Text'}
+                        </button>
+                        {unbilledStatus[s.id] && (
+                          <span className="field-error" style={{ fontSize: '0.78rem' }}>{unbilledStatus[s.id]}</span>
+                        )}
+                      </div>
+                    </div>
                   )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="rate-setting past-stays-section">
+          <label className="field-label">Past Stays</label>
+          <input className="search-input" placeholder="Search by dog or owner name..." value={search} onChange={e => setSearch(e.target.value)} />
+          {filtered.length === 0 && !loading && <p className="empty">No records found.</p>}
+          <div className="dog-list">
+            {filtered.map((d, i) => (
+              <div key={i} className="dog-row" onClick={() => setSelected(d)}>
+                <div className="dog-row-left">
+                  <div className="dog-row-name">{d.name}</div>
+                  <div className="dog-row-owner">{d.owner?.name}</div>
+                </div>
+                <div className="dog-row-right">
+                  <span className="stay-count">{d.stays.length} stay{d.stays.length !== 1 ? 's' : ''}</span>
+                  <span className="chevron">›</span>
                 </div>
               </div>
             ))}
           </div>
         </div>
 
-        <input className="search-input" placeholder="Search by dog or owner name..." value={search} onChange={e => setSearch(e.target.value)} />
-        <div className="admin-count">{loading ? 'Loading...' : `${totalStays} signed agreement${totalStays !== 1 ? 's' : ''} on file`}</div>
-        {filtered.length === 0 && !loading && <p className="empty">No records found.</p>}
-        <div className="dog-list">
-          {filtered.map((d, i) => (
-            <div key={i} className="dog-row" onClick={() => setSelected(d)}>
-              <div className="dog-row-left">
-                <div className="dog-row-name">{d.name}</div>
-                <div className="dog-row-owner">{d.owner?.name}</div>
-              </div>
-              <div className="dog-row-right">
-                <span className="stay-count">{d.stays.length} stay{d.stays.length !== 1 ? 's' : ''}</span>
-                <span className="chevron">›</span>
-              </div>
-            </div>
-          ))}
-        </div>
-
-        <div className="admin-entry-row">
-          <button className="btn-secondary feedback-entry" onClick={() => setShowFeedback(true)}>
-            <span>💡 Ideas &amp; Bugs</span>
-            {feedbackOpenCount > 0 && <span className="feedback-badge">{feedbackOpenCount}</span>}
-          </button>
-          <button className="btn-secondary feedback-entry" onClick={() => setShowTesters(true)}>
-            <span>📢 Testers</span>
-          </button>
-        </div>
         <div className="rate-setting day-rate-editor">
           <label className="field-label">Day Rate (per 24 hours)</label>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
@@ -1392,6 +1467,16 @@ function AdminView({
           ))}
         </div>
         {settingsError && <div className="field-error" style={{ marginBottom: 12 }}>{settingsError}</div>}
+
+        <div className="admin-entry-row">
+          <button className="btn-secondary feedback-entry" onClick={() => setShowFeedback(true)}>
+            <span>💡 Ideas &amp; Bugs</span>
+            {feedbackOpenCount > 0 && <span className="feedback-badge">{feedbackOpenCount}</span>}
+          </button>
+          <button className="btn-secondary feedback-entry" onClick={() => setShowTesters(true)}>
+            <span>📢 Testers</span>
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -1963,7 +2048,7 @@ export default function App() {
         <main className="main">
           {!submitted ? (
             <>
-              <Progress step={step} numberOfDogs={form.dogs.length} />
+              <Progress step={step} />
               {step === 0 && (
                 <StepOwner
                   data={form}
@@ -1973,28 +2058,19 @@ export default function App() {
                   multiDogDiscount={multiDogDiscount}
                 />
               )}
-              {step >= 1 && step <= form.dogs.length && (
-                <StepDogPage
-                  data={form}
-                  onChange={update}
-                  index={step - 1}
-                  onNext={() => setStep(step + 1)}
-                  onBack={() => setStep(step - 1)}
-                />
-              )}
-              {step === form.dogs.length + 1 && (
+              {step === 1 && (
                 <StepDates
                   data={form}
                   onChange={update}
                   onNext={() => setStep(step + 1)}
-                  onBack={() => setStep(step - 1)}
+                  onBack={() => setStep(0)}
                   rate={rate}
                   multiDogDiscount={multiDogDiscount}
                   holidayUpcharge={holidayUpcharge}
                 />
               )}
-              {step === form.dogs.length + 2 && <StepWaiver onNext={() => setStep(step + 1)} onBack={() => setStep(step - 1)} />}
-              {step === form.dogs.length + 3 && <StepSign data={form} onChange={update} onSubmit={handleSubmit} onBack={() => setStep(step - 1)} ownerName={form.ownerName} submitting={submitting} />}
+              {step === 2 && <StepWaiver onNext={() => setStep(step + 1)} onBack={() => setStep(step - 1)} />}
+              {step === 3 && <StepSign data={form} onChange={update} onSubmit={handleSubmit} onBack={() => setStep(step - 1)} ownerName={form.ownerName} submitting={submitting} />}
             </>
           ) : (
             <Confirmation stay={currentStay} onNewBooking={reset} />
