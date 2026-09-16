@@ -36,6 +36,7 @@ function mockInvokeDefaults(overrides = {}) {
   // Function - merging and echoing back the new values - rather than
   // always returning the same fixed defaults regardless of what was sent.
   const currentSettings = { ...DEFAULT_SETTINGS };
+  let currentFeedback = [];
   supabase.functions.invoke.mockImplementation((fn, opts) => {
     if (overrides[fn]) return overrides[fn](opts);
     if (fn === 'lookup-client') return Promise.resolve({ data: { found: false }, error: null });
@@ -43,6 +44,28 @@ function mockInvokeDefaults(overrides = {}) {
     if (fn === 'send-confirmation') return Promise.resolve({ data: {}, error: null });
     if (fn === 'admin-data') return Promise.resolve({ data: null, error: { message: 'not mocked in this test' } });
     if (fn === 'send-contact') return Promise.resolve({ data: { success: true }, error: null });
+    // Mimics the real feedback function: no password -> public submit
+    // (appends to an in-memory list); password + id -> update that
+    // submission's status; password alone -> list everything + open count.
+    if (fn === 'feedback') {
+      const { password, id, status, message, category, name, contact } = opts?.body || {};
+      if (!password) {
+        if (!message?.trim()) return Promise.resolve({ data: null, error: { message: 'Message is required' } });
+        currentFeedback = [
+          { id: `fb-${currentFeedback.length + 1}`, status: 'open', created_at: '2026-09-16T12:00:00Z', category: category || 'idea', name: name || null, contact: contact || null, message },
+          ...currentFeedback,
+        ];
+        return Promise.resolve({ data: { success: true }, error: null });
+      }
+      if (id) {
+        currentFeedback = currentFeedback.map(f => (f.id === id ? { ...f, status } : f));
+        return Promise.resolve({ data: { feedback: currentFeedback.find(f => f.id === id) }, error: null });
+      }
+      return Promise.resolve({
+        data: { feedback: currentFeedback, openCount: currentFeedback.filter(f => f.status === 'open').length },
+        error: null,
+      });
+    }
     // App fetches this once on mount (public read, no password) to load
     // live pricing/vet-list settings - every test needs a sane default
     // here or that automatic call interferes with tests written around
@@ -209,6 +232,32 @@ function goToAdminUrl() {
 
 async function loginAsAdmin(dogs = SAMPLE_DOGS, totalStays = SAMPLE_TOTAL_STAYS) {
   mockInvokeDefaults({ 'admin-data': async () => ({ data: { dogs, totalStays }, error: null }) });
+  goToAdminUrl();
+  render(<App />);
+  await userEvent.type(screen.getByPlaceholderText('Password'), 'correct-password');
+  fireEvent.click(screen.getByText('Sign In'));
+  await screen.findByText('Bayview Boarding — Admin');
+}
+
+const SAMPLE_FEEDBACK = [
+  { id: 'fb-1', category: 'bug', message: 'Map pin looks off on Safari', name: 'Jane Tester', contact: 'jane@test.com', status: 'open', created_at: '2026-09-16T12:00:00Z' },
+  { id: 'fb-2', category: 'idea', message: 'Add a dark mode', name: null, contact: null, status: 'open', created_at: '2026-09-15T12:00:00Z' },
+  { id: 'fb-3', category: 'other', message: 'Already fixed, thanks', name: null, contact: null, status: 'done', created_at: '2026-09-14T12:00:00Z' },
+];
+
+async function loginAsAdminWithFeedback(feedback = SAMPLE_FEEDBACK) {
+  let current = feedback.map(f => ({ ...f }));
+  mockInvokeDefaults({
+    'admin-data': async () => ({ data: { dogs: SAMPLE_DOGS, totalStays: SAMPLE_TOTAL_STAYS }, error: null }),
+    'feedback': async (opts) => {
+      const { id, status } = opts?.body || {};
+      if (id) {
+        current = current.map(f => (f.id === id ? { ...f, status } : f));
+        return { data: { feedback: current.find(f => f.id === id) }, error: null };
+      }
+      return { data: { feedback: current, openCount: current.filter(f => f.status === 'open').length }, error: null };
+    },
+  });
   goToAdminUrl();
   render(<App />);
   await userEvent.type(screen.getByPlaceholderText('Password'), 'correct-password');
@@ -606,14 +655,22 @@ describe('Nav menu (hamburger)', () => {
     fireEvent.click(screen.getByLabelText('Open menu'));
   }
 
-  test('is collapsed until opened, then shows all four destinations', async () => {
+  test('is collapsed until opened, then shows all five destinations', async () => {
     render(<App />);
     expect(screen.queryByText('About Us')).not.toBeInTheDocument();
     openMenu();
     expect(screen.getByText('About Us')).toBeInTheDocument();
     expect(screen.getByText('Contact Us')).toBeInTheDocument();
+    expect(screen.getByText('Submit Idea')).toBeInTheDocument();
     expect(screen.getByText('Book a Stay')).toBeInTheDocument();
     expect(screen.getByText('Admin')).toBeInTheDocument();
+  });
+
+  test('"Submit Idea" opens the idea/bug form', async () => {
+    render(<App />);
+    openMenu();
+    fireEvent.click(screen.getByText('Submit Idea'));
+    expect(await screen.findByText('Submit Idea', { selector: 'h1' })).toBeInTheDocument();
   });
 
   test('clicking the backdrop closes the menu without navigating', () => {
@@ -716,6 +773,61 @@ describe('Contact Us', () => {
   test('Back returns to the landing page', async () => {
     goToContact();
     await screen.findByText('Contact Us', { selector: 'h1' });
+    fireEvent.click(screen.getByText('← Back'));
+    expect(await screen.findByText('Book My Stay')).toBeInTheDocument();
+  });
+});
+
+describe('Submit Idea', () => {
+  function goToSubmitIdea() {
+    render(<App />);
+    fireEvent.click(screen.getByLabelText('Open menu'));
+    fireEvent.click(screen.getByText('Submit Idea'));
+  }
+
+  test('defaults to "Idea / suggestion" and requires only a message', async () => {
+    goToSubmitIdea();
+    await screen.findByText('Submit Idea', { selector: 'h1' });
+    expect(screen.getByDisplayValue('Idea / suggestion')).toBeInTheDocument();
+    const submit = screen.getByText('Submit');
+    expect(submit).toBeDisabled();
+    await userEvent.type(screen.getByPlaceholderText("What's on your mind?"), 'Add dark mode');
+    expect(submit).not.toBeDisabled();
+  });
+
+  test('submits with category/name/contact and shows a thank-you', async () => {
+    goToSubmitIdea();
+    await screen.findByText('Submit Idea', { selector: 'h1' });
+    fireEvent.change(screen.getByDisplayValue('Idea / suggestion'), { target: { value: 'bug' } });
+    await userEvent.type(screen.getByPlaceholderText("What's on your mind?"), 'The map pin looks wrong on Safari');
+    await userEvent.type(screen.getByPlaceholderText('Jane Smith'), 'Jane Tester');
+    await userEvent.type(screen.getByPlaceholderText('jane@email.com'), 'jane@test.com');
+    fireEvent.click(screen.getByText('Submit'));
+
+    await waitFor(() => {
+      expect(supabase.functions.invoke).toHaveBeenCalledWith('feedback', {
+        body: {
+          category: 'bug', message: 'The map pin looks wrong on Safari',
+          name: 'Jane Tester', contact: 'jane@test.com',
+        },
+      });
+    });
+    expect(await screen.findByText('Thanks!')).toBeInTheDocument();
+  });
+
+  test('shows an error and does not claim success if the send fails', async () => {
+    mockInvokeDefaults({ 'feedback': async () => ({ data: null, error: { message: 'network down' } }) });
+    goToSubmitIdea();
+    await screen.findByText('Submit Idea', { selector: 'h1' });
+    await userEvent.type(screen.getByPlaceholderText("What's on your mind?"), 'Hi');
+    fireEvent.click(screen.getByText('Submit'));
+    expect(await screen.findByText(/Something went wrong sending this/)).toBeInTheDocument();
+    expect(screen.queryByText('Thanks!')).not.toBeInTheDocument();
+  });
+
+  test('Back returns to the landing page', async () => {
+    goToSubmitIdea();
+    await screen.findByText('Submit Idea', { selector: 'h1' });
     fireEvent.click(screen.getByText('← Back'));
     expect(await screen.findByText('Book My Stay')).toBeInTheDocument();
   });
@@ -1402,6 +1514,50 @@ describe('Admin login', () => {
 });
 
 // ── Admin: logged in ─────────────────────────────────────────────────────────
+describe('Admin — logged in — Ideas & Bugs', () => {
+  test('the entry button shows the open count as a badge', async () => {
+    await loginAsAdminWithFeedback();
+    const entry = screen.getByText('💡 Ideas & Bugs').closest('button');
+    expect(within(entry).getByText('2')).toBeInTheDocument(); // 2 of the 3 fixtures are open
+  });
+
+  test('no badge when there are no open submissions', async () => {
+    await loginAsAdminWithFeedback([{ id: 'fb-1', category: 'idea', message: 'x', status: 'done', created_at: '2026-09-16T12:00:00Z' }]);
+    const entry = screen.getByText('💡 Ideas & Bugs').closest('button');
+    expect(within(entry).queryByText('1')).not.toBeInTheDocument();
+  });
+
+  test('opens the list showing every submission with its category, message, and submitter', async () => {
+    await loginAsAdminWithFeedback();
+    fireEvent.click(screen.getByText('💡 Ideas & Bugs'));
+    expect(await screen.findByText('Ideas & Bugs', { selector: 'h2' })).toBeInTheDocument();
+    expect(screen.getByText('3 submissions · 2 open')).toBeInTheDocument();
+    expect(screen.getByText('Map pin looks off on Safari')).toBeInTheDocument();
+    expect(screen.getByText('Jane Tester · jane@test.com')).toBeInTheDocument();
+    expect(screen.getByText('Add a dark mode')).toBeInTheDocument();
+  });
+
+  test('moves a submission to a new status', async () => {
+    await loginAsAdminWithFeedback();
+    fireEvent.click(screen.getByText('💡 Ideas & Bugs'));
+    await screen.findByText('Map pin looks off on Safari');
+    const card = screen.getByText('Map pin looks off on Safari').closest('.stay-card');
+
+    fireEvent.click(within(card).getByText('Considered'));
+    await waitFor(() => expect(supabase.functions.invoke).toHaveBeenCalledWith('feedback', {
+      body: { password: 'correct-password', id: 'fb-1', status: 'considered' },
+    }));
+  });
+
+  test('← All Dogs returns to the dog list', async () => {
+    await loginAsAdminWithFeedback();
+    fireEvent.click(screen.getByText('💡 Ideas & Bugs'));
+    await screen.findByText('Ideas & Bugs', { selector: 'h2' });
+    fireEvent.click(screen.getByText('← All Dogs'));
+    expect(await screen.findByText('Bayview Boarding — Admin')).toBeInTheDocument();
+  });
+});
+
 describe('Admin — logged in', () => {
   test('filters the dog list by search term', async () => {
     await loginAsAdmin();

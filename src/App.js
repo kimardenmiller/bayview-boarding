@@ -667,6 +667,12 @@ function AdminView({
   const [editSms, setEditSms] = useState(smsTemplates);
   const [settingsError, setSettingsError] = useState('');
   const [savingSettings, setSavingSettings] = useState(false);
+  // "Submit Idea" queue - fetched alongside the dog list at login, shown
+  // as its own sub-view (see showFeedback) rather than mixed into the dog
+  // list, since it's a different kind of thing to triage.
+  const [feedback, setFeedback] = useState([]);
+  const [showFeedback, setShowFeedback] = useState(false);
+  const [updatingFeedbackId, setUpdatingFeedbackId] = useState(null);
   // Billing SMS is admin-triggered (not auto-sent at pickup time) - the
   // estimated cost can be wrong by pickup (early/late pickup, extra
   // services), so an admin reviews/adjusts the actual final amount before
@@ -727,6 +733,11 @@ function AdminView({
     setAuthed(true);
     setDogs(result.dogs);
     setTotalStays(result.totalStays || 0);
+    // Fetched alongside the dog list - a failure here shouldn't block
+    // getting into the admin panel at all, just leaves the queue empty.
+    supabase.functions.invoke('feedback', { body: { password: pw } }).then(({ data }) => {
+      if (data && !data.error) setFeedback(data.feedback || []);
+    }).catch(() => {});
     // editRate/editMultiDogDiscount/editHolidayUpcharge/editVets were
     // seeded from these same-named props back when this component first
     // mounted - but App's own settings fetch (a separate network call)
@@ -804,6 +815,16 @@ function AdminView({
     setEditPackingList(l => l.filter((_, i) => i !== index));
   }
 
+  async function updateFeedbackStatus(id, status) {
+    setUpdatingFeedbackId(id);
+    const { data, error: fnError } = await supabase.functions.invoke('feedback', {
+      body: { password: pw, id, status },
+    });
+    setUpdatingFeedbackId(null);
+    if (fnError || data?.error) return;
+    setFeedback(list => list.map(f => (f.id === id ? data.feedback : f)));
+  }
+
   if (!authed) {
     return (
       <div className="admin-overlay">
@@ -824,6 +845,52 @@ function AdminView({
     d.name?.toLowerCase().includes(search.toLowerCase()) ||
     d.owner?.name?.toLowerCase().includes(search.toLowerCase())
   );
+  const feedbackOpenCount = feedback.filter(f => f.status === 'open').length;
+
+  if (showFeedback) {
+    const CATEGORY_LABEL = { bug: '🐛 Bug', idea: '💡 Idea', other: '📝 Other' };
+    return (
+      <div className="admin-overlay">
+        <div className="admin-panel">
+          <div className="admin-header">
+            <button className="back-btn" onClick={() => setShowFeedback(false)}>← All Dogs</button>
+            <button className="close-btn" onClick={onClose}>✕</button>
+          </div>
+          <h2>Ideas &amp; Bugs</h2>
+          <div className="admin-count">
+            {feedback.length} submission{feedback.length !== 1 ? 's' : ''} · {feedbackOpenCount} open
+          </div>
+          {feedback.length === 0 && <p className="empty">Nothing submitted yet.</p>}
+          <div className="stay-history">
+            {feedback.map(f => (
+              <div key={f.id} className="stay-card">
+                <div className="stay-meta">{CATEGORY_LABEL[f.category] || f.category} · {formatDate(f.created_at?.slice(0, 10))}</div>
+                <div className="stay-notes" style={{ fontStyle: 'normal', marginTop: 6 }}>{f.message}</div>
+                {(f.name || f.contact) && (
+                  <div className="stay-meta" style={{ marginTop: 6 }}>
+                    {[f.name, f.contact].filter(Boolean).join(' · ')}
+                  </div>
+                )}
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 10 }}>
+                  {['open', 'considered', 'done'].map(s => (
+                    <button
+                      key={s}
+                      className={s === f.status ? 'btn-primary' : 'btn-secondary'}
+                      style={{ padding: '4px 10px', fontSize: '0.78rem' }}
+                      disabled={updatingFeedbackId === f.id || s === f.status}
+                      onClick={() => updateFeedbackStatus(f.id, s)}
+                    >
+                      {s.charAt(0).toUpperCase() + s.slice(1)}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   if (selected) {
     // selected.stays is each stay's frozen per-booking snapshot (what was
@@ -915,6 +982,10 @@ function AdminView({
           <h2>Bayview Boarding — Admin</h2>
           <button className="close-btn" onClick={onClose}>✕</button>
         </div>
+        <button className="btn-secondary feedback-entry" onClick={() => setShowFeedback(true)}>
+          <span>💡 Ideas &amp; Bugs</span>
+          {feedbackOpenCount > 0 && <span className="feedback-badge">{feedbackOpenCount}</span>}
+        </button>
         <div className="rate-setting">
           <label className="field-label">Day Rate (per 24 hours)</label>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
@@ -1239,7 +1310,7 @@ function AboutUs({ onBack, onStart }) {
 // earlier "no visible Admin entry point" decision (v1.5.13) per explicit
 // request - it's still fully password-gated server-side (see AdminView),
 // so this trades obscurity for convenience, not security.
-function NavMenu({ onAbout, onContact, onBookStay, onAdmin }) {
+function NavMenu({ onAbout, onContact, onSubmitIdea, onBookStay, onAdmin }) {
   const [open, setOpen] = useState(false);
 
   function go(handler) {
@@ -1263,6 +1334,7 @@ function NavMenu({ onAbout, onContact, onBookStay, onAdmin }) {
           <div className="nav-menu-panel">
             <button className="nav-menu-item" onClick={() => go(onAbout)}>About Us</button>
             <button className="nav-menu-item" onClick={() => go(onContact)}>Contact Us</button>
+            <button className="nav-menu-item" onClick={() => go(onSubmitIdea)}>Submit Idea</button>
             <button className="nav-menu-item" onClick={() => go(onBookStay)}>Book a Stay</button>
             <button className="nav-menu-item" onClick={() => go(onAdmin)}>Admin</button>
           </div>
@@ -1354,10 +1426,94 @@ function ContactUs({ onBack }) {
   );
 }
 
+// "Submit Idea" - lets testers report bugs/ideas without costing anything
+// per submission (SMS costs money; this is just a DB write). Persisted in
+// `feedback` rather than texted, so it's an actual reviewable queue in
+// admin (open/considered/done) instead of scrollback in a text thread -
+// see the migration for the full rationale.
+function SubmitIdea({ onBack }) {
+  const [form, setForm] = useState({ category: 'idea', message: '', name: '', contact: '' });
+  const [errors, setErrors] = useState({});
+  const [status, setStatus] = useState('idle'); // idle | sending | sent | error
+
+  function update(key, val) { setForm(f => ({ ...f, [key]: val })); }
+
+  function getErrors() {
+    const e = {};
+    if (!form.message.trim()) e.message = 'Required';
+    return e;
+  }
+
+  const canSend = Object.keys(getErrors()).length === 0;
+
+  async function handleSend() {
+    const e = getErrors();
+    setErrors(e);
+    if (Object.keys(e).length > 0) return;
+    setStatus('sending');
+    const { data, error } = await supabase.functions.invoke('feedback', { body: form });
+    if (error || data?.error) {
+      setStatus('error');
+      return;
+    }
+    setStatus('sent');
+  }
+
+  if (status === 'sent') {
+    return (
+      <div className="about">
+        <div className="about-content">
+          <button className="back-btn" onClick={onBack}>← Back</button>
+          <h1 className="about-title about-title--center" style={{ marginTop: 20 }}>Thanks!</h1>
+          <p style={{ textAlign: 'center' }}>We've got it and will take a look.</p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="about">
+      <div className="about-content">
+        <button className="back-btn" onClick={onBack}>← Back</button>
+        <h1 className="about-title about-title--center" style={{ marginTop: 20 }}>Submit Idea</h1>
+        <p>
+          Found a bug, or have an idea to make this better? Let us know -
+          every submission gets reviewed.
+        </p>
+        <Field label="Type">
+          <select value={form.category} onChange={e => update('category', e.target.value)}>
+            <option value="idea">Idea / suggestion</option>
+            <option value="bug">Something's broken</option>
+            <option value="other">Other</option>
+          </select>
+        </Field>
+        <Field label="Message" error={errors.message}>
+          <textarea value={form.message} onChange={e => update('message', e.target.value)} placeholder="What's on your mind?" rows={5} />
+        </Field>
+        <Field label="Your Name (optional)">
+          <input value={form.name} onChange={e => update('name', e.target.value)} placeholder="Jane Smith" />
+        </Field>
+        <Field label="Email or Phone (optional, in case we follow up)">
+          <input value={form.contact} onChange={e => update('contact', e.target.value)} placeholder="jane@email.com" />
+        </Field>
+        {status === 'error' && (
+          <div className="field-error" style={{ marginBottom: 12 }}>
+            Something went wrong sending this. Please try again.
+          </div>
+        )}
+        <button className="landing-cta" style={{ width: '100%', boxShadow: 'none' }} disabled={!canSend || status === 'sending'} onClick={handleSend}>
+          {status === 'sending' ? 'Sending...' : 'Submit'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const [showLanding, setShowLanding] = useState(true);
   const [showAbout, setShowAbout] = useState(false);
   const [showContact, setShowContact] = useState(false);
+  const [showSubmitIdea, setShowSubmitIdea] = useState(false);
   const [step, setStep] = useState(0);
   // Admin has no visible entry point in the UI anymore - reached only via a
   // bookmarked URL (?admin), e.g. https://.../bayview-boarding/?admin
@@ -1503,13 +1659,14 @@ export default function App() {
   // others explicitly rather than relying on ordering, so there's no way
   // to land on two views at once regardless of which one was previously
   // showing.
-  function goToLanding() { setShowLanding(true); setShowAbout(false); setShowContact(false); }
-  function goToAbout() { setShowAbout(true); setShowLanding(false); setShowContact(false); }
-  function goToContact() { setShowContact(true); setShowLanding(false); setShowAbout(false); }
-  function goToBooking() { setShowLanding(false); setShowAbout(false); setShowContact(false); }
+  function goToLanding() { setShowLanding(true); setShowAbout(false); setShowContact(false); setShowSubmitIdea(false); }
+  function goToAbout() { setShowAbout(true); setShowLanding(false); setShowContact(false); setShowSubmitIdea(false); }
+  function goToContact() { setShowContact(true); setShowLanding(false); setShowAbout(false); setShowSubmitIdea(false); }
+  function goToSubmitIdea() { setShowSubmitIdea(true); setShowLanding(false); setShowAbout(false); setShowContact(false); }
+  function goToBooking() { setShowLanding(false); setShowAbout(false); setShowContact(false); setShowSubmitIdea(false); }
 
   const navMenu = (
-    <NavMenu onAbout={goToAbout} onContact={goToContact} onBookStay={goToBooking} onAdmin={() => setShowAdmin(true)} />
+    <NavMenu onAbout={goToAbout} onContact={goToContact} onSubmitIdea={goToSubmitIdea} onBookStay={goToBooking} onAdmin={() => setShowAdmin(true)} />
   );
 
   let pageContent;
@@ -1517,6 +1674,8 @@ export default function App() {
     pageContent = <AboutUs onBack={goToLanding} onStart={goToBooking} />;
   } else if (showContact) {
     pageContent = <ContactUs onBack={goToLanding} />;
+  } else if (showSubmitIdea) {
+    pageContent = <SubmitIdea onBack={goToLanding} />;
   } else if (showLanding) {
     pageContent = <Landing onStart={goToBooking} onLearnMore={goToAbout} />;
   } else {

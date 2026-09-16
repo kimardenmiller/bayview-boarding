@@ -27,29 +27,34 @@ Kim Miller and Estee Fletter at 210 Bayview Drive, San Rafael, CA.
 - Past check-in dates are rejected, client-side (StepDates) and
   server-side (submit-booking, the actual boundary); a same-day stay's
   pick-up must be after its drop-off (no such constraint across days)
-- Twilio SMS: booking confirmations (pending A2P carrier approval, sent at
-  submission), stay reminders (a daily cron job texts everyone checking in
-  the next day, Sept 16 — see supabase/functions/send-reminders), and
-  billing texts (admin-triggered from the stay detail view with an
-  editable final cost, not auto-sent — the estimate can be wrong by
-  pickup)
+- Twilio SMS: booking confirmations (sent at submission), stay reminders
+  (a daily cron job texts everyone checking in the next day, Sept 16 —
+  see supabase/functions/send-reminders), and billing texts (admin-
+  triggered from the stay detail view with an editable final cost, not
+  auto-sent — the estimate can be wrong by pickup). A2P 10DLC is APPROVED
+  (confirmed via the API Sept 16, 2026) - real sends actually go through
 - Admin panel: browse by dog, each with its always-current profile and full
   stay history (each past stay shows its own frozen declared/signed
   snapshot, not just the dog's latest profile — see Data model below), a
   "Send Billing Text" control and a "View waiver as signed" toggle (Sept
-  16 (5) — see waiver_snapshot below) on every stay. Reached via the nav
-  menu's "Admin" item (Sept 16, 2026 — reversed the earlier "no visible
-  entry point" decision on request) or the bookmarked ?admin URL; either
-  way it's still fully password-gated server-side
+  16 (5) — see waiver_snapshot below) on every stay, plus a "💡 Ideas &
+  Bugs" section (Sept 16 (8) — see feedback below) with an open-count
+  badge. Reached via the nav menu's "Admin" item (Sept 16, 2026 —
+  reversed the earlier "no visible entry point" decision on request) or
+  the bookmarked ?admin URL; either way it's still fully password-gated
+  server-side
 - "Learn more about us" page (content from the Bayview Boarding Rover
   profile — bio, home characteristics, photos, all 5-star reviews with
   dates linking out to Rover, an approximate-location map). Reached via
   a real link on the landing page, clicking the "Bayview Boarding" title/
   header, or the nav menu (Sept 16, 2026)
-- Hamburger nav menu (every screen): About Us, Contact Us, Book a Stay,
-  Admin (Sept 16, 2026)
+- Hamburger nav menu (every screen): About Us, Contact Us, Submit Idea,
+  Book a Stay, Admin (Sept 16, 2026)
 - "Contact Us" page — relays a name/email-or-phone/message submission to
   Kim & Estee by SMS via send-contact (Sept 16, 2026)
+- "Submit Idea" page (Sept 16 (8)) — testers report bugs/ideas/feedback,
+  persisted (not texted - see feedback below) so it's an actual triage
+  queue in admin rather than scrollback in a text thread
 
 ## Data model (Sept 14, 2026 reorg)
 `owners` (by phone) → `dogs` (owner's always-current profile) → `stays`
@@ -95,6 +100,16 @@ src/waiver.js can never retroactively change what a past client is on
 record as having agreed to. submit-booking requires a non-empty array;
 admin can view it per-stay via a collapsed-by-default toggle.
 
+`feedback` (Sept 16 (8)) is the "Submit Idea" queue - one row per tester
+submission (name/contact optional, category bug|idea|other, message,
+status open|considered|done). Same RLS-locked-with-zero-policies pattern
+as everything else; public submit and password-gated list/status-update
+both go through supabase/functions/feedback/index.ts (one function, same
+"request shape decides the branch" style as settings). Deliberately not
+wired to any notification (SMS costs money; email would need a new
+provider account Kim hasn't set up) - the admin panel's open-count badge
+is the only "something's new" signal for now.
+
 **Reproducing the reminder cron's secret** (Sept 16, 2026): the cron job
 (supabase/migrations/20260916000000_stay_reminders_cron.sql) calls
 send-reminders via pg_net with an x-cron-secret header, read from
@@ -119,8 +134,9 @@ call itself is dropped, not for a routine secret rotation.
 - src/App.js — main app
 - src/settings.js — all configurable values (rates, vets, messages, packing list)
 - src/waiver.js — full waiver text
-- src/App.test.js — 137 passing tests (TDD), Supabase mocked via src/__mocks__/supabase.js
+- src/App.test.js — 147 passing tests (TDD), Supabase mocked via src/__mocks__/supabase.js
 - supabase/functions/send-contact/index.ts — public Contact Us form handler: relays name/email-or-phone/message to Kim & Estee by SMS (reuses KIM_PHONE/ESTEE_PHONE). Deployed normally (no --no-verify-jwt) since it's called via the Supabase JS client like settings/lookup-client/submit-booking
+- supabase/functions/feedback/index.ts — "Submit Idea": public submit (no password) + admin list/status-update (password) for the feedback queue
 - public/img/about/ — the 6 numbered photos on the About page, served from the public folder (not bundled) and referenced via process.env.PUBLIC_URL since the app is hosted at a subpath
 - supabase/functions/send-reminders/index.ts — daily cron target (pg_cron + pg_net, see the migration): finds stays checking in tomorrow, fetches the current sms_reminder template + packing_list from `settings`, texts each via send-confirmation, marks reminder_sent_at. Deployed with `--no-verify-jwt`; checks its own CRON_SECRET instead (see Data model for how that secret is set up without ever being committed) - be careful to keep that flag on every redeploy (a plain `supabase functions deploy send-reminders` silently re-enables JWT verification and would break the cron, same bug class as the receive-sms incident)
 - supabase/functions/settings/index.ts — public read / password-gated write of day rate, multi-dog discount, holiday upcharge, vet list, packing list, and the 3 SMS templates

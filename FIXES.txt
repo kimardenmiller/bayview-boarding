@@ -1,6 +1,6 @@
 BAYVIEW BOARDING — FIX LIST
 ============================
-Last updated: September 16, 2026 (SMS templates: line break before the contact-note footer)
+Last updated: September 16, 2026 ("Submit Idea" feedback feature)
 
 NEXT CHANGE LIST (v1.5)
 -----------------------
@@ -69,6 +69,49 @@ TWILIO STATUS
 
 COMPLETED
 ---------
+- Sept 16, 2026 (8): New "Submit Idea" feature - a nav menu item where
+  testers report bugs/ideas/feedback through the site instead of a text
+  message. Deliberately NOT SMS (costs money per send, and a text thread
+  isn't a workflow - things get lost); instead persisted in a new
+  `feedback` table (same RLS-locked-with-zero-policies pattern as every
+  other table) with a status: open -> considered -> done, so it's an
+  actual triage-able queue. New public/password-dual-mode `feedback` Edge
+  Function (same "request shape decides the branch" pattern as settings):
+  no password = public submit (any visitor, message required, category
+  optional/defaults to "idea", name/contact optional); password + no id =
+  admin list (every submission + open count); password + id = admin
+  status update. Admin panel gained a "💡 Ideas & Bugs" entry point with a
+  red badge showing the open count, opening a dedicated list view (message,
+  category, submitter if given, submission date, 3 status buttons) rather
+  than mixing feedback into the dog list.
+
+  Explicitly scoped down from the original ask: no email/SMS notification
+  on new submissions for v1 (Kim chose to skip that - no new cost, no new
+  account to set up; the admin badge is the "how do I know something's
+  new" mechanism instead). Also clarified: there's no live pipeline that
+  auto-writes a submission into this very file - when something from the
+  queue is worth actually doing, it gets promoted into a FIXES.txt entry
+  by hand, credited as "Suggested by <name>" from what was submitted.
+
+  Tests: 10 new Deno tests for the feedback function (public submit
+  validation/category fallback, admin list password-gating + open count,
+  status-update password/validation/404, full open->considered->done
+  transition). React: new nav-menu test, a full Submit Idea describe
+  block (default category, validation, successful submit with all
+  fields, failed-send error state, Back), and a new "Ideas & Bugs" admin
+  describe block (badge count present/absent, list contents, status
+  transition, back navigation) - caught and fixed a real bug while
+  writing these: the badge's sibling <span> made the entry button's
+  combined textContent no longer exactly match its own label text,
+  breaking getByText lookups whenever the badge was showing; fixed by
+  giving the label its own wrapping span. 147 React + 99 Deno = 246/246
+  passing. Verified live: the public submit path end-to-end (a real test
+  submission, found and deleted afterward via direct DB access - same
+  cleanup approach as the earlier submit-booking diagnosis). Did NOT
+  verify the admin list/status-update paths live, since those require
+  the real admin password, which Claude doesn't have and won't ask to
+  bypass - covered by the Deno suite instead, same as every other
+  admin-gated function in this project.
 - Sept 16, 2026 (7): SMS templates (confirmation/reminder/billing) now put
   the "Replies to this number aren't monitored..." footer on its own line
   instead of running on directly after "— Kim & Estee" as one sentence.
