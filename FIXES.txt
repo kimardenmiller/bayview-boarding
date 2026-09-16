@@ -1,6 +1,6 @@
 BAYVIEW BOARDING — FIX LIST
 ============================
-Last updated: September 16, 2026 (map pin placed 300 yards past the address; Twilio A2P APPROVED)
+Last updated: September 16, 2026 (SMS templates: line break before the contact-note footer)
 
 NEXT CHANGE LIST (v1.5)
 -----------------------
@@ -69,6 +69,34 @@ TWILIO STATUS
 
 COMPLETED
 ---------
+- Sept 16, 2026 (7): SMS templates (confirmation/reminder/billing) now put
+  the "Replies to this number aren't monitored..." footer on its own line
+  instead of running on directly after "— Kim & Estee" as one sentence.
+  Changed in appendContactNote (_shared/contact.ts, used by
+  send-confirmation's fallback path when no message_template is given),
+  the 3 fallback templates in src/settings.js, AND the live settings
+  table row itself via a new migration - an `alter column ... set
+  default` alone wouldn't have retroactively changed the singleton row
+  that already existed, so the migration also runs a targeted `replace()`
+  UPDATE (matches only the old exact wording, so it's a no-op if re-run
+  and won't clobber a custom-edited admin template that doesn't match
+  either the old or new default). Verified the live settings row directly
+  via the public settings endpoint - line break confirmed present.
+  Redeployed send-confirmation (picks up the contact.ts change) and the
+  frontend. 137 React + 89 Deno = 226/226 passing (contact.ts and
+  send-confirmation tests updated for the new exact string).
+
+  Also, while testing: confirmed a real "There was an error saving" report
+  was a stale-browser-cache issue, not a server bug - reproduced directly
+  against the live submit-booking function and found it rejects a payload
+  missing waiverSnapshot (added earlier today) with exactly that failure
+  mode. A hard refresh resolved it. Diagnosing this way (a raw Edge
+  Function invoke, not the UI) did write one throwaway test record into
+  the real database, found and deleted immediately after (owner/dog/stay
+  all confirmed gone) - worth remembering this risk before repeating that
+  approach: prefer read-only checks (Supabase dashboard/logs) first, only
+  reproduce a live write if genuinely needed to diagnose, and always clean
+  up immediately.
 - Sept 16, 2026 (6): About page map pin placed at the specific spot Kim
   chose (~300 yards past the actual address), replacing the earlier
   neighborhood-level "Loch Lomond, San Rafael, CA" query. Kim sent a

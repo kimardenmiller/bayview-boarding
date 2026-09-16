@@ -9,9 +9,10 @@ export function buildContactNote(kimPhone: string, esteePhone: string): string {
   return `Replies to this number aren't monitored. For questions, please group-text Kim ${kimPhone} & Estee ${esteePhone}.`;
 }
 
-/** Appends the contact note to an outbound message body. */
+/** Appends the contact note to an outbound message body, on its own line
+ * (Sept 16, 2026 - was a single space, read as one run-on sentence). */
 export function appendContactNote(message: string, kimPhone: string, esteePhone: string): string {
-  return `${message} ${buildContactNote(kimPhone, esteePhone)}`;
+  return `${message}\n${buildContactNote(kimPhone, esteePhone)}`;
 }
 
 /** The auto-reply TwiML sends back to anyone who texts the business number

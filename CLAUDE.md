@@ -148,6 +148,16 @@ call itself is dropped, not for a routine secret rotation.
   a real reason — the first four hold client PII (names, phone, email,
   signatures, health/aggression notes); `settings` isn't sensitive but
   writes still need the admin password, checked in the function.
+- Twilio A2P 10DLC is APPROVED (confirmed via the API Sept 16, 2026) -
+  real SMS sends now actually go through, unlike earlier in development
+  when they silently failed. When testing the live site, use a
+  555-01XX phone number (e.g. 415-555-0199) - that block is permanently
+  reserved by NANPA across every area code for fictional/testing use and
+  can never reach a real subscriber. Prefer read-only checks (Supabase
+  dashboard, live settings reads) over writing test records/triggering
+  test sends directly against production when diagnosing an issue; if a
+  live write genuinely is necessary, clean it up immediately and verify
+  the cleanup actually took.
 
 ## Current priorities (v1.5)
 See FIXES.txt for the live list - nothing outstanding here as of Sept

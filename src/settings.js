@@ -48,11 +48,11 @@ export const SETTINGS = {
   // server-side. This file ships in the public client JS bundle, so real
   // personal phone numbers must never be filled in here directly.
 
-  SMS_CONFIRMATION: `Hi {firstName}! {dogName}'s stay at Bayview Boarding is confirmed. Drop-off: {dropDate} at {dropTime}. Pick-up: {pickDate} at {pickTime}. Estimated cost: ${'{estimatedCost}'}. — Kim & Estee Replies to this number aren't monitored. For questions, please group-text Kim {kimPhone} & Estee {esteePhone}.`,
+  SMS_CONFIRMATION: `Hi {firstName}! {dogName}'s stay at Bayview Boarding is confirmed. Drop-off: {dropDate} at {dropTime}. Pick-up: {pickDate} at {pickTime}. Estimated cost: ${'{estimatedCost}'}. — Kim & Estee\nReplies to this number aren't monitored. For questions, please group-text Kim {kimPhone} & Estee {esteePhone}.`,
 
-  SMS_REMINDER: `Hi {firstName}! Just a reminder that {dogName}'s stay at Bayview Boarding starts tomorrow at {dropTime}. Here's what to bring: {packingList}. See you then! Reply STOP to opt out. — Kim & Estee Replies to this number aren't monitored. For questions, please group-text Kim {kimPhone} & Estee {esteePhone}.`,
+  SMS_REMINDER: `Hi {firstName}! Just a reminder that {dogName}'s stay at Bayview Boarding starts tomorrow at {dropTime}. Here's what to bring: {packingList}. See you then! Reply STOP to opt out. — Kim & Estee\nReplies to this number aren't monitored. For questions, please group-text Kim {kimPhone} & Estee {esteePhone}.`,
 
-  SMS_BILLING: `Hi {firstName}! {dogName} is ready for pickup. Your total for this stay is ${'{finalCost}'}. Thanks for choosing Bayview Boarding! Reply STOP to opt out. — Kim & Estee Replies to this number aren't monitored. For questions, please group-text Kim {kimPhone} & Estee {esteePhone}.`,
+  SMS_BILLING: `Hi {firstName}! {dogName} is ready for pickup. Your total for this stay is ${'{finalCost}'}. Thanks for choosing Bayview Boarding! Reply STOP to opt out. — Kim & Estee\nReplies to this number aren't monitored. For questions, please group-text Kim {kimPhone} & Estee {esteePhone}.`,
 
   // ── Vet Dropdown ──────────────────────────────────────────────────────────
   SAN_RAFAEL_VETS: [

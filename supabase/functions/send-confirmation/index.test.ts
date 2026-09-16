@@ -56,7 +56,7 @@ Deno.test('with no message_template: builds the default confirmation message and
     assertEquals(res.status, 200);
     assertEquals(
       stub.calls[0].body,
-      "Hi Kim! Rex's stay at Bayview Boarding is confirmed. Drop-off: Thu, Oct 1 at 09:00. Pick-up: Sat, Oct 3 at 10:00. Estimated cost: $210. — Kim & Estee Replies to this number aren't monitored. For questions, please group-text Kim 4155550101 & Estee 4155550102.",
+      "Hi Kim! Rex's stay at Bayview Boarding is confirmed. Drop-off: Thu, Oct 1 at 09:00. Pick-up: Sat, Oct 3 at 10:00. Estimated cost: $210. — Kim & Estee\nReplies to this number aren't monitored. For questions, please group-text Kim 4155550101 & Estee 4155550102.",
     );
   } finally {
     stub.restore();

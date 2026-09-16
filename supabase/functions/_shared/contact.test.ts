@@ -18,9 +18,9 @@ Deno.test('buildContactNote includes both phone numbers and the "not monitored" 
   assertEquals(note.includes("aren't monitored"), true);
 });
 
-Deno.test('appendContactNote appends the note after the original message', () => {
+Deno.test('appendContactNote appends the note after the original message, on its own line', () => {
   const result = appendContactNote('Hi Jane! Your stay is confirmed.', KIM, ESTEE);
-  assertEquals(result.startsWith('Hi Jane! Your stay is confirmed. '), true);
+  assertEquals(result.startsWith('Hi Jane! Your stay is confirmed.\n'), true);
   assertEquals(result.includes(KIM), true);
   assertEquals(result.includes(ESTEE), true);
 });
