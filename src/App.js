@@ -245,16 +245,6 @@ function StepOwner({ data, onChange, onNext, vetOptions, multiDogDiscount }) {
   const [errors, setErrors] = useState({});
   const [looking, setLooking] = useState(false);
   const [found, setFound] = useState(false);
-  // The "Number of Dogs" input's own displayed text, decoupled from
-  // data.dogs.length - see setDogCount below for why.
-  const [dogCountText, setDogCountText] = useState(String(data.dogs.length));
-
-  // Resync the field when the dog count changes for a reason other than
-  // typing here - e.g. a returning-client lookup growing the array to
-  // match known dogs.
-  useEffect(() => {
-    setDogCountText(String(data.dogs.length));
-  }, [data.dogs.length]);
 
   async function lookupPhone() {
     if (!data.ownerPhone.trim()) return;
@@ -292,32 +282,18 @@ function StepOwner({ data, onChange, onNext, vetOptions, multiDogDiscount }) {
     setLooking(false);
   }
 
-  // The input's value used to be bound directly to data.dogs.length,
-  // clamped to a minimum of 1 on every keystroke. That was the bug:
-  // backspacing "1" to clear the field before typing "2" produced ""
-  // -> NaN -> clamped right back to 1, so the field's displayed value
-  // never actually changed and "2" could never land. Now the field keeps
-  // its own text (dogCountText) while focused - it can go genuinely
-  // blank, or hold "0" - and only resizes data.dogs on a valid parse.
-  // "Number of Dogs" defaults to 0; Continue itself enforces > 0 (see
-  // validate below) rather than the input refusing to go there.
-  function handleDogCountChange(e) {
-    const raw = e.target.value;
-    setDogCountText(raw);
-    if (raw === '') return; // let them clear it freely, no snap-back
-    const n = parseInt(raw, 10);
-    if (Number.isNaN(n) || n < 0) return;
-    const next = data.dogs.slice(0, n);
-    while (next.length < n) next.push(emptyDog());
-    onChange('dogs', next);
+  // "Add Dog" / delete (Sept 17, 2026 - replaced the old "Number of Dogs"
+  // number input entirely). Always keeps at least one dog - removeDog is
+  // a no-op at length 1, and the Remove button itself is hidden then, so
+  // dogs.length can never reach 0 and there's no longer a "must be at
+  // least 1" error state to report.
+  function addDog() {
+    onChange('dogs', [...data.dogs, emptyDog()]);
   }
 
-  // If they leave the field blank (or otherwise invalid) and click/tab
-  // away, snap the displayed text back to the actual committed count
-  // instead of leaving it looking blank while dogs.length disagrees.
-  function handleDogCountBlur() {
-    const n = parseInt(dogCountText, 10);
-    if (Number.isNaN(n) || n < 0) setDogCountText(String(data.dogs.length));
+  function removeDog(index) {
+    if (data.dogs.length <= 1) return;
+    onChange('dogs', data.dogs.filter((_, i) => i !== index));
   }
 
   // Pure - no state writes - so it can also drive the Continue button's
@@ -328,7 +304,6 @@ function StepOwner({ data, onChange, onNext, vetOptions, multiDogDiscount }) {
     if (!data.ownerName.trim()) e.ownerName = 'Required';
     if (!data.ownerEmail.trim()) e.ownerEmail = 'Required';
     if (!data.vetName || data.vetName === 'Select a Vet') e.vetName = 'Required';
-    if (data.dogs.length === 0) e.dogCount = 'Must be at least 1';
     return e;
   }
 
@@ -368,17 +343,20 @@ function StepOwner({ data, onChange, onNext, vetOptions, multiDogDiscount }) {
           {vetOptions.map((v, i) => <option key={i} value={v}>{v}</option>)}
         </select>
       </Field>
-      <Field label="Number of Dogs" error={errors.dogCount}>
-        <input
-          type="number"
-          min="0"
-          step="1"
-          value={dogCountText}
-          onChange={handleDogCountChange}
-          onBlur={handleDogCountBlur}
-        />
+      <Field label="Dogs">
+        <div className="dog-count-list">
+          {data.dogs.map((_, i) => (
+            <div className="dog-count-row" key={i}>
+              <span>Dog {i + 1}</span>
+              {data.dogs.length > 1 && (
+                <button type="button" className="btn-secondary" onClick={() => removeDog(i)}>Remove</button>
+              )}
+            </div>
+          ))}
+        </div>
+        <button type="button" className="btn-secondary" onClick={addDog}>+ Add Dog</button>
         {data.dogs.length > 1 && (
-          <div style={{ fontSize: '0.78rem', color: '#7D9B76', marginTop: 4 }}>
+          <div style={{ fontSize: '0.78rem', color: '#7D9B76', marginTop: 8 }}>
             {multiDogDiscount * 100}% off each additional dog's nightly rate.
           </div>
         )}

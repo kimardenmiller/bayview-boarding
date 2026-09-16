@@ -1,6 +1,6 @@
 BAYVIEW BOARDING — FIX LIST
 ============================
-Last updated: September 17, 2026 (per-tester greeting, unbilled-stays review, pickup reminder)
+Last updated: September 17, 2026 (Owner page: Add/Remove Dog replaces Number of Dogs)
 
 NEXT CHANGE LIST (v1.5)
 -----------------------
@@ -79,6 +79,30 @@ TWILIO STATUS
 
 COMPLETED
 ---------
+- Sept 17, 2026 (3): Owner Information page - removed the "Number of
+  Dogs" number input entirely, replaced with a plain list of "Dog 1",
+  "Dog 2", ... rows, each with its own Remove button, plus a "+ Add Dog"
+  button below. Always keeps at least one dog (Remove is hidden once
+  only one is left, so the count can never reach 0) - the old "must be
+  at least 1" validation error is gone too, since it's now structurally
+  guaranteed rather than something that needed checking. The 2nd+ dog
+  discount note still shows once more than one dog is listed, unchanged
+  logic, just triggered by Add/Remove instead of typing a number.
+  Returning-client lookup (autofilling every known dog) is unaffected -
+  it already just manipulated the dogs array directly, never depended on
+  the old input.
+
+  Tests: replaced the old Number-of-Dogs-specific tests (typing/blur/
+  backspace-to-clear behavior, all obsolete now that there's no text
+  input to type into) with new ones for the Add/Remove list itself
+  (starts at 1 dog with no Remove button, Add Dog adds another with
+  Remove buttons on both, Remove takes one off and hides Remove again at
+  1, several dogs can be added/removed independently); every other
+  booking-flow test that used to set the count via the number input
+  (fillStep1 and a handful of others) now clicks "+ Add Dog" instead.
+  157 React + 129 Deno = 286/286 passing. Verified live via the actual
+  deployed JS bundle: "Add Dog" and the new dog-count-row markup are
+  present, "Number of Dogs" no longer appears anywhere in it at all.
 - Sept 17, 2026 (2): Four related pieces, all following the same
   Sept 17 request:
 

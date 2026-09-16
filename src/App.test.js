@@ -145,10 +145,11 @@ async function goToOwnerStep() {
   await screen.findByText('Owner Information');
 }
 
-// Fills Owner Information (name/phone/email/vet/Number of Dogs) and
-// advances to Dog 1. Vet and dog count live here now, not on the dog
-// pages. "Number of Dogs" defaults to 0, so this always sets it to 1
-// unless a test explicitly wants otherwise.
+// Fills Owner Information (name/phone/email/vet) and advances to Dog 1.
+// Vet lives here now, not on the dog pages. The form always starts with
+// exactly 1 dog (see emptyForm), so this clicks "+ Add Dog" the rest of
+// the way to numberOfDogs (Sept 17, 2026 - replaced the old "Number of
+// Dogs" number input entirely).
 async function fillStep1(phone = '4155550100', name = 'Kim Miller', email = 'kim@test.com', numberOfDogs = 1) {
   render(<App />);
   fireEvent.click(screen.getByText('Book My Stay'));
@@ -156,7 +157,7 @@ async function fillStep1(phone = '4155550100', name = 'Kim Miller', email = 'kim
   await userEvent.type(screen.getByPlaceholderText('Jane Smith'), name);
   await userEvent.type(screen.getByPlaceholderText('jane@email.com'), email);
   fireEvent.change(screen.getByDisplayValue('Select a Vet'), { target: { value: 'Marin Pet Hospital — (415) 479-8387' } });
-  fireEvent.change(screen.getByRole('spinbutton'), { target: { value: String(numberOfDogs) } });
+  for (let i = 1; i < numberOfDogs; i++) fireEvent.click(screen.getByText('+ Add Dog'));
   fireEvent.click(screen.getByText('Continue'));
   await screen.findByText('Dog 1');
 }
@@ -907,9 +908,10 @@ describe('Step 1 — Owner Info', () => {
     expect(button).toBeDisabled();
     fireEvent.click(button);
     // a disabled button never fires its click handler - no error text,
-    // no navigation to Dog 1
+    // no navigation past Owner Info (note: "Dog 1" itself is a poor check
+    // here now - it's also a row label right on this page's own dog list)
     expect(screen.queryByText('Required')).not.toBeInTheDocument();
-    expect(screen.queryByText('Dog 1')).not.toBeInTheDocument();
+    expect(screen.getByText('Owner Information')).toBeInTheDocument();
   });
 
   test('Continue enables once every required field (name/phone/email/vet) is filled - dog count already defaults to 1', async () => {
@@ -940,50 +942,42 @@ describe('Step 1 — Owner Info', () => {
     expect(screen.getByDisplayValue('Select a Vet')).toBeInTheDocument();
   });
 
-  test('Number of Dogs defaults to 1 (editable) and does not show a discount note', async () => {
+  test('starts with exactly one dog ("Dog 1"), no Remove button, and no discount note', async () => {
     await goToOwnerStep();
-    expect(screen.getByRole('spinbutton')).toHaveValue(1);
+    expect(screen.getByText('Dog 1')).toBeInTheDocument();
+    expect(screen.queryByText('Dog 2')).not.toBeInTheDocument();
+    expect(screen.queryByText('Remove')).not.toBeInTheDocument(); // can't remove the only dog
     expect(screen.queryByText(/off each additional dog/)).not.toBeInTheDocument();
   });
 
-  test('Continue stays disabled if Number of Dogs is cleared down to 0, everything else filled', async () => {
+  test('"+ Add Dog" adds another dog, each with its own Remove button, and shows the discount note', async () => {
     await goToOwnerStep();
-    await userEvent.type(screen.getByPlaceholderText('(415) 555-0100'), '4155550100');
-    await userEvent.type(screen.getByPlaceholderText('Jane Smith'), 'Kim Miller');
-    await userEvent.type(screen.getByPlaceholderText('jane@email.com'), 'kim@test.com');
-    fireEvent.change(screen.getByDisplayValue('Select a Vet'), { target: { value: 'Marin Pet Hospital — (415) 479-8387' } });
-    fireEvent.change(screen.getByRole('spinbutton'), { target: { value: '0' } });
-    expect(screen.getByText('Continue')).toBeDisabled();
-    expect(screen.queryByText('Dog 1')).not.toBeInTheDocument();
-  });
-
-  test('shows the multi-dog discount note once more than 1 dog is entered', async () => {
-    await goToOwnerStep();
-    fireEvent.change(screen.getByRole('spinbutton'), { target: { value: '2' } });
+    fireEvent.click(screen.getByText('+ Add Dog'));
+    expect(screen.getByText('Dog 1')).toBeInTheDocument();
+    expect(screen.getByText('Dog 2')).toBeInTheDocument();
+    expect(screen.getAllByText('Remove')).toHaveLength(2);
     expect(await screen.findByText(/10% off each additional dog/)).toBeInTheDocument();
   });
 
-  test('lets the field go blank while editing, instead of snapping back on every keystroke', async () => {
-    // Regression test for the actual reported bug: clearing "1" before
-    // typing "2" used to clamp straight back to 1 on the empty
-    // intermediate state, so the field could never actually change.
+  test('Remove takes a dog off the list, hiding Remove again once only one is left', async () => {
     await goToOwnerStep();
-    const spinbutton = screen.getByRole('spinbutton');
-    fireEvent.change(spinbutton, { target: { value: '1' } });
-    expect(spinbutton).toHaveValue(1);
-    fireEvent.change(spinbutton, { target: { value: '' } }); // simulates backspacing to clear
-    expect(spinbutton).toHaveValue(null); // genuinely blank, not reverted to 1
-    fireEvent.change(spinbutton, { target: { value: '2' } });
-    expect(spinbutton).toHaveValue(2);
+    fireEvent.click(screen.getByText('+ Add Dog'));
+    fireEvent.click(screen.getAllByText('Remove')[0]);
+    expect(screen.queryByText('Dog 2')).not.toBeInTheDocument();
+    expect(screen.getByText('Dog 1')).toBeInTheDocument();
+    expect(screen.queryByText('Remove')).not.toBeInTheDocument();
+    expect(screen.queryByText(/off each additional dog/)).not.toBeInTheDocument();
   });
 
-  test('blank Number of Dogs reverts to the last committed count on blur', async () => {
+  test('adding several dogs lists each one and lets any of them be removed independently', async () => {
     await goToOwnerStep();
-    const spinbutton = screen.getByRole('spinbutton');
-    fireEvent.change(spinbutton, { target: { value: '3' } });
-    fireEvent.change(spinbutton, { target: { value: '' } });
-    fireEvent.blur(spinbutton);
-    expect(spinbutton).toHaveValue(3);
+    fireEvent.click(screen.getByText('+ Add Dog'));
+    fireEvent.click(screen.getByText('+ Add Dog'));
+    expect(screen.getByText('Dog 3')).toBeInTheDocument();
+    fireEvent.click(screen.getAllByText('Remove')[1]); // remove the middle one
+    expect(screen.getByText('Dog 1')).toBeInTheDocument();
+    expect(screen.getByText('Dog 2')).toBeInTheDocument();
+    expect(screen.queryByText('Dog 3')).not.toBeInTheDocument(); // re-labeled by position, not identity
   });
 
   test('looks up a returning client by phone and autofills name/email', async () => {
@@ -1048,7 +1042,7 @@ describe('Step 1 — Owner Info', () => {
     await userEvent.type(screen.getByPlaceholderText('(415) 555-0100'), '4155550100');
     fireEvent.click(screen.getByText('Look up'));
     await screen.findByText(/Info found/);
-    expect(screen.getByRole('spinbutton')).toHaveValue(2); // count grew to match, not left at 1
+    expect(screen.getByText('Dog 2')).toBeInTheDocument(); // count grew to match, not left at 1
     // this mock's client has no owner_name/owner_email - fill those
     // manually so Continue's own validation isn't what's under test here
     await userEvent.type(screen.getByPlaceholderText('Jane Smith'), 'Kim Miller');
@@ -1096,7 +1090,8 @@ describe('Step 1 — Owner Info', () => {
     expect(screen.getByPlaceholderText('Jane Smith')).toHaveValue('');
     expect(screen.getByPlaceholderText('jane@email.com')).toHaveValue('');
     expect(screen.getByDisplayValue('Select a Vet')).toBeInTheDocument();
-    expect(screen.getByRole('spinbutton')).toHaveValue(1); // unaffected - an empty lookup doesn't touch the count
+    expect(screen.getByText('Dog 1')).toBeInTheDocument(); // still just 1 - an empty lookup doesn't touch the count
+    expect(screen.queryByText('Dog 2')).not.toBeInTheDocument();
   });
 });
 
@@ -1158,16 +1153,7 @@ describe('Dog pages', () => {
   });
 
   test('a 2nd dog gets its own page, titled "Dog 2"', async () => {
-    render(<App />);
-    fireEvent.click(screen.getByText('Book My Stay'));
-    await userEvent.type(screen.getByPlaceholderText('(415) 555-0100'), '4155550100');
-    await userEvent.type(screen.getByPlaceholderText('Jane Smith'), 'Kim Miller');
-    await userEvent.type(screen.getByPlaceholderText('jane@email.com'), 'kim@test.com');
-    fireEvent.change(screen.getByDisplayValue('Select a Vet'), { target: { value: 'Marin Pet Hospital — (415) 479-8387' } });
-    fireEvent.change(screen.getByRole('spinbutton'), { target: { value: '2' } });
-    fireEvent.click(screen.getByText('Continue'));
-
-    await screen.findByText('Dog 1');
+    await fillStep1('4155550100', 'Kim Miller', 'kim@test.com', 2);
     await fillDogPage({ name: 'Rex', breed: 'Labrador' });
     expect(await screen.findByText('Dog 2')).toBeInTheDocument();
     expect(screen.queryByText('Dog 1')).not.toBeInTheDocument();
@@ -1177,16 +1163,7 @@ describe('Dog pages', () => {
   });
 
   test('Back from Dog 2 returns to Dog 1 with its data preserved', async () => {
-    render(<App />);
-    fireEvent.click(screen.getByText('Book My Stay'));
-    await userEvent.type(screen.getByPlaceholderText('(415) 555-0100'), '4155550100');
-    await userEvent.type(screen.getByPlaceholderText('Jane Smith'), 'Kim Miller');
-    await userEvent.type(screen.getByPlaceholderText('jane@email.com'), 'kim@test.com');
-    fireEvent.change(screen.getByDisplayValue('Select a Vet'), { target: { value: 'Marin Pet Hospital — (415) 479-8387' } });
-    fireEvent.change(screen.getByRole('spinbutton'), { target: { value: '2' } });
-    fireEvent.click(screen.getByText('Continue'));
-
-    await screen.findByText('Dog 1');
+    await fillStep1('4155550100', 'Kim Miller', 'kim@test.com', 2);
     await fillDogPage({ name: 'Rex', breed: 'Labrador' });
     await screen.findByText('Dog 2');
     fireEvent.click(screen.getByText('Back'));
@@ -1357,7 +1334,7 @@ describe('Step 3 — Stay Dates', () => {
     await userEvent.type(screen.getByPlaceholderText('Jane Smith'), 'Kim Miller');
     await userEvent.type(screen.getByPlaceholderText('jane@email.com'), 'kim@test.com');
     fireEvent.change(screen.getByDisplayValue('Select a Vet'), { target: { value: 'Marin Pet Hospital — (415) 479-8387' } });
-    fireEvent.change(screen.getByRole('spinbutton'), { target: { value: '2' } });
+    fireEvent.click(screen.getByText('+ Add Dog'));
     fireEvent.click(screen.getByText('Continue'));
 
     await screen.findByText('Dog 1');
@@ -1503,7 +1480,7 @@ describe('Step 5 — Signature', () => {
     await userEvent.type(screen.getByPlaceholderText('Jane Smith'), 'Kim Miller');
     await userEvent.type(screen.getByPlaceholderText('jane@email.com'), 'kim@test.com');
     fireEvent.change(screen.getByDisplayValue('Select a Vet'), { target: { value: 'Marin Pet Hospital — (415) 479-8387' } });
-    fireEvent.change(screen.getByRole('spinbutton'), { target: { value: '2' } });
+    fireEvent.click(screen.getByText('+ Add Dog'));
     fireEvent.click(screen.getByText('Continue'));
 
     await screen.findByText('Dog 1');

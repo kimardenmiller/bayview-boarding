@@ -6,10 +6,12 @@ Kim Miller and Estee Fletter at 210 Bayview Drive, San Rafael, CA.
 
 ## What it does
 - Client intake form, a dynamic number of steps: owner info (name/phone/
-  email/vet/"Number of Dogs"), one full-profile page per dog ("Dog 1",
-  "Dog 2", ... — breed/DOB/spay-neuter/aggression/health), stay dates,
-  waiver, signature. Vet and dog count are asked once on the owner page,
-  not per dog (Sept 14 reorg, moved off the dog page Sept 15)
+  email/vet, plus "+ Add Dog"/Remove controls - a plain list of "Dog 1",
+  "Dog 2", ... rows, replacing the old "Number of Dogs" number input
+  Sept 17, 2026), one full-profile page per dog ("Dog 1", "Dog 2", ... —
+  breed/DOB/spay-neuter/aggression/health), stay dates, waiver,
+  signature. Vet and dog count are asked once on the owner page, not per
+  dog (Sept 14 reorg, moved off the dog page Sept 15)
 - Aggression/health questions warn visibly if left blank (previously
   required to advance but silently so - no message ever showed)
 - Electronic waiver with e-signature (legally binding under E-SIGN / UETA)
@@ -177,7 +179,7 @@ call itself is dropped, not for a routine secret rotation.
 - src/App.js — main app
 - src/settings.js — all configurable values (rates, vets, messages, packing list)
 - src/waiver.js — full waiver text
-- src/App.test.js — 158 passing tests (TDD), Supabase mocked via src/__mocks__/supabase.js
+- src/App.test.js — 157 passing tests (TDD), Supabase mocked via src/__mocks__/supabase.js
 - supabase/functions/send-contact/index.ts — public Contact Us form handler: relays name/email-or-phone/message to Kim & Estee by SMS (reuses KIM_PHONE/ESTEE_PHONE). Deployed normally (no --no-verify-jwt) since it's called via the Supabase JS client like settings/lookup-client/submit-booking
 - supabase/functions/feedback/index.ts — "Submit Idea": public submit (no password) + admin list/status-update (password) for the feedback queue
 - supabase/functions/testers/index.ts — tester broadcast list: entirely admin-password-gated list/add/remove/notify (no public branch at all); notify greets each active tester by their own first name
