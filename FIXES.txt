@@ -1,6 +1,6 @@
 BAYVIEW BOARDING — FIX LIST
 ============================
-Last updated: September 17, 2026 (Dog editing moves off sequential steps; Admin: Unbilled/Past Stays split)
+Last updated: September 18, 2026 (Admin: full billing math + Past Stays by owner; billing SMS grammar/formatting fixes)
 
 NEXT CHANGE LIST (v1.5)
 -----------------------
@@ -79,6 +79,89 @@ TWILIO STATUS
 
 COMPLETED
 ---------
+- Sept 18, 2026: Five related pieces, all from the same follow-up
+  request to the Unbilled/Past Stays split below (4):
+
+  1. Admin: Stay Editing - each stay's edit view now has its own
+  Daily Rate and Holiday Upcharge % fields (defaulting to the current
+  site settings), separate from the site-wide values, so a one-off
+  discount or correction doesn't require changing pricing for everyone.
+  Recalculate now uses these per-stay values and shows the full math
+  first (nights x rate x dog multiplier = subtotal, + holiday upcharge
+  if any nights fall in a holiday window, = total) rather than just the
+  final number - calcCostBreakdown (new, alongside calcCost, same
+  underlying math) returns the line items instead of just the total.
+
+  2. Past Stays now groups by OWNER, not by dog - an owner with 2 dogs
+  used to get 2 separate rows; now one row per owner, listing all their
+  dog names. Opening an owner lists their past STAYS (deduped by stay id
+  across a shared multi-dog booking, same dedup as Unbilled Stays)
+  rather than one dog's history at a time, so a 2-dog stay now shows as
+  one card naming both dogs instead of two separate dog-scoped cards.
+  Each stay card is the exact same shared component Unbilled Stays uses
+  (see (4) below) - "Edit" + "Send Billing Text" now work identically
+  whether the stay has never been billed or is being corrected and
+  resent; admin-data's billStay action already just patches the given
+  fields and re-stamps billed_at, so no server-side change was needed
+  for "resend" to work. The old per-dog billing UI (a separate,
+  parallel implementation from the Unbilled Stays one) is gone entirely,
+  folded into this one shared path.
+
+  3. A "Site Settings" header now separates Unbilled Stays/Past Stays
+  (the day-to-day lookup/billing sections) from the day rate/discount/
+  holiday/vet/packing-list/SMS-template settings below - previously
+  there was no visual break between "things you use constantly" and
+  "things you rarely touch".
+
+  4. Billing SMS fixes: a shared multi-dog stay's text used to always
+  say "{dogName} is ready for pickup" even when dogName was "Don & Bob" -
+  new dogVerb() picks "is"/"are" by checking for " & " in the name, used
+  both in send-confirmation's own hardcoded billing fallback and via a
+  new {dogVerb} placeholder for the admin-editable template. Dollar
+  amounts ({finalCost}/{estimatedCost}) were being inserted as a bare
+  JS number-to-string ("$1795.5") - new formatDollars() always shows 2
+  decimals with thousands commas ("$1,795.50"), applied everywhere a
+  dollar placeholder is filled. "Reply STOP to opt out." moved to below
+  "— Kim & Estee" with a blank line before it (was above the signature,
+  directly against the "aren't monitored" footer) in both the billing
+  and drop-off-reminder templates/fallbacks - same footer shape, just
+  reordered.
+
+  5. Booking form: each dog on the Owner page's list now shows a red
+  "Needs updating" label next to its name/fallback "Dog N" whenever
+  dogIsComplete() is false (missing breed/DOB/spay-neuter/aggression/
+  health, not just aggression+health specifically, though those are
+  what's typically still missing right after a returning-client lookup
+  autofill) - previously the only sign a dog needed attention was the
+  owner page's Continue button staying disabled with no visible reason
+  why.
+
+  Tests: calcCostBreakdown gets its own describe block (return-null
+  parity with calcCost, subtotal/holidayExtra/total math, multi-dog
+  discount interacting with the holiday upcharge); a new Unbilled Stays
+  test covers the per-stay Daily Rate field driving Recalculate; the
+  whole "Admin — logged in" describe block rewritten for the owner-
+  grouped Past Stays UI (search by owner OR dog name, click-to-expand
+  cards, Edit before Billing SMS assertions); a new dedicated fixture
+  test confirms an owner with 2 dogs on one shared billed stay gets
+  exactly one owner row and one combined-name card, not two; a new
+  Step-1 test confirms "Needs updating" clears once a dog's profile page
+  is filled in. send-confirmation's Deno suite gets formatDollars/
+  dogVerb unit tests plus full-string assertions for both the billing
+  and reminder hardcoded fallbacks' new footer order. 168 React + 136
+  Deno = 304/304 passing.
+
+  Verified live: deployed JS bundle greped for "Site Settings", "Needs
+  updating", "Daily Rate", "Holiday Upcharge %", "All Owners", "Billed
+  cost" - all present. send-confirmation redeployed (plain deploy, no
+  --no-verify-jwt needed - same as always for this one) and invoked
+  directly against production with a type:"billing", dogName "Don & Bob"
+  payload to a 415-555-0199 number (NANPA-reserved, can never reach a
+  real subscriber) - Twilio accepted the send (200, real sid returned);
+  couldn't read the actual message body back without real Twilio
+  credentials, so the exact wording rests on the Deno suite's own
+  full-string assertions for that same code path, same limitation noted
+  every other time this project has verified an SMS-sending function.
 - Sept 17, 2026 (4): Two related restructurings, both from the same
   follow-up request to the Add/Remove Dog change below (3):
 

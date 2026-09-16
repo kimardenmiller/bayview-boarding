@@ -182,10 +182,42 @@ function calcCost(
   return total.toFixed(2);
 }
 
+// Same math as calcCost, but returns the line items instead of just the
+// final total - Admin: Stay Editing (Sept 18, 2026) shows this breakdown
+// next to the editable Daily Rate/Holiday Upcharge fields so admin can see
+// exactly how a correction changes the total, not just the total itself.
+function calcCostBreakdown(
+  checkIn, checkOut, dropTime, pickupTime, rate, numberOfDogs = 1,
+  multiDogDiscount = DEFAULT_MULTI_DOG_DISCOUNT, holidayUpcharge = DEFAULT_HOLIDAY_UPCHARGE
+) {
+  if (!checkIn || !checkOut || !dropTime || !pickupTime) return null;
+  const drop = new Date(`${checkIn}T${dropTime}`);
+  const pickup = new Date(`${checkOut}T${pickupTime}`);
+  const hours = (pickup - drop) / 3600000;
+  if (hours <= 0) return null;
+  const nights = Math.max(1, Math.ceil(hours / 24));
+  const dogs = Math.max(1, Number(numberOfDogs) || 1);
+  const perNightDogMultiplier = 1 + (dogs - 1) * (1 - multiDogDiscount);
+
+  const [y, m, d] = checkIn.split('-').map(Number);
+  let holidayNights = 0;
+  let subtotal = 0;
+  let holidayExtra = 0;
+  for (let i = 0; i < nights; i++) {
+    const nightISO = isoFromLocalDate(new Date(y, m - 1, d + i));
+    subtotal += rate * perNightDogMultiplier;
+    if (isHolidayNight(nightISO)) {
+      holidayNights++;
+      holidayExtra += rate * holidayUpcharge * perNightDogMultiplier;
+    }
+  }
+  return { nights, holidayNights, dogs, rate, perNightDogMultiplier, subtotal, holidayExtra, total: subtotal + holidayExtra };
+}
+
 // Named exports alongside the default App export, purely so pure helper
 // functions can be unit-tested directly instead of only through full
 // multi-step form flows. No behavior change.
-export { formatDate, calcAge, calcCost, isHolidayNight, getHolidayWindows, todayISO, formatMoney, vetDropdownOptions };
+export { formatDate, calcAge, calcCost, calcCostBreakdown, isHolidayNight, getHolidayWindows, todayISO, formatMoney, vetDropdownOptions };
 
 function Header({ onTitleClick }) {
   return (
@@ -376,7 +408,10 @@ function StepOwner({ data, onChange, onNext, vetOptions, multiDogDiscount }) {
         <div className="dog-count-list">
           {data.dogs.map((dog, i) => (
             <div className="dog-count-row" key={i}>
-              <span>{dog.name.trim() || `Dog ${i + 1}`}</span>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <span>{dog.name.trim() || `Dog ${i + 1}`}</span>
+                {!dogIsComplete(dog) && <span className="dog-needs-updating">Needs updating</span>}
+              </div>
               <div style={{ display: 'flex', gap: 6 }}>
                 <button type="button" className="btn-secondary" onClick={() => setEditingDogIndex(i)}>Edit</button>
                 {data.dogs.length > 1 && (
@@ -675,7 +710,8 @@ function AdminView({
   const [dogs, setDogs] = useState([]);
   const [totalStays, setTotalStays] = useState(0);
   const [search, setSearch] = useState('');
-  const [selected, setSelected] = useState(null);
+  // Past Stays opens an owner (not a dog) - see pastStaysOwners below.
+  const [selectedOwnerPhone, setSelectedOwnerPhone] = useState(null);
   const [loading, setLoading] = useState(false);
   const [editRate, setEditRate] = useState(rate);
   const [editMultiDogDiscount, setEditMultiDogDiscount] = useState(String(multiDogDiscount * 100));
@@ -705,63 +741,25 @@ function AdminView({
   const [broadcastMessage, setBroadcastMessage] = useState(DEFAULT_BROADCAST_MESSAGE);
   const [broadcastStatus, setBroadcastStatus] = useState('idle'); // idle | sending | sent | error
   const [broadcastResult, setBroadcastResult] = useState(null);
-  // Unbilled-stays review (Sept 17, 2026) - local edits per stay id, only
-  // committed (and the stay marked billed) once the bill is actually
-  // sent; a failed send leaves the stay in the list with edits intact
-  // rather than silently marking it billed anyway.
+  // Stay billing review (Sept 17, 2026; shared by Unbilled Stays and Past
+  // Stays "resend" since Sept 18, 2026 - same fields, same sendBill call)
+  // - local edits per stay id, only committed (and the stay (re)marked
+  // billed) once the bill is actually sent; a failed send leaves the
+  // stay's edits intact rather than silently marking it billed anyway.
   const [billingEdits, setBillingEdits] = useState({});
-  const [unbilledStatus, setUnbilledStatus] = useState({});
+  const [billingSendStatus, setBillingSendStatus] = useState({});
   const [sendingBillId, setSendingBillId] = useState(null);
   // Click-to-expand (Sept 17, 2026 - replaced "every field always visible
   // inline" now that the list includes every unbilled stay, not just
   // already-checked-out ones, and would otherwise be a wall of inputs).
-  const [expandedUnbilledId, setExpandedUnbilledId] = useState(null);
-  const [editingUnbilledId, setEditingUnbilledId] = useState(null);
-  // Billing SMS is admin-triggered (not auto-sent at pickup time) - the
-  // estimated cost can be wrong by pickup (early/late pickup, extra
-  // services), so an admin reviews/adjusts the actual final amount before
-  // it goes out, rather than the system silently texting a guess. Keyed
-  // by stay id since a dog can have several stays, each independently
-  // billable.
-  const [billingDrafts, setBillingDrafts] = useState({});
-  const [billingStatus, setBillingStatus] = useState({});
+  // Shared by both stay lists - a stay id can only appear in one of them
+  // at a time (unbilled vs. billed), so there's no collision risk.
+  const [expandedStayId, setExpandedStayId] = useState(null);
+  const [editingStayId, setEditingStayId] = useState(null);
   // Which stay's signed waiver snapshot is currently expanded, if any -
   // one at a time, collapsed by default so the stay history doesn't turn
   // into a wall of legal text.
   const [expandedWaiver, setExpandedWaiver] = useState(null);
-
-  function billingDraftFor(s) {
-    if (s.id in billingDrafts) return billingDrafts[s.id];
-    return s.estimated_cost != null ? String(s.estimated_cost) : '';
-  }
-
-  async function sendBillingText(s) {
-    const finalCost = Number(billingDraftFor(s));
-    if (!finalCost || finalCost <= 0) {
-      setBillingStatus(prev => ({ ...prev, [s.id]: 'Enter a valid amount first' }));
-      return;
-    }
-    setBillingStatus(prev => ({ ...prev, [s.id]: 'sending' }));
-    const { data, error: fnError } = await supabase.functions.invoke('send-confirmation', {
-      body: {
-        type: 'billing',
-        owner_name: selected.owner?.name,
-        owner_phone: selected.owner?.phone,
-        // Named for the dog currently being viewed - a stay covering
-        // several dogs still only names this one in the text, a known
-        // scope trade-off rather than reworking admin-data to surface
-        // every dog on a shared stay.
-        dog_name: selected.name,
-        final_cost: finalCost,
-        message_template: smsTemplates.billing,
-      },
-    });
-    if (fnError || data?.error) {
-      setBillingStatus(prev => ({ ...prev, [s.id]: 'Failed to send. Please try again.' }));
-      return;
-    }
-    setBillingStatus(prev => ({ ...prev, [s.id]: 'sent' }));
-  }
 
   async function login() {
     setError('');
@@ -918,7 +916,7 @@ function AdminView({
   }
 
   // Lazily falls back to the stay's actual stored value until admin
-  // touches that field - same pattern as billingDraftFor above.
+  // touches that field.
   function billingFieldFor(stay, field, fallback) {
     return billingEdits[stay.id]?.[field] ?? fallback;
   }
@@ -927,17 +925,30 @@ function AdminView({
     setBillingEdits(prev => ({ ...prev, [stayId]: { ...prev[stayId], [field]: value } }));
   }
 
-  // Recomputes a suggested total from the (possibly-just-edited)
-  // dates/times using the site's real cost logic - still just a
-  // suggestion, landing in the same editable Final Cost field so admin
-  // can hand-adjust it further before sending.
-  function recalculateBilling(stay) {
+  // Admin: Stay Editing (Sept 18, 2026) - Daily Rate and Holiday Upcharge
+  // are now per-stay editable fields too (defaulting to the current global
+  // settings), not just dates/times, so a one-off correction or discount
+  // doesn't require changing the site-wide rate. Returns the full line-item
+  // breakdown (calcCostBreakdown) so the edit view can show the math, not
+  // just the final number.
+  function costBreakdownFor(stay) {
     const checkIn = billingFieldFor(stay, 'checkIn', stay.check_in);
     const checkOut = billingFieldFor(stay, 'checkOut', stay.check_out);
     const dropTime = billingFieldFor(stay, 'dropTime', stay.drop_time ? stay.drop_time.slice(0, 5) : '');
     const pickupTime = billingFieldFor(stay, 'pickupTime', stay.pickup_time ? stay.pickup_time.slice(0, 5) : '');
-    const cost = calcCost(checkIn, checkOut, dropTime, pickupTime, rate, stay.number_of_dogs || 1, multiDogDiscount, holidayUpcharge);
-    updateBillingField(stay.id, 'finalCost', cost || '');
+    const dayRate = Number(billingFieldFor(stay, 'dayRate', String(rate)));
+    const holidayPct = Number(billingFieldFor(stay, 'holidayUpchargePct', String(holidayUpcharge * 100)));
+    const numberOfDogs = stay.number_of_dogs || (stay.dogNames ? stay.dogNames.length : 1);
+    return calcCostBreakdown(checkIn, checkOut, dropTime, pickupTime, dayRate, numberOfDogs, multiDogDiscount, holidayPct / 100);
+  }
+
+  // Recomputes a suggested total from the (possibly-just-edited)
+  // dates/times/rate/holiday-upcharge using the site's real cost logic -
+  // still just a suggestion, landing in the same editable Final Cost field
+  // so admin can hand-adjust it further before sending.
+  function recalculateBilling(stay) {
+    const breakdown = costBreakdownFor(stay);
+    updateBillingField(stay.id, 'finalCost', breakdown ? breakdown.total.toFixed(2) : '');
   }
 
   // Sends the bill THEN marks it billed - in that order, deliberately:
@@ -946,6 +957,9 @@ function AdminView({
   // stay stays on the unbilled list with the edits still in place to
   // retry. Any corrected dates/times/cost are saved in the same call
   // that marks it billed (admin-data's billStay action).
+  // Works equally for an unbilled stay's first bill and a Past Stays
+  // "resend" (Sept 18, 2026) - billStay always just patches the given
+  // fields and stamps billed_at fresh, whether or not one was already set.
   async function sendBill(stay) {
     const checkIn = billingFieldFor(stay, 'checkIn', stay.check_in);
     const checkOut = billingFieldFor(stay, 'checkOut', stay.check_out);
@@ -953,11 +967,11 @@ function AdminView({
     const pickupTime = billingFieldFor(stay, 'pickupTime', stay.pickup_time ? stay.pickup_time.slice(0, 5) : '');
     const finalCost = Number(billingFieldFor(stay, 'finalCost', stay.estimated_cost != null ? String(stay.estimated_cost) : ''));
     if (!finalCost || finalCost <= 0) {
-      setUnbilledStatus(prev => ({ ...prev, [stay.id]: 'Enter a valid amount first' }));
+      setBillingSendStatus(prev => ({ ...prev, [stay.id]: 'Enter a valid amount first' }));
       return;
     }
     setSendingBillId(stay.id);
-    setUnbilledStatus(prev => ({ ...prev, [stay.id]: null }));
+    setBillingSendStatus(prev => ({ ...prev, [stay.id]: null }));
 
     const { data: smsData, error: smsErr } = await supabase.functions.invoke('send-confirmation', {
       body: {
@@ -967,7 +981,7 @@ function AdminView({
     });
     if (smsErr || smsData?.error) {
       setSendingBillId(null);
-      setUnbilledStatus(prev => ({ ...prev, [stay.id]: 'Failed to send. Please try again.' }));
+      setBillingSendStatus(prev => ({ ...prev, [stay.id]: 'Failed to send. Please try again.' }));
       return;
     }
 
@@ -981,8 +995,9 @@ function AdminView({
     if (fnError || data?.error) {
       // The text already went out - just couldn't record it as billed.
       // Log-worthy but not something to block the admin over; the stay
-      // stays on the unbilled list so it isn't lost.
-      setUnbilledStatus(prev => ({ ...prev, [stay.id]: 'Sent, but failed to save - it may show as unbilled again.' }));
+      // stays on the list (unbilled, or still showing its old billed
+      // state) so it isn't lost.
+      setBillingSendStatus(prev => ({ ...prev, [stay.id]: 'Sent, but failed to save - it may show as unbilled again.' }));
       return;
     }
     setDogs(data.dogs);
@@ -1030,21 +1045,195 @@ function AdminView({
 
   // "Past Stays" = fully billed stays, the counterpart lookup to Unbilled
   // Stays above - together the two sections cover every signed agreement
-  // on file, so there's no separate running total needed any more.
-  const pastStaysDogs = dogs
-    .map(d => ({ ...d, stays: (d.stays || []).filter(s => s.billed_at) }))
-    .filter(d => d.stays.length > 0);
-  const filtered = pastStaysDogs.filter(d =>
-    d.name?.toLowerCase().includes(search.toLowerCase()) ||
-    d.owner?.name?.toLowerCase().includes(search.toLowerCase())
+  // on file, so there's no separate running total needed any more. Grouped
+  // by owner rather than by dog (Sept 18, 2026) - an owner with 2 dogs
+  // used to get 2 separate rows; now one row per owner, and opening it
+  // lists their past STAYS (deduped by stay id across a shared multi-dog
+  // booking, same as Unbilled Stays) rather than one dog's history alone.
+  // perDog keeps each dog's own frozen aggression/health/DOB snapshot for
+  // that specific stay, since only name/dates/cost/notes/waiver are
+  // actually shared across dogs on the same stay.
+  const pastStaysByOwnerPhone = new Map();
+  dogs.forEach(d => {
+    const phone = d.owner?.phone;
+    if (!phone) return;
+    (d.stays || []).forEach(s => {
+      if (!s.billed_at) return;
+      if (!pastStaysByOwnerPhone.has(phone)) {
+        pastStaysByOwnerPhone.set(phone, { ownerName: d.owner?.name, ownerPhone: phone, staysById: new Map() });
+      }
+      const perDogEntry = {
+        name: d.name, breed: s.breed, dob: s.dob,
+        aggression_history: s.aggression_history, aggression_detail: s.aggression_detail,
+        health_concerns: s.health_concerns, health_detail: s.health_detail,
+      };
+      const owner = pastStaysByOwnerPhone.get(phone);
+      if (owner.staysById.has(s.id)) {
+        const existing = owner.staysById.get(s.id);
+        existing.dogNames.push(d.name);
+        existing.perDog.push(perDogEntry);
+      } else {
+        owner.staysById.set(s.id, { ...s, dogNames: [d.name], perDog: [perDogEntry], ownerName: d.owner?.name, ownerPhone: phone });
+      }
+    });
+  });
+  const pastStaysOwners = Array.from(pastStaysByOwnerPhone.values()).map(o => ({
+    ownerName: o.ownerName,
+    ownerPhone: o.ownerPhone,
+    dogNames: [...new Set(Array.from(o.staysById.values()).flatMap(s => s.dogNames))],
+    stays: Array.from(o.staysById.values()).sort((a, b) => b.check_in.localeCompare(a.check_in)),
+  }));
+  const filteredOwners = pastStaysOwners.filter(o =>
+    o.ownerName?.toLowerCase().includes(search.toLowerCase()) ||
+    o.dogNames.some(n => n.toLowerCase().includes(search.toLowerCase()))
   );
+  const selectedOwner = pastStaysOwners.find(o => o.ownerPhone === selectedOwnerPhone) || null;
+
+  // Shared by Unbilled Stays and Past Stays (Sept 18, 2026) - same
+  // click-to-expand card, same Edit/Recalculate/Send Billing Text
+  // controls, whether the stay has never been billed or is being
+  // corrected and resent. Notes and a signed-waiver toggle show whenever
+  // the stay actually has them (every real booking does).
+  function renderStayCard(s) {
+    const isExpanded = expandedStayId === s.id;
+    const isEditing = editingStayId === s.id;
+    const breakdown = isEditing ? costBreakdownFor(s) : null;
+    return (
+      <div key={s.id} className="stay-card">
+        <div
+          className="stay-dates"
+          style={{ cursor: 'pointer' }}
+          onClick={() => {
+            setExpandedStayId(isExpanded ? null : s.id);
+            if (isExpanded) setEditingStayId(null);
+          }}
+        >
+          <span>{s.dogNames.join(' & ')} — {s.ownerName}</span>
+        </div>
+        <div className="stay-meta">{formatDate(s.check_in)} – {formatDate(s.check_out)}</div>
+        {isExpanded && (
+          <div style={{ marginTop: 8 }}>
+            <div className="stay-meta">{s.ownerPhone}</div>
+            {!isEditing ? (
+              <>
+                <div className="stay-meta">
+                  Drop-off: {billingFieldFor(s, 'dropTime', s.drop_time ? s.drop_time.slice(0, 5) : '') || '—'} · Pickup: {billingFieldFor(s, 'pickupTime', s.pickup_time ? s.pickup_time.slice(0, 5) : '') || '—'}
+                </div>
+                <div className="stay-meta">
+                  {s.billed_at ? 'Billed cost' : 'Estimated cost'}: {(() => {
+                    const fc = billingFieldFor(s, 'finalCost', s.estimated_cost != null ? String(s.estimated_cost) : '');
+                    return fc ? `$${formatMoney(Number(fc).toFixed(2))}` : '—';
+                  })()}
+                </div>
+                {s.perDog && s.perDog.map((pd, i) => (
+                  <div key={i}>
+                    {pd.dob && (
+                      <div className="stay-meta">
+                        {s.perDog.length > 1 ? `${pd.name} — ` : ''}DOB: {formatDate(pd.dob)} · Age at stay: {calcAge(pd.dob)}
+                      </div>
+                    )}
+                    {pd.aggression_history === 'yes' && <div className="stay-flag">⚠ {s.perDog.length > 1 ? `${pd.name}: ` : ''}Aggression noted: {pd.aggression_detail}</div>}
+                    {pd.health_concerns === 'yes' && <div className="stay-flag">⚕ {s.perDog.length > 1 ? `${pd.name}: ` : ''}Health note: {pd.health_detail}</div>}
+                  </div>
+                ))}
+                {s.notes && <div className="stay-notes">"{s.notes}"</div>}
+                {Array.isArray(s.waiver_snapshot) && s.waiver_snapshot.length > 0 && (
+                  <div style={{ marginTop: 6 }}>
+                    <button
+                      className="back-btn"
+                      style={{ fontSize: '0.78rem' }}
+                      onClick={() => setExpandedWaiver(w => (w === s.id ? null : s.id))}
+                    >
+                      {expandedWaiver === s.id ? 'Hide waiver as signed' : 'View waiver as signed'}
+                    </button>
+                    {expandedWaiver === s.id && (
+                      <div className="waiver-scroll" style={{ marginTop: 8, maxHeight: 260 }}>
+                        {s.waiver_snapshot.map((section, si) => (
+                          <div className="waiver-section" key={si}>
+                            <div className="waiver-section-title">{section.title}</div>
+                            <p>{section.body}</p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </>
+            ) : (
+              <>
+                <div className="field-row" style={{ marginTop: 8 }}>
+                  <Field label="Check-in">
+                    <input type="date" value={billingFieldFor(s, 'checkIn', s.check_in)} onChange={e => updateBillingField(s.id, 'checkIn', e.target.value)} />
+                  </Field>
+                  <Field label="Check-out">
+                    <input type="date" value={billingFieldFor(s, 'checkOut', s.check_out)} onChange={e => updateBillingField(s.id, 'checkOut', e.target.value)} />
+                  </Field>
+                </div>
+                <div className="field-row">
+                  <Field label="Drop-off time">
+                    <input type="time" value={billingFieldFor(s, 'dropTime', s.drop_time ? s.drop_time.slice(0, 5) : '')} onChange={e => updateBillingField(s.id, 'dropTime', e.target.value)} />
+                  </Field>
+                  <Field label="Pickup time">
+                    <input type="time" value={billingFieldFor(s, 'pickupTime', s.pickup_time ? s.pickup_time.slice(0, 5) : '')} onChange={e => updateBillingField(s.id, 'pickupTime', e.target.value)} />
+                  </Field>
+                </div>
+                <div className="field-row">
+                  <Field label="Daily Rate">
+                    <input type="number" value={billingFieldFor(s, 'dayRate', String(rate))} onChange={e => updateBillingField(s.id, 'dayRate', e.target.value)} />
+                  </Field>
+                  <Field label="Holiday Upcharge %">
+                    <input type="number" value={billingFieldFor(s, 'holidayUpchargePct', String(holidayUpcharge * 100))} onChange={e => updateBillingField(s.id, 'holidayUpchargePct', e.target.value)} />
+                  </Field>
+                </div>
+                {breakdown && (
+                  <div className="stay-meta" style={{ marginTop: 4, marginBottom: 4 }}>
+                    {breakdown.nights} night{breakdown.nights !== 1 ? 's' : ''} × ${formatMoney(breakdown.rate.toFixed(2))}{breakdown.dogs > 1 ? ` × ${breakdown.dogs} dogs` : ''} = ${formatMoney(breakdown.subtotal.toFixed(2))}
+                    {breakdown.holidayNights > 0 && (
+                      <><br />+ Holiday upcharge ({breakdown.holidayNights} night{breakdown.holidayNights !== 1 ? 's' : ''}): ${formatMoney(breakdown.holidayExtra.toFixed(2))}</>
+                    )}
+                    <br />= ${formatMoney(breakdown.total.toFixed(2))}
+                  </div>
+                )}
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 8, flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: '0.85rem' }}>$</span>
+                  <input
+                    type="number"
+                    value={billingFieldFor(s, 'finalCost', s.estimated_cost != null ? String(s.estimated_cost) : '')}
+                    onChange={e => updateBillingField(s.id, 'finalCost', e.target.value)}
+                    style={{ width: 80, padding: '6px 10px', border: '1.5px solid #D5D9DE', borderRadius: 6, fontSize: '0.85rem' }}
+                  />
+                  <button className="btn-secondary" style={{ padding: '4px 10px', fontSize: '0.78rem' }} onClick={() => recalculateBilling(s)}>Recalculate</button>
+                </div>
+              </>
+            )}
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 8, flexWrap: 'wrap' }}>
+              <button className="btn-secondary" style={{ padding: '4px 10px', fontSize: '0.78rem' }} onClick={() => setEditingStayId(isEditing ? null : s.id)}>
+                {isEditing ? 'Done Editing' : 'Edit'}
+              </button>
+              <button
+                className="btn-primary"
+                style={{ padding: '4px 10px', fontSize: '0.78rem' }}
+                disabled={sendingBillId === s.id}
+                onClick={() => sendBill(s)}
+              >
+                {sendingBillId === s.id ? 'Sending...' : 'Send Billing Text'}
+              </button>
+              {billingSendStatus[s.id] && (
+                <span className="field-error" style={{ fontSize: '0.78rem' }}>{billingSendStatus[s.id]}</span>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
 
   if (showFeedback) {
     return (
       <div className="admin-overlay">
         <div className="admin-panel">
           <div className="admin-header">
-            <button className="back-btn" onClick={() => setShowFeedback(false)}>← All Dogs</button>
+            <button className="back-btn" onClick={() => setShowFeedback(false)}>← Admin</button>
             <button className="close-btn" onClick={onClose}>✕</button>
           </div>
           <h2>Ideas &amp; Bugs</h2>
@@ -1086,7 +1275,7 @@ function AdminView({
       <div className="admin-overlay">
         <div className="admin-panel">
           <div className="admin-header">
-            <button className="back-btn" onClick={() => setShowTesters(false)}>← All Dogs</button>
+            <button className="back-btn" onClick={() => setShowTesters(false)}>← Admin</button>
             <button className="close-btn" onClick={onClose}>✕</button>
           </div>
           <h2>Testers</h2>
@@ -1154,83 +1343,22 @@ function AdminView({
     );
   }
 
-  if (selected) {
-    // selected.stays is each stay's frozen per-booking snapshot (what was
-    // declared/signed at the time), already sorted newest-first by
-    // admin-data - deliberately distinct from selected.* below, which is
-    // the dog's always-current profile.
+  if (selectedOwner) {
+    // Past Stays opens an owner, not a dog (Sept 18, 2026) - stays are
+    // rendered with the same shared card as Unbilled Stays (see
+    // renderStayCard above), so "resend" is really just sendBill again:
+    // any correction is saved and billed_at is stamped fresh.
     return (
       <div className="admin-overlay">
         <div className="admin-panel">
           <div className="admin-header">
-            <button className="back-btn" onClick={() => setSelected(null)}>← All Dogs</button>
+            <button className="back-btn" onClick={() => setSelectedOwnerPhone(null)}>← All Owners</button>
             <button className="close-btn" onClick={onClose}>✕</button>
           </div>
-          <h2>{selected.name}</h2>
-          <p className="admin-owner">
-            {selected.owner?.name}
-            {selected.breed && ` · ${selected.breed}`}
-            {selected.dob && ` · ${calcAge(selected.dob)} old`}
-          </p>
+          <h2>{selectedOwner.ownerName}</h2>
+          <p className="admin-owner">{selectedOwner.dogNames.join(', ')}</p>
           <div className="stay-history">
-            {selected.stays.map((s, i) => (
-              <div key={i} className="stay-card">
-                <div className="stay-dates">
-                  <span>{formatDate(s.check_in)} {s.drop_time?.slice(0,5)}</span>
-                  <span className="stay-arrow">→</span>
-                  <span>{formatDate(s.check_out)} {s.pickup_time?.slice(0,5)}</span>
-                </div>
-                {s.estimated_cost && <div className="stay-cost">Est. ${formatMoney(s.estimated_cost)}</div>}
-                {s.number_of_dogs > 1 && <div className="stay-meta">{s.number_of_dogs} dogs</div>}
-                <div className="stay-meta">Signed {formatDate(s.submitted_at?.slice(0,10))} · {selected.owner?.email} · {selected.owner?.phone}</div>
-                {s.dob && <div className="stay-meta">DOB: {formatDate(s.dob)} · Age at stay: {calcAge(s.dob)}</div>}
-                {s.notes && <div className="stay-notes">"{s.notes}"</div>}
-                {s.aggression_history === 'yes' && <div className="stay-flag">⚠ Aggression noted: {s.aggression_detail}</div>}
-                {s.health_concerns === 'yes' && <div className="stay-flag">⚕ Health note: {s.health_detail}</div>}
-                {Array.isArray(s.waiver_snapshot) && s.waiver_snapshot.length > 0 && (
-                  <div style={{ marginTop: 6 }}>
-                    <button
-                      className="back-btn"
-                      style={{ fontSize: '0.78rem' }}
-                      onClick={() => setExpandedWaiver(w => (w === s.id ? null : s.id))}
-                    >
-                      {expandedWaiver === s.id ? 'Hide waiver as signed' : 'View waiver as signed'}
-                    </button>
-                    {expandedWaiver === s.id && (
-                      <div className="waiver-scroll" style={{ marginTop: 8, maxHeight: 260 }}>
-                        {s.waiver_snapshot.map((section, si) => (
-                          <div className="waiver-section" key={si}>
-                            <div className="waiver-section-title">{section.title}</div>
-                            <p>{section.body}</p>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                )}
-                <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 8 }}>
-                  <span style={{ fontSize: '0.85rem' }}>$</span>
-                  <input
-                    type="number"
-                    value={billingDraftFor(s)}
-                    onChange={e => setBillingDrafts(prev => ({ ...prev, [s.id]: e.target.value }))}
-                    style={{ width: 80, padding: '6px 10px', border: '1.5px solid #D5D9DE', borderRadius: 6, fontSize: '0.85rem' }}
-                  />
-                  <button
-                    className="btn-secondary"
-                    style={{ padding: '4px 10px', fontSize: '0.78rem' }}
-                    disabled={billingStatus[s.id] === 'sending'}
-                    onClick={() => sendBillingText(s)}
-                  >
-                    {billingStatus[s.id] === 'sending' ? 'Sending...' : 'Send Billing Text'}
-                  </button>
-                  {billingStatus[s.id] === 'sent' && <span style={{ color: '#7D9B76', fontSize: '0.78rem' }}>✓ Sent</span>}
-                  {billingStatus[s.id] && billingStatus[s.id] !== 'sending' && billingStatus[s.id] !== 'sent' && (
-                    <span className="field-error" style={{ fontSize: '0.78rem' }}>{billingStatus[s.id]}</span>
-                  )}
-                </div>
-              </div>
-            ))}
+            {selectedOwner.stays.map(renderStayCard)}
           </div>
         </div>
       </div>
@@ -1251,110 +1379,31 @@ function AdminView({
           </label>
           {unbilledStays.length === 0 && <p className="empty" style={{ padding: '8px 0' }}>Nothing to bill right now.</p>}
           <div className="stay-history">
-            {unbilledStays.map(s => {
-              const isExpanded = expandedUnbilledId === s.id;
-              const isEditing = editingUnbilledId === s.id;
-              return (
-                <div key={s.id} className="stay-card">
-                  <div
-                    className="stay-dates"
-                    style={{ cursor: 'pointer' }}
-                    onClick={() => {
-                      setExpandedUnbilledId(isExpanded ? null : s.id);
-                      if (isExpanded) setEditingUnbilledId(null);
-                    }}
-                  >
-                    <span>{s.dogNames.join(' & ')} — {s.ownerName}</span>
-                  </div>
-                  <div className="stay-meta">{formatDate(s.check_in)} – {formatDate(s.check_out)}</div>
-                  {isExpanded && (
-                    <div style={{ marginTop: 8 }}>
-                      <div className="stay-meta">{s.ownerPhone}</div>
-                      {!isEditing ? (
-                        <>
-                          <div className="stay-meta">
-                            Drop-off: {billingFieldFor(s, 'dropTime', s.drop_time ? s.drop_time.slice(0, 5) : '') || '—'} · Pickup: {billingFieldFor(s, 'pickupTime', s.pickup_time ? s.pickup_time.slice(0, 5) : '') || '—'}
-                          </div>
-                          <div className="stay-meta">
-                            Estimated cost: {(() => {
-                              const fc = billingFieldFor(s, 'finalCost', s.estimated_cost != null ? String(s.estimated_cost) : '');
-                              return fc ? formatMoney(Number(fc)) : '—';
-                            })()}
-                          </div>
-                        </>
-                      ) : (
-                        <>
-                          <div className="field-row" style={{ marginTop: 8 }}>
-                            <Field label="Check-in">
-                              <input type="date" value={billingFieldFor(s, 'checkIn', s.check_in)} onChange={e => updateBillingField(s.id, 'checkIn', e.target.value)} />
-                            </Field>
-                            <Field label="Check-out">
-                              <input type="date" value={billingFieldFor(s, 'checkOut', s.check_out)} onChange={e => updateBillingField(s.id, 'checkOut', e.target.value)} />
-                            </Field>
-                          </div>
-                          <div className="field-row">
-                            <Field label="Drop-off time">
-                              <input type="time" value={billingFieldFor(s, 'dropTime', s.drop_time ? s.drop_time.slice(0, 5) : '')} onChange={e => updateBillingField(s.id, 'dropTime', e.target.value)} />
-                            </Field>
-                            <Field label="Pickup time">
-                              <input type="time" value={billingFieldFor(s, 'pickupTime', s.pickup_time ? s.pickup_time.slice(0, 5) : '')} onChange={e => updateBillingField(s.id, 'pickupTime', e.target.value)} />
-                            </Field>
-                          </div>
-                          <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 8, flexWrap: 'wrap' }}>
-                            <span style={{ fontSize: '0.85rem' }}>$</span>
-                            <input
-                              type="number"
-                              value={billingFieldFor(s, 'finalCost', s.estimated_cost != null ? String(s.estimated_cost) : '')}
-                              onChange={e => updateBillingField(s.id, 'finalCost', e.target.value)}
-                              style={{ width: 80, padding: '6px 10px', border: '1.5px solid #D5D9DE', borderRadius: 6, fontSize: '0.85rem' }}
-                            />
-                            <button className="btn-secondary" style={{ padding: '4px 10px', fontSize: '0.78rem' }} onClick={() => recalculateBilling(s)}>Recalculate</button>
-                          </div>
-                        </>
-                      )}
-                      <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 8, flexWrap: 'wrap' }}>
-                        <button className="btn-secondary" style={{ padding: '4px 10px', fontSize: '0.78rem' }} onClick={() => setEditingUnbilledId(isEditing ? null : s.id)}>
-                          {isEditing ? 'Done Editing' : 'Edit'}
-                        </button>
-                        <button
-                          className="btn-primary"
-                          style={{ padding: '4px 10px', fontSize: '0.78rem' }}
-                          disabled={sendingBillId === s.id}
-                          onClick={() => sendBill(s)}
-                        >
-                          {sendingBillId === s.id ? 'Sending...' : 'Send Billing Text'}
-                        </button>
-                        {unbilledStatus[s.id] && (
-                          <span className="field-error" style={{ fontSize: '0.78rem' }}>{unbilledStatus[s.id]}</span>
-                        )}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              );
-            })}
+            {unbilledStays.map(renderStayCard)}
           </div>
         </div>
 
         <div className="rate-setting past-stays-section">
           <label className="field-label">Past Stays</label>
-          <input className="search-input" placeholder="Search by dog or owner name..." value={search} onChange={e => setSearch(e.target.value)} />
-          {filtered.length === 0 && !loading && <p className="empty">No records found.</p>}
+          <input className="search-input" placeholder="Search by owner or dog name..." value={search} onChange={e => setSearch(e.target.value)} />
+          {filteredOwners.length === 0 && !loading && <p className="empty">No records found.</p>}
           <div className="dog-list">
-            {filtered.map((d, i) => (
-              <div key={i} className="dog-row" onClick={() => setSelected(d)}>
+            {filteredOwners.map((o, i) => (
+              <div key={i} className="dog-row" onClick={() => setSelectedOwnerPhone(o.ownerPhone)}>
                 <div className="dog-row-left">
-                  <div className="dog-row-name">{d.name}</div>
-                  <div className="dog-row-owner">{d.owner?.name}</div>
+                  <div className="dog-row-name">{o.ownerName}</div>
+                  <div className="dog-row-owner">{o.dogNames.join(', ')}</div>
                 </div>
                 <div className="dog-row-right">
-                  <span className="stay-count">{d.stays.length} stay{d.stays.length !== 1 ? 's' : ''}</span>
+                  <span className="stay-count">{o.stays.length} stay{o.stays.length !== 1 ? 's' : ''}</span>
                   <span className="chevron">›</span>
                 </div>
               </div>
             ))}
           </div>
         </div>
+
+        <h3 className="admin-section-header">Site Settings</h3>
 
         <div className="rate-setting day-rate-editor">
           <label className="field-label">Day Rate (per 24 hours)</label>

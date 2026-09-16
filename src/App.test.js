@@ -1,6 +1,6 @@
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import App, { formatDate, calcAge, calcCost, isHolidayNight, getHolidayWindows, todayISO, formatMoney } from './App';
+import App, { formatDate, calcAge, calcCost, calcCostBreakdown, isHolidayNight, getHolidayWindows, todayISO, formatMoney } from './App';
 import { supabase } from './supabase';
 
 jest.mock('./supabase');
@@ -401,6 +401,43 @@ describe('calcCost', () => {
 
   test('defaults to 1 dog when numberOfDogs is omitted', () => {
     expect(calcCost('2026-03-10', '2026-03-10', '09:00', '15:00', 100)).toBe('100.00');
+  });
+});
+
+describe('calcCostBreakdown', () => {
+  test('returns null under the same invalid-input conditions as calcCost', () => {
+    expect(calcCostBreakdown('', '2026-03-11', '09:00', '09:00', 100)).toBeNull();
+    expect(calcCostBreakdown('2026-03-11', '2026-03-10', '09:00', '09:00', 100)).toBeNull();
+  });
+
+  test('total matches calcCost exactly for a plain (no holiday, 1 dog) stay', () => {
+    const b = calcCostBreakdown('2026-03-10', '2026-03-12', '09:00', '09:00', 100);
+    expect(b.nights).toBe(2);
+    expect(b.holidayNights).toBe(0);
+    expect(b.subtotal).toBe(200);
+    expect(b.holidayExtra).toBe(0);
+    expect(b.total).toBe(200);
+    expect(b.total.toFixed(2)).toBe(calcCost('2026-03-10', '2026-03-12', '09:00', '09:00', 100));
+  });
+
+  test('splits a holiday night out into holidayExtra, still matching calcCost\'s total', () => {
+    // New Year's Day - 1 night @ $100 + 30% holiday upcharge
+    const b = calcCostBreakdown('2026-01-01', '2026-01-02', '09:00', '09:00', 100);
+    expect(b.holidayNights).toBe(1);
+    expect(b.subtotal).toBe(100);
+    expect(b.holidayExtra).toBe(30);
+    expect(b.total).toBe(130);
+    expect(b.total.toFixed(2)).toBe(calcCost('2026-01-01', '2026-01-02', '09:00', '09:00', 100));
+  });
+
+  test('multi-dog discount factors into both subtotal and holidayExtra', () => {
+    // 1 night, 2 dogs, New Year's Day: dog1 $100 + dog2 $90 = $190 base,
+    // holiday extra 30% of that = $57 -> total $247
+    const b = calcCostBreakdown('2026-01-01', '2026-01-02', '09:00', '09:00', 100, 2);
+    expect(b.subtotal).toBe(190);
+    expect(b.holidayExtra).toBe(57);
+    expect(b.total).toBe(247);
+    expect(b.total.toFixed(2)).toBe(calcCost('2026-01-01', '2026-01-02', '09:00', '09:00', 100, 2));
   });
 });
 
@@ -966,6 +1003,14 @@ describe('Step 1 — Owner Info', () => {
     expect(screen.getByText('Edit')).toBeInTheDocument();
     expect(screen.queryByText('Delete')).not.toBeInTheDocument(); // can't delete the only dog
     expect(screen.queryByText(/off each additional dog/)).not.toBeInTheDocument();
+  });
+
+  test('shows "Needs updating" for an incomplete dog, clearing once its profile is filled in', async () => {
+    await goToOwnerStep();
+    expect(screen.getByText('Needs updating')).toBeInTheDocument();
+    fireEvent.click(screen.getByText('Edit'));
+    await fillDogPage();
+    expect(screen.queryByText('Needs updating')).not.toBeInTheDocument();
   });
 
   test('"+ Add Dog" opens the new dog\'s own edit page directly', async () => {
@@ -1744,6 +1789,28 @@ describe('Admin — logged in — Unbilled Stays', () => {
     await waitFor(() => expect(costInput.value).not.toBe(''));
   });
 
+  test('Daily Rate and Holiday Upcharge % are per-stay editable (defaulting to the site settings), with the full math shown, and drive Recalculate', async () => {
+    await loginAsAdminWithUnbilled();
+    const card = screen.getByText('Fido & Bud — Kim').closest('.stay-card');
+    fireEvent.click(screen.getByText('Fido & Bud — Kim'));
+    fireEvent.click(within(card).getByText('Edit'));
+
+    expect(within(card).getByText('Daily Rate')).toBeInTheDocument();
+    expect(within(card).getByText('Holiday Upcharge %')).toBeInTheDocument();
+    const dayRateInput = within(card).getByDisplayValue('105'); // defaults to the global day rate
+    within(card).getByDisplayValue('30'); // defaults to the global holiday upcharge %
+
+    fireEvent.change(dayRateInput, { target: { value: '200' } });
+    fireEvent.click(within(card).getByText('Recalculate'));
+
+    const stay = UNBILLED_DOGS[1].stays[0]; // stay-shared
+    const expected = calcCostBreakdown(
+      stay.check_in, stay.check_out, stay.drop_time.slice(0, 5), stay.pickup_time.slice(0, 5),
+      200, stay.number_of_dogs, 0.10, 0.30,
+    ).total.toFixed(2);
+    await waitFor(() => expect(within(card).getByDisplayValue(expected)).toBeInTheDocument());
+  });
+
   test('sends the bill (SMS first, then marks billed) and the stay drops off the list - no Edit click required first', async () => {
     await loginAsAdminWithUnbilled();
     fireEvent.click(screen.getByText('Fido & Bud — Kim'));
@@ -1819,11 +1886,11 @@ describe('Admin — logged in — Ideas & Bugs', () => {
     }));
   });
 
-  test('← All Dogs returns to the dog list', async () => {
+  test('← Admin returns to the main admin panel', async () => {
     await loginAsAdminWithFeedback();
     fireEvent.click(screen.getByText('💡 Ideas & Bugs'));
     await screen.findByText('Ideas & Bugs', { selector: 'h2' });
-    fireEvent.click(screen.getByText('← All Dogs'));
+    fireEvent.click(screen.getByText('← Admin'));
     expect(await screen.findByText('Bayview Boarding — Admin')).toBeInTheDocument();
   });
 });
@@ -1888,21 +1955,21 @@ describe('Admin — logged in — Testers', () => {
     expect(await screen.findByText(/Sent to 1/)).toBeInTheDocument();
   });
 
-  test('← All Dogs returns to the dog list', async () => {
+  test('← Admin returns to the main admin panel', async () => {
     await loginAsAdminWithTesters();
     fireEvent.click(screen.getByText('📢 Testers'));
     await screen.findByText('Testers', { selector: 'h2' });
-    fireEvent.click(screen.getByText('← All Dogs'));
+    fireEvent.click(screen.getByText('← Admin'));
     expect(await screen.findByText('Bayview Boarding — Admin')).toBeInTheDocument();
   });
 });
 
 describe('Admin — logged in', () => {
-  test('filters the dog list by search term', async () => {
+  test('filters the owner list by owner or dog name', async () => {
     await loginAsAdmin();
-    await userEvent.type(screen.getByPlaceholderText('Search by dog or owner name...'), 'Bud');
-    expect(screen.getByText('Bud')).toBeInTheDocument();
-    expect(screen.queryByText('Choco')).not.toBeInTheDocument();
+    await userEvent.type(screen.getByPlaceholderText('Search by owner or dog name...'), 'Bud');
+    expect(screen.getByText('Kim')).toBeInTheDocument();
+    expect(screen.queryByText('Estee')).not.toBeInTheDocument();
   });
 
   test('close button closes the admin overlay', async () => {
@@ -1911,39 +1978,43 @@ describe('Admin — logged in', () => {
     expect(screen.queryByText('Bayview Boarding — Admin')).not.toBeInTheDocument();
   });
 
-  test('selecting a dog shows its full stay history, including flags and notes', async () => {
+  test('selecting an owner shows their full past-stay history, including per-dog flags and notes', async () => {
     await loginAsAdmin();
-    fireEvent.click(screen.getByText('Bud'));
-    expect(await screen.findByRole('heading', { name: 'Bud' })).toBeInTheDocument();
-    // owner name shares a line with the dog's current breed/age, so this
-    // is a partial match rather than the line's full text
-    expect(screen.getByText(/Kim/)).toBeInTheDocument();
-    expect(screen.getByText('Est. $210')).toBeInTheDocument();
-    expect(screen.getByText(/Loves belly rubs/)).toBeInTheDocument();
-    expect(screen.getByText(/DOB:/)).toBeInTheDocument();
+    fireEvent.click(screen.getByText('Kim'));
+    expect(await screen.findByRole('heading', { name: 'Kim' })).toBeInTheDocument();
+    expect(screen.getByText('Bud')).toBeInTheDocument(); // dog-names subtitle
 
-    // Bud has 2 stays (Sept + June) — most recent check-in sorts first
+    // Bud has 2 past stays (Sept + June) — most recent check-in sorts first
     const budCards = document.querySelectorAll('.stay-card');
     expect(budCards).toHaveLength(2);
     expect(budCards[0].textContent).toContain('09/01/2026');
     expect(budCards[1].textContent).toContain('06/01/2026');
 
-    fireEvent.click(screen.getByText(/All Dogs/));
-    fireEvent.click(screen.getByText('Choco'));
-    expect(await screen.findByRole('heading', { name: 'Choco' })).toBeInTheDocument();
-    expect(screen.getByText(/Aggression noted: Barks at mail carrier/)).toBeInTheDocument();
-    expect(screen.getByText(/Health note: Mild hip dysplasia/)).toBeInTheDocument();
+    // collapsed by default - click to expand
+    fireEvent.click(within(budCards[0]).getByText(/Bud — Kim/));
+    expect(within(budCards[0]).getByText(/Billed cost: \$210\.00/)).toBeInTheDocument();
+    expect(within(budCards[0]).getByText(/Loves belly rubs/)).toBeInTheDocument();
+    expect(within(budCards[0]).getByText(/DOB:/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByText(/All Owners/));
+    fireEvent.click(screen.getByText('Estee'));
+    expect(await screen.findByRole('heading', { name: 'Estee' })).toBeInTheDocument();
+    const chocoCard = document.querySelector('.stay-card');
+    fireEvent.click(within(chocoCard).getByText(/Choco — Estee/));
+    expect(within(chocoCard).getByText(/Aggression noted: Barks at mail carrier/)).toBeInTheDocument();
+    expect(within(chocoCard).getByText(/Health note: Mild hip dysplasia/)).toBeInTheDocument();
   });
 
   test('a stay with a waiver snapshot offers to show it, collapsed by default; one without shows no such control', async () => {
     await loginAsAdmin();
-    fireEvent.click(screen.getByText('Bud'));
-    await screen.findByRole('heading', { name: 'Bud' });
+    fireEvent.click(screen.getByText('Kim'));
+    await screen.findByRole('heading', { name: 'Kim' });
     const budCards = document.querySelectorAll('.stay-card');
 
-    // stay-1 (Sept) has a waiver_snapshot in the fixture; stay-3 (June) does not
+    // stay-1 (Sept) has a waiver_snapshot in the fixture; stay-3 (June) does not.
+    // Only one stay expands at a time, so this checks each in turn.
+    fireEvent.click(within(budCards[0]).getByText(/Bud — Kim/));
     expect(within(budCards[0]).getByText('View waiver as signed')).toBeInTheDocument();
-    expect(within(budCards[1]).queryByText('View waiver as signed')).not.toBeInTheDocument();
     expect(within(budCards[0]).queryByText('Test waiver body text.')).not.toBeInTheDocument();
 
     fireEvent.click(within(budCards[0]).getByText('View waiver as signed'));
@@ -1952,18 +2023,22 @@ describe('Admin — logged in', () => {
 
     fireEvent.click(within(budCards[0]).getByText('Hide waiver as signed'));
     expect(within(budCards[0]).queryByText('Test waiver body text.')).not.toBeInTheDocument();
+
+    fireEvent.click(within(budCards[1]).getByText(/Bud — Kim/));
+    expect(within(budCards[1]).queryByText('View waiver as signed')).not.toBeInTheDocument();
   });
 
-  test('Billing SMS: final cost defaults to the estimate, and Send calls send-confirmation with type billing', async () => {
+  test('Billing SMS: Edit shows the final cost defaulting to the estimate, and Send calls send-confirmation with type billing', async () => {
     await loginAsAdmin();
-    fireEvent.click(screen.getByText('Bud'));
-    await screen.findByRole('heading', { name: 'Bud' });
+    fireEvent.click(screen.getByText('Kim'));
+    await screen.findByRole('heading', { name: 'Kim' });
 
-    const budCards = document.querySelectorAll('.stay-card');
-    const costInput = budCards[0].querySelector('input[type="number"]');
-    expect(costInput).toHaveValue(210); // defaults to that stay's estimate
+    const budCard = document.querySelectorAll('.stay-card')[0];
+    fireEvent.click(within(budCard).getByText(/Bud — Kim/));
+    fireEvent.click(within(budCard).getByText('Edit'));
+    expect(within(budCard).getByDisplayValue('210')).toBeInTheDocument(); // defaults to that stay's estimate
 
-    fireEvent.click(within(budCards[0]).getByText('Send Billing Text'));
+    fireEvent.click(within(budCard).getByText('Send Billing Text'));
     await waitFor(() => expect(supabase.functions.invoke).toHaveBeenCalledWith('send-confirmation', {
       body: {
         type: 'billing',
@@ -1974,18 +2049,19 @@ describe('Admin — logged in', () => {
         message_template: expect.any(String), // the admin-editable billing template (settings.sms_billing)
       },
     }));
-    expect(await within(budCards[0]).findByText('✓ Sent')).toBeInTheDocument();
   });
 
-  test('Billing SMS: admin can adjust the final cost before sending', async () => {
+  test('Billing SMS: admin can adjust the final cost before (re)sending', async () => {
     await loginAsAdmin();
-    fireEvent.click(screen.getByText('Bud'));
-    await screen.findByRole('heading', { name: 'Bud' });
+    fireEvent.click(screen.getByText('Kim'));
+    await screen.findByRole('heading', { name: 'Kim' });
 
-    const budCards = document.querySelectorAll('.stay-card');
-    const costInput = budCards[0].querySelector('input[type="number"]');
+    const budCard = document.querySelectorAll('.stay-card')[0];
+    fireEvent.click(within(budCard).getByText(/Bud — Kim/));
+    fireEvent.click(within(budCard).getByText('Edit'));
+    const costInput = within(budCard).getByDisplayValue('210');
     fireEvent.change(costInput, { target: { value: '250' } });
-    fireEvent.click(within(budCards[0]).getByText('Send Billing Text'));
+    fireEvent.click(within(budCard).getByText('Send Billing Text'));
 
     await waitFor(() => expect(supabase.functions.invoke).toHaveBeenCalledWith('send-confirmation', {
       body: expect.objectContaining({ final_cost: 250 }),
@@ -1994,10 +2070,11 @@ describe('Admin — logged in', () => {
 
   test('Billing SMS: refuses to send with no amount entered', async () => {
     await loginAsAdmin();
-    fireEvent.click(screen.getByText('Choco')); // Choco's stay has a null estimate
-    await screen.findByRole('heading', { name: 'Choco' });
+    fireEvent.click(screen.getByText('Estee')); // Choco's stay has a null estimate
+    await screen.findByRole('heading', { name: 'Estee' });
 
     const chocoCard = document.querySelector('.stay-card');
+    fireEvent.click(within(chocoCard).getByText(/Choco — Estee/));
     fireEvent.click(within(chocoCard).getByText('Send Billing Text'));
     expect(await within(chocoCard).findByText('Enter a valid amount first')).toBeInTheDocument();
     expect(supabase.functions.invoke).not.toHaveBeenCalledWith('send-confirmation', expect.any(Object));
@@ -2013,29 +2090,70 @@ describe('Admin — logged in', () => {
     await userEvent.type(screen.getByPlaceholderText('Password'), 'correct-password');
     fireEvent.click(screen.getByText('Sign In'));
     await screen.findByText('Bayview Boarding — Admin');
-    fireEvent.click(screen.getByText('Bud'));
-    await screen.findByRole('heading', { name: 'Bud' });
+    fireEvent.click(screen.getByText('Kim'));
+    await screen.findByRole('heading', { name: 'Kim' });
 
     const budCard = document.querySelectorAll('.stay-card')[0];
+    fireEvent.click(within(budCard).getByText(/Bud — Kim/));
     fireEvent.click(within(budCard).getByText('Send Billing Text'));
     expect(await within(budCard).findByText('Failed to send. Please try again.')).toBeInTheDocument();
-    expect(within(budCard).queryByText('✓ Sent')).not.toBeInTheDocument();
   });
 
-  test('back button returns from the detail view to the dog list', async () => {
+  test('← All Owners returns from the owner detail view to Past Stays', async () => {
     await loginAsAdmin();
-    fireEvent.click(screen.getByText('Bud'));
-    await screen.findByRole('heading', { name: 'Bud' });
-    fireEvent.click(screen.getByText(/All Dogs/));
+    fireEvent.click(screen.getByText('Kim'));
+    await screen.findByRole('heading', { name: 'Kim' });
+    fireEvent.click(screen.getByText(/All Owners/));
     expect(await screen.findByText('Bayview Boarding — Admin')).toBeInTheDocument();
   });
 
-  test('close button in the detail view closes the admin overlay', async () => {
+  test('close button in the owner detail view closes the admin overlay', async () => {
     await loginAsAdmin();
-    fireEvent.click(screen.getByText('Bud'));
-    await screen.findByRole('heading', { name: 'Bud' });
+    fireEvent.click(screen.getByText('Kim'));
+    await screen.findByRole('heading', { name: 'Kim' });
     fireEvent.click(screen.getByText('✕'));
-    expect(screen.queryByRole('heading', { name: 'Bud' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Kim' })).not.toBeInTheDocument();
+  });
+
+  test('"Site Settings" header separates the lookup sections from the settings sections below', async () => {
+    await loginAsAdmin();
+    expect(screen.getByText('Site Settings')).toBeInTheDocument();
+  });
+
+  test('Past Stays: an owner with 2 dogs on a shared billed stay gets one owner row and one combined-name stay card', async () => {
+    const sharedStayDogs = [
+      {
+        id: 'dog-don', name: 'Don', breed: 'Lab', dob: null, spay_neuter: 'yes',
+        aggression_history: 'no', aggression_detail: '', health_concerns: 'no', health_detail: '',
+        owner: { name: 'Pat', phone: '6505553333', email: 'pat@test.com' },
+        stays: [{
+          id: 'stay-shared-billed', check_in: '2026-08-01', check_out: '2026-08-03',
+          drop_time: '09:00:00', pickup_time: '09:00:00', estimated_cost: 300,
+          number_of_dogs: 2, submitted_at: '2026-07-30T10:00:00Z', billed_at: '2026-08-04T00:00:00Z',
+        }],
+      },
+      {
+        id: 'dog-bob', name: 'Bob', breed: 'Poodle', dob: null, spay_neuter: 'yes',
+        aggression_history: 'no', aggression_detail: '', health_concerns: 'no', health_detail: '',
+        owner: { name: 'Pat', phone: '6505553333', email: 'pat@test.com' },
+        stays: [{
+          id: 'stay-shared-billed', check_in: '2026-08-01', check_out: '2026-08-03',
+          drop_time: '09:00:00', pickup_time: '09:00:00', estimated_cost: 300,
+          number_of_dogs: 2, submitted_at: '2026-07-30T10:00:00Z', billed_at: '2026-08-04T00:00:00Z',
+        }],
+      },
+    ];
+    await loginAsAdmin(sharedStayDogs, 1);
+
+    // One row for owner Pat, not two (one per dog)
+    expect(screen.getAllByText('Pat')).toHaveLength(1);
+    expect(screen.getByText('Don, Bob')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByText('Pat'));
+    await screen.findByRole('heading', { name: 'Pat' });
+    const cards = document.querySelectorAll('.stay-card');
+    expect(cards).toHaveLength(1); // deduped, not one per dog
+    expect(within(cards[0]).getByText('Don & Bob — Pat')).toBeInTheDocument();
   });
 
   test('updates and displays the day rate after Save', async () => {

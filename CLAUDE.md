@@ -14,8 +14,13 @@ Kim Miller and Estee Fletter at 210 Bayview Drive, San Rafael, CA.
   page — breed/DOB/spay-neuter/aggression/health — inline, in place of
   the owner page, ending with "Done"/"← Back to Dogs") and "Delete"
   buttons, plus "+ Add Dog" (as many as you like, opens the new dog's
-  page directly). Continue only enables once every listed dog passes its
-  own required-field check, then goes straight to Stay Dates - dog pages
+  page directly). Any dog failing dogIsComplete() shows a red "Needs
+  updating" label next to its name (Sept 18, 2026) - previously the only
+  sign was Continue staying disabled with no visible reason why, which
+  especially mattered right after a returning-client lookup autofill
+  (fills name/breed/DOB/spay-neuter but never aggression/health).
+  Continue only enables once every listed dog passes its own
+  required-field check, then goes straight to Stay Dates - dog pages
   are edited in place from this list rather than forced sequential
   top-level wizard steps (Sept 17, 2026 (4) reorg)
 - Aggression/health questions warn visibly if left blank (previously
@@ -42,29 +47,47 @@ Kim Miller and Estee Fletter at 210 Bayview Drive, San Rafael, CA.
   supabase/functions/send-pickup-reminders), and billing texts (admin-
   triggered, editable final cost, not auto-sent — the estimate can be
   wrong by pickup). A2P 10DLC is APPROVED (confirmed via the API Sept
-  16, 2026) - real sends actually go through
-- Admin panel, top to bottom (reordered Sept 17, 2026 (2) and (4)): an
-  "Unbilled Stays" review list — every never-billed stay at all, past,
-  in-progress, or future, sorted earliest check-in first (previously
-  limited to already-checked-out stays); each card is a one-line summary
-  until clicked, which expands it to show the stay's details plus "Edit"
-  (reveals the correctable dates/times/cost + Recalculate) and "Send
-  Billing Text" (works with or without opening Edit first - see
-  billed_at below). Below that, "Past Stays" — the owner search + dog
-  list, now scoped to fully billed stays only (the direct counterpart to
-  Unbilled Stays; together the two cover every signed agreement on file,
-  which is why the old running "{n} signed agreements on file" count was
-  deleted rather than kept). Then, at the very bottom, a "💡 Ideas &
-  Bugs" section (Sept 16 (8) — see feedback below) with an open-count
-  badge and a "📢 Testers" section (Sept 17 — see testers below) to
-  maintain a tester list and broadcast a personally-greeted SMS to all
-  of them, then day rate/discount/holiday/vet-list/packing-list/
-  SMS-template settings. Each stay in a dog's (billed) history also
-  still shows its own "Send Billing Text" control and a "View waiver as
-  signed" toggle (Sept 16 (5) — see waiver_snapshot below). Reached via
-  the nav menu's "Admin" item (Sept 16, 2026 — reversed the earlier "no
-  visible entry point" decision on request) or the bookmarked ?admin
-  URL; either way it's still fully password-gated server-side
+  16, 2026) - real sends actually go through. The billing text correctly
+  pluralizes for a shared multi-dog stay ("Don & Bob are ready for
+  pickup", not "is" - dogVerb(), Sept 18, 2026) and formats every dollar
+  amount with commas and 2 decimals ("$1,795.50", not "$1795.5" -
+  formatDollars()); "Reply STOP to opt out." sits below the "— Kim &
+  Estee" signature line (with a blank line before it) in both the
+  billing and drop-off-reminder texts, not directly above it
+- Admin panel, top to bottom (reordered Sept 17 (2)(4), math/grouping
+  Sept 18): an "Unbilled Stays" review list — every never-billed stay at
+  all, past, in-progress, or future, sorted earliest check-in first
+  (previously limited to already-checked-out stays); each card is a
+  one-line summary until clicked, which expands it to show the stay's
+  details plus "Edit" (reveals correctable dates/times, and Daily
+  Rate/Holiday Upcharge % fields defaulting to the site's own settings -
+  Recalculate shows the full line-item math, not just the final number:
+  nights × rate × dog multiplier, + holiday-night upcharge if any,
+  = total - see calcCostBreakdown) and "Send Billing Text" (works with
+  or without opening Edit first - see billed_at below). Below that,
+  "Past Stays" — grouped by OWNER now, not by dog (Sept 18, 2026 - an
+  owner with 2 dogs used to get 2 rows), scoped to fully billed stays
+  only (the direct counterpart to Unbilled Stays; together the two cover
+  every signed agreement on file, which is why the old running "{n}
+  signed agreements on file" count was deleted rather than kept).
+  Opening an owner lists their past stays as the exact same
+  click-to-expand card Unbilled Stays uses - a shared multi-dog stay
+  shows as one card naming every dog, and "Edit"/"Send Billing Text"
+  work identically for a first bill or a correction-and-resend (billStay
+  just patches fields and re-stamps billed_at either way). A "Site
+  Settings" header (Sept 18, 2026) then separates those two day-to-day
+  lookup sections from everything below: a "💡 Ideas & Bugs" section
+  (Sept 16 (8) — see feedback below) with an open-count badge and a
+  "📢 Testers" section (Sept 17 — see testers below) to maintain a
+  tester list and broadcast a personally-greeted SMS to all of them,
+  then day rate/discount/holiday/vet-list/packing-list/SMS-template
+  settings, both feedback/testers moved to the very bottom of the panel
+  (Sept 17 (4)). Each stay card also still offers a "View waiver as
+  signed" toggle when that stay has one (Sept 16 (5) — see
+  waiver_snapshot below). Reached via the nav menu's "Admin" item (Sept
+  16, 2026 — reversed the earlier "no visible entry point" decision on
+  request) or the bookmarked ?admin URL; either way it's still fully
+  password-gated server-side
 - "Learn more about us" page (content from the Bayview Boarding Rover
   profile — bio, home characteristics, photos, all 5-star reviews with
   dates linking out to Rover, an approximate-location map). Reached via
@@ -192,7 +215,7 @@ call itself is dropped, not for a routine secret rotation.
 - src/App.js — main app
 - src/settings.js — all configurable values (rates, vets, messages, packing list)
 - src/waiver.js — full waiver text
-- src/App.test.js — 160 passing tests (TDD), Supabase mocked via src/__mocks__/supabase.js
+- src/App.test.js — 168 passing tests (TDD), Supabase mocked via src/__mocks__/supabase.js
 - supabase/functions/send-contact/index.ts — public Contact Us form handler: relays name/email-or-phone/message to Kim & Estee by SMS (reuses KIM_PHONE/ESTEE_PHONE). Deployed normally (no --no-verify-jwt) since it's called via the Supabase JS client like settings/lookup-client/submit-booking
 - supabase/functions/feedback/index.ts — "Submit Idea": public submit (no password) + admin list/status-update (password) for the feedback queue
 - supabase/functions/testers/index.ts — tester broadcast list: entirely admin-password-gated list/add/remove/notify (no public branch at all); notify greets each active tester by their own first name
@@ -201,7 +224,7 @@ call itself is dropped, not for a routine secret rotation.
 - supabase/functions/send-reminders/index.ts — daily cron target (pg_cron + pg_net, see the migration): finds stays checking in tomorrow, fetches the current sms_reminder template + packing_list from `settings`, texts each via send-confirmation, marks reminder_sent_at. Deployed with `--no-verify-jwt`; checks its own CRON_SECRET instead (see Data model for how that secret is set up without ever being committed) - be careful to keep that flag on every redeploy (a plain `supabase functions deploy send-reminders` silently re-enables JWT verification and would break the cron, same bug class as the receive-sms incident)
 - supabase/functions/settings/index.ts — public read / password-gated write of day rate, multi-dog discount, holiday upcharge, vet list, packing list, and the 4 SMS templates (confirmation/drop-off reminder/pickup reminder/billing)
 - supabase/functions/submit-booking/index.ts — handles booking submission: find-or-create owner (by phone) and each dog (by owner+name), inserts the stay (incl. waiver_snapshot) + stay_dogs snapshot links (service role key)
-- supabase/functions/send-confirmation/index.ts — Twilio SMS function (outbound); accepts an optional message_template (the admin-edited settings text, with {placeholders} filled by fillTemplate) + packing_list from the caller; falls back to its own hardcoded 4-message-type logic (confirmation/reminder/billing/pickup) if no template is given. Called directly by the client at booking time, and by send-reminders/send-pickup-reminders/the admin panel for the other three - has its own Deno test suite (index.test.ts), added Sept 16 (5)
+- supabase/functions/send-confirmation/index.ts — Twilio SMS function (outbound); accepts an optional message_template (the admin-edited settings text, with {placeholders} filled by fillTemplate, including {dogVerb} - "is"/"are", Sept 18, 2026) + packing_list from the caller; falls back to its own hardcoded 4-message-type logic (confirmation/reminder/billing/pickup) if no template is given. Every dollar placeholder ({finalCost}/{estimatedCost}) is run through formatDollars() first (comma + always 2 decimals). Called directly by the client at booking time, and by send-reminders/send-pickup-reminders/the admin panel for the other three - has its own Deno test suite (index.test.ts), added Sept 16 (5)
 - supabase/functions/receive-sms/index.ts — inbound SMS webhook: auto-reply + relay to Kim/Estee. Deploy with `--no-verify-jwt` (see comment at top of file) or Twilio's webhook calls silently fail
 - supabase/functions/_shared/contact.ts — pure text builders + Twilio signature validator, shared by send-confirmation and receive-sms, unit-tested via `deno test`
 - supabase/functions/admin-data/index.ts — server-side admin password check + every dog (profile + owner + stay history) (service role key, never exposed to client). Also handles billStay (Sept 17, 2026): saves corrected check-in/out/drop/pickup/cost and marks billed_at, returning the refreshed dog list

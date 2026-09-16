@@ -41,6 +41,25 @@ export function fillTemplate(template: string, vars: Record<string, string>): st
   return template.replace(/\{(\w+)\}/g, (match, key) => (key in vars ? vars[key] : match));
 }
 
+// Comma-separated, always 2 decimals - "1795.5" -> "1,795.50" (Sept 18,
+// 2026 - a bare `${amount}` was going out in real texts as "$1795.5").
+// Non-numeric input (including "") passes through unchanged rather than
+// becoming "NaN" in a real message.
+export function formatDollars(amount: unknown): string {
+  if (amount === null || amount === undefined || amount === "") return "";
+  const n = Number(amount);
+  if (Number.isNaN(n)) return String(amount);
+  const [whole, decimal] = n.toFixed(2).split(".");
+  return `${whole.replace(/\B(?=(\d{3})+(?!\d))/g, ",")}.${decimal}`;
+}
+
+// "Don" -> "is", "Don & Bob" -> "are" - the billing text names every dog on
+// a shared stay joined with " & " (see App.js's sendBill), so the verb has
+// to agree with however many names actually made it in.
+export function dogVerb(dogName: string | undefined): string {
+  return dogName && dogName.includes(" & ") ? "are" : "is";
+}
+
 // Exported (rather than only passed inline to serve()) so it can be unit
 // tested directly with a constructed Request - no live server needed.
 export async function handleRequest(req: Request): Promise<Response> {
@@ -73,23 +92,23 @@ export async function handleRequest(req: Request): Promise<Response> {
       // {kimPhone}/{esteePhone}, so appendContactNote is NOT also called
       // here - that would duplicate it.
       message = fillTemplate(message_template, {
-        firstName, dogName: dog_name || "", dropDate, dropTime: dropTimeStr,
+        firstName, dogName: dog_name || "", dogVerb: dogVerb(dog_name), dropDate, dropTime: dropTimeStr,
         pickDate, pickTime: pickTimeStr, pickupDate: pickDate, pickupTime: pickTimeStr,
-        estimatedCost: estimated_cost != null ? String(estimated_cost) : "",
-        finalCost: final_cost != null ? String(final_cost) : "",
+        estimatedCost: formatDollars(estimated_cost),
+        finalCost: formatDollars(final_cost),
         packingList: packingListStr, kimPhone: KIM_PHONE, esteePhone: ESTEE_PHONE,
       });
     } else if (type === "reminder") {
-      message = `Hi ${firstName}! Just a reminder that ${dog_name}'s stay at Bayview Boarding starts tomorrow at ${dropTimeStr}. Please bring: ${packingListStr}. See you then! Reply STOP to opt out. — Kim & Estee`;
+      message = `Hi ${firstName}! Just a reminder that ${dog_name}'s stay at Bayview Boarding starts tomorrow at ${dropTimeStr}. Please bring: ${packingListStr}. See you then! — Kim & Estee\n\nReply STOP to opt out.`;
       message = appendContactNote(message, KIM_PHONE, ESTEE_PHONE);
     } else if (type === "billing") {
-      message = `Hi ${firstName}! ${dog_name} is ready for pickup. Your total for this stay is $${final_cost}. Thanks for choosing Bayview Boarding! Reply STOP to opt out. — Kim & Estee`;
+      message = `Hi ${firstName}! ${dog_name} ${dogVerb(dog_name)} ready for pickup. Your total for this stay is $${formatDollars(final_cost)}. Thanks for choosing Bayview Boarding! — Kim & Estee\n\nReply STOP to opt out.`;
       message = appendContactNote(message, KIM_PHONE, ESTEE_PHONE);
     } else if (type === "pickup") {
       message = `It's been wonderful having ${dog_name}! We have you down for pick up at ${pickDate} ${pickTimeStr}. Please let us know in our shared group text thread if anything has changed. Otherwise, we'll see you tomorrow at ${pickTimeStr}.`;
     } else {
       // Default: confirmation
-      message = `Hi ${firstName}! ${dog_name}'s stay at Bayview Boarding is confirmed. Drop-off: ${dropDate} at ${dropTimeStr}. Pick-up: ${pickDate} at ${pickTimeStr}. Estimated cost: $${estimated_cost}. — Kim & Estee`;
+      message = `Hi ${firstName}! ${dog_name}'s stay at Bayview Boarding is confirmed. Drop-off: ${dropDate} at ${dropTimeStr}. Pick-up: ${pickDate} at ${pickTimeStr}. Estimated cost: $${formatDollars(estimated_cost)}. — Kim & Estee`;
       message = appendContactNote(message, KIM_PHONE, ESTEE_PHONE);
     }
 

@@ -23,6 +23,8 @@
 .dog-count-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; }
 .dog-count-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 12px; background: #F5F0E8; border-radius: 6px; font-size: 0.9rem; color: #1A2530; }
 .dog-count-row .btn-secondary { padding: 4px 10px; font-size: 0.78rem; }
+.dog-needs-updating { color: #C0392B; font-size: 0.76rem; font-weight: 600; }
+.admin-section-header { font-size: 0.95rem; font-weight: 600; color: #2C3E50; margin: 4px 0 12px; padding-top: 8px; border-top: 1px solid #EAE3D6; }
 
 .link-blue, .link-blue:visited { color: #0000EE; }
 /* A brighter sky-blue rather than classic #0000EE here specifically - the
