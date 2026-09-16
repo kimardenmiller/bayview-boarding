@@ -673,6 +673,18 @@ function AdminView({
   const [feedback, setFeedback] = useState([]);
   const [showFeedback, setShowFeedback] = useState(false);
   const [updatingFeedbackId, setUpdatingFeedbackId] = useState(null);
+  // Tester broadcast list - fetched alongside the dog list at login, its
+  // own sub-view like feedback (see showTesters). No public read at all
+  // (unlike settings/feedback) - a tester's phone number is contact info.
+  const [testers, setTesters] = useState([]);
+  const [showTesters, setShowTesters] = useState(false);
+  const [newTesterName, setNewTesterName] = useState('');
+  const [newTesterPhone, setNewTesterPhone] = useState('');
+  const [testersError, setTestersError] = useState('');
+  const [savingTester, setSavingTester] = useState(false);
+  const [broadcastMessage, setBroadcastMessage] = useState('');
+  const [broadcastStatus, setBroadcastStatus] = useState('idle'); // idle | sending | sent | error
+  const [broadcastResult, setBroadcastResult] = useState(null);
   // Billing SMS is admin-triggered (not auto-sent at pickup time) - the
   // estimated cost can be wrong by pickup (early/late pickup, extra
   // services), so an admin reviews/adjusts the actual final amount before
@@ -737,6 +749,9 @@ function AdminView({
     // getting into the admin panel at all, just leaves the queue empty.
     supabase.functions.invoke('feedback', { body: { password: pw } }).then(({ data }) => {
       if (data && !data.error) setFeedback(data.feedback || []);
+    }).catch(() => {});
+    supabase.functions.invoke('testers', { body: { password: pw, action: 'list' } }).then(({ data }) => {
+      if (data && !data.error) setTesters(data.testers || []);
     }).catch(() => {});
     // editRate/editMultiDogDiscount/editHolidayUpcharge/editVets were
     // seeded from these same-named props back when this component first
@@ -825,6 +840,48 @@ function AdminView({
     setFeedback(list => list.map(f => (f.id === id ? data.feedback : f)));
   }
 
+  async function addTester() {
+    setTestersError('');
+    if (!newTesterName.trim() || !newTesterPhone.trim()) {
+      setTestersError('Name and phone are both required');
+      return;
+    }
+    setSavingTester(true);
+    const { data, error: fnError } = await supabase.functions.invoke('testers', {
+      body: { password: pw, action: 'add', name: newTesterName.trim(), phone: newTesterPhone.trim() },
+    });
+    setSavingTester(false);
+    if (fnError || data?.error) {
+      setTestersError(data?.error || 'Failed to save. Please try again.');
+      return;
+    }
+    setTesters(data.testers);
+    setNewTesterName('');
+    setNewTesterPhone('');
+  }
+
+  async function removeTester(id) {
+    const { data, error: fnError } = await supabase.functions.invoke('testers', {
+      body: { password: pw, action: 'remove', id },
+    });
+    if (!fnError && !data?.error) setTesters(data.testers);
+  }
+
+  async function sendBroadcast() {
+    if (!broadcastMessage.trim()) return;
+    setBroadcastStatus('sending');
+    const { data, error: fnError } = await supabase.functions.invoke('testers', {
+      body: { password: pw, action: 'notify', message: broadcastMessage.trim() },
+    });
+    if (fnError || data?.error) {
+      setBroadcastStatus('error');
+      return;
+    }
+    setBroadcastResult(data);
+    setBroadcastStatus('sent');
+    setBroadcastMessage('');
+  }
+
   if (!authed) {
     return (
       <div className="admin-overlay">
@@ -883,6 +940,79 @@ function AdminView({
                 </div>
               </div>
             ))}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (showTesters) {
+    return (
+      <div className="admin-overlay">
+        <div className="admin-panel">
+          <div className="admin-header">
+            <button className="back-btn" onClick={() => setShowTesters(false)}>← All Dogs</button>
+            <button className="close-btn" onClick={onClose}>✕</button>
+          </div>
+          <h2>Testers</h2>
+
+          <div className="rate-setting">
+            <label className="field-label">Broadcast a Message</label>
+            <div style={{ fontSize: '0.72rem', color: '#6B7A8A', marginBottom: 8 }}>
+              Sent to every active tester below, with directions to "Submit Idea" added automatically.
+            </div>
+            <textarea
+              value={broadcastMessage}
+              onChange={e => setBroadcastMessage(e.target.value)}
+              placeholder="I've just made some changes, please have a look..."
+              rows={3}
+              style={{ width: '100%', padding: '8px 10px', border: '1.5px solid #D5D9DE', borderRadius: 6, fontSize: '0.85rem', fontFamily: 'inherit' }}
+            />
+            <div style={{ marginTop: 8, display: 'flex', gap: 8, alignItems: 'center' }}>
+              <button
+                className="btn-primary"
+                style={{ padding: '6px 14px' }}
+                disabled={!broadcastMessage.trim() || broadcastStatus === 'sending' || testers.filter(t => t.active).length === 0}
+                onClick={sendBroadcast}
+              >
+                {broadcastStatus === 'sending' ? 'Sending...' : `Send to ${testers.filter(t => t.active).length} tester${testers.filter(t => t.active).length !== 1 ? 's' : ''}`}
+              </button>
+              {broadcastStatus === 'sent' && broadcastResult && (
+                <span style={{ color: '#7D9B76', fontSize: '0.78rem' }}>
+                  ✓ Sent to {broadcastResult.sent}{broadcastResult.failed > 0 ? `, ${broadcastResult.failed} failed` : ''}
+                </span>
+              )}
+              {broadcastStatus === 'error' && <span className="field-error">Failed to send. Please try again.</span>}
+            </div>
+          </div>
+
+          <div className="rate-setting">
+            <label className="field-label">Tester List</label>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 8 }}>
+              {testers.map(t => (
+                <div key={t.id} style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: '0.85rem' }}>
+                  <span style={{ flex: 1 }}>{t.name} — {t.phone}</span>
+                  <button className="btn-secondary" style={{ padding: '4px 10px', fontSize: '0.78rem' }} onClick={() => removeTester(t.id)}>Remove</button>
+                </div>
+              ))}
+              {testers.length === 0 && <p className="empty" style={{ padding: '8px 0' }}>No testers added yet.</p>}
+            </div>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+              <input
+                placeholder="Name"
+                value={newTesterName}
+                onChange={e => setNewTesterName(e.target.value)}
+                style={{ flex: 1, minWidth: 100, padding: '6px 10px', border: '1.5px solid #D5D9DE', borderRadius: 6, fontSize: '0.9rem' }}
+              />
+              <input
+                placeholder="(415) 555-0100"
+                value={newTesterPhone}
+                onChange={e => setNewTesterPhone(e.target.value)}
+                style={{ flex: 1, minWidth: 130, padding: '6px 10px', border: '1.5px solid #D5D9DE', borderRadius: 6, fontSize: '0.9rem' }}
+              />
+              <button className="btn-secondary" style={{ padding: '6px 14px' }} disabled={savingTester} onClick={addTester}>Add</button>
+            </div>
+            {testersError && <div className="field-error" style={{ marginTop: 8 }}>{testersError}</div>}
           </div>
         </div>
       </div>
@@ -979,10 +1109,15 @@ function AdminView({
           <h2>Bayview Boarding — Admin</h2>
           <button className="close-btn" onClick={onClose}>✕</button>
         </div>
-        <button className="btn-secondary feedback-entry" onClick={() => setShowFeedback(true)}>
-          <span>💡 Ideas &amp; Bugs</span>
-          {feedbackOpenCount > 0 && <span className="feedback-badge">{feedbackOpenCount}</span>}
-        </button>
+        <div className="admin-entry-row">
+          <button className="btn-secondary feedback-entry" onClick={() => setShowFeedback(true)}>
+            <span>💡 Ideas &amp; Bugs</span>
+            {feedbackOpenCount > 0 && <span className="feedback-badge">{feedbackOpenCount}</span>}
+          </button>
+          <button className="btn-secondary feedback-entry" onClick={() => setShowTesters(true)}>
+            <span>📢 Testers</span>
+          </button>
+        </div>
         <div className="rate-setting">
           <label className="field-label">Day Rate (per 24 hours)</label>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>

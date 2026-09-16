@@ -39,9 +39,11 @@ Kim Miller and Estee Fletter at 210 Bayview Drive, San Rafael, CA.
   "Send Billing Text" control and a "View waiver as signed" toggle (Sept
   16 (5) — see waiver_snapshot below) on every stay, plus a "💡 Ideas &
   Bugs" section (Sept 16 (8) — see feedback below) with an open-count
-  badge. Reached via the nav menu's "Admin" item (Sept 16, 2026 —
-  reversed the earlier "no visible entry point" decision on request) or
-  the bookmarked ?admin URL; either way it's still fully password-gated
+  badge and a "📢 Testers" section (Sept 17, 2026 — see testers below) to
+  maintain a tester list and broadcast an SMS invite to all of them.
+  Reached via the nav menu's "Admin" item (Sept 16, 2026 — reversed the
+  earlier "no visible entry point" decision on request) or the
+  bookmarked ?admin URL; either way it's still fully password-gated
   server-side
 - "Learn more about us" page (content from the Bayview Boarding Rover
   profile — bio, home characteristics, photos, all 5-star reviews with
@@ -117,6 +119,16 @@ Kim hasn't set up) - the admin panel's open-count badge is the only
 "something's new" signal, plus a standing habit (see Rules) of checking
 this queue at the start of any work session, same as FIXES.txt itself.
 
+`testers` (Sept 17, 2026) is the tester broadcast list - name, phone,
+email (optional), active (default true, no toggle in the UI yet - see
+supabase/functions/testers/index.ts). Unlike settings/feedback, this one
+has NO public branch at all: list/add/remove/notify are all admin-
+password-gated (same shape as admin-data), since a phone number is
+contact info nobody but Kim should read or add to. "notify" texts every
+active tester the composed message plus a fixed footer (buildTesterInvite)
+explaining how to reach "Submit Idea", reusing the same Twilio sendSms
+pattern as receive-sms/send-confirmation.
+
 **Reproducing the reminder cron's secret** (Sept 16, 2026): the cron job
 (supabase/migrations/20260916000000_stay_reminders_cron.sql) calls
 send-reminders via pg_net with an x-cron-secret header, read from
@@ -141,9 +153,10 @@ call itself is dropped, not for a routine secret rotation.
 - src/App.js — main app
 - src/settings.js — all configurable values (rates, vets, messages, packing list)
 - src/waiver.js — full waiver text
-- src/App.test.js — 147 passing tests (TDD), Supabase mocked via src/__mocks__/supabase.js
+- src/App.test.js — 153 passing tests (TDD), Supabase mocked via src/__mocks__/supabase.js
 - supabase/functions/send-contact/index.ts — public Contact Us form handler: relays name/email-or-phone/message to Kim & Estee by SMS (reuses KIM_PHONE/ESTEE_PHONE). Deployed normally (no --no-verify-jwt) since it's called via the Supabase JS client like settings/lookup-client/submit-booking
 - supabase/functions/feedback/index.ts — "Submit Idea": public submit (no password) + admin list/status-update (password) for the feedback queue
+- supabase/functions/testers/index.ts — tester broadcast list: entirely admin-password-gated list/add/remove/notify (no public branch at all)
 - public/img/about/ — the 6 numbered photos on the About page, served from the public folder (not bundled) and referenced via process.env.PUBLIC_URL since the app is hosted at a subpath
 - supabase/functions/send-reminders/index.ts — daily cron target (pg_cron + pg_net, see the migration): finds stays checking in tomorrow, fetches the current sms_reminder template + packing_list from `settings`, texts each via send-confirmation, marks reminder_sent_at. Deployed with `--no-verify-jwt`; checks its own CRON_SECRET instead (see Data model for how that secret is set up without ever being committed) - be careful to keep that flag on every redeploy (a plain `supabase functions deploy send-reminders` silently re-enables JWT verification and would break the cron, same bug class as the receive-sms incident)
 - supabase/functions/settings/index.ts — public read / password-gated write of day rate, multi-dog discount, holiday upcharge, vet list, packing list, and the 3 SMS templates

@@ -37,6 +37,7 @@ function mockInvokeDefaults(overrides = {}) {
   // always returning the same fixed defaults regardless of what was sent.
   const currentSettings = { ...DEFAULT_SETTINGS };
   let currentFeedback = [];
+  let currentTesters = [];
   supabase.functions.invoke.mockImplementation((fn, opts) => {
     if (overrides[fn]) return overrides[fn](opts);
     if (fn === 'lookup-client') return Promise.resolve({ data: { found: false }, error: null });
@@ -66,6 +67,27 @@ function mockInvokeDefaults(overrides = {}) {
         data: { feedback: currentFeedback, openCount: currentFeedback.filter(f => f.status === 'open').length },
         error: null,
       });
+    }
+    // Mimics the real testers function: entirely password-gated (no
+    // public branch at all), one of 4 actions decided by opts.body.action.
+    if (fn === 'testers') {
+      const { password, action, id, name, phone, message } = opts?.body || {};
+      if (password !== 'correct-password') return Promise.resolve({ data: null, error: { message: 'Incorrect password' } });
+      if (action === 'add') {
+        if (!name?.trim() || !phone?.trim()) return Promise.resolve({ data: null, error: { message: 'Name and phone are both required' } });
+        currentTesters = [...currentTesters, { id: `tester-${currentTesters.length + 1}`, name, phone, active: true, created_at: '2026-09-17T12:00:00Z' }];
+        return Promise.resolve({ data: { testers: currentTesters }, error: null });
+      }
+      if (action === 'remove') {
+        currentTesters = currentTesters.filter(t => t.id !== id);
+        return Promise.resolve({ data: { testers: currentTesters }, error: null });
+      }
+      if (action === 'notify') {
+        if (!message?.trim()) return Promise.resolve({ data: null, error: { message: 'Message is required' } });
+        const active = currentTesters.filter(t => t.active);
+        return Promise.resolve({ data: { sent: active.length, failed: 0, total: active.length }, error: null });
+      }
+      return Promise.resolve({ data: { testers: currentTesters }, error: null });
     }
     // App fetches this once on mount (public read, no password) to load
     // live pricing/vet-list settings - every test needs a sane default
@@ -257,6 +279,41 @@ async function loginAsAdminWithFeedback(feedback = SAMPLE_FEEDBACK) {
         return { data: { feedback: current.find(f => f.id === id) }, error: null };
       }
       return { data: { feedback: current, openCount: current.filter(f => f.status === 'open').length }, error: null };
+    },
+  });
+  goToAdminUrl();
+  render(<App />);
+  await userEvent.type(screen.getByPlaceholderText('Password'), 'correct-password');
+  fireEvent.click(screen.getByText('Sign In'));
+  await screen.findByText('Bayview Boarding — Admin');
+}
+
+const SAMPLE_TESTERS = [
+  { id: 'tester-1', name: 'Jane Tester', phone: '4155550100', active: true, created_at: '2026-09-17T12:00:00Z' },
+  { id: 'tester-2', name: 'Inactive Ida', phone: '4155550101', active: false, created_at: '2026-09-16T12:00:00Z' },
+];
+
+async function loginAsAdminWithTesters(testers = SAMPLE_TESTERS) {
+  let current = testers.map(t => ({ ...t }));
+  mockInvokeDefaults({
+    'admin-data': async () => ({ data: { dogs: SAMPLE_DOGS, totalStays: SAMPLE_TOTAL_STAYS }, error: null }),
+    'testers': async (opts) => {
+      const { action, id, name, phone, message } = opts?.body || {};
+      if (action === 'add') {
+        if (!name?.trim() || !phone?.trim()) return { data: null, error: { message: 'Name and phone are both required' } };
+        current = [...current, { id: `tester-${current.length + 1}`, name, phone, active: true, created_at: '2026-09-17T12:00:00Z' }];
+        return { data: { testers: current }, error: null };
+      }
+      if (action === 'remove') {
+        current = current.filter(t => t.id !== id);
+        return { data: { testers: current }, error: null };
+      }
+      if (action === 'notify') {
+        if (!message?.trim()) return { data: null, error: { message: 'Message is required' } };
+        const active = current.filter(t => t.active);
+        return { data: { sent: active.length, failed: 0, total: active.length }, error: null };
+      }
+      return { data: { testers: current }, error: null };
     },
   });
   goToAdminUrl();
@@ -1561,6 +1618,71 @@ describe('Admin — logged in — Ideas & Bugs', () => {
     await loginAsAdminWithFeedback();
     fireEvent.click(screen.getByText('💡 Ideas & Bugs'));
     await screen.findByText('Ideas & Bugs', { selector: 'h2' });
+    fireEvent.click(screen.getByText('← All Dogs'));
+    expect(await screen.findByText('Bayview Boarding — Admin')).toBeInTheDocument();
+  });
+});
+
+describe('Admin — logged in — Testers', () => {
+  test('opens the tester list, showing name and phone for each', async () => {
+    await loginAsAdminWithTesters();
+    fireEvent.click(screen.getByText('📢 Testers'));
+    expect(await screen.findByText('Testers', { selector: 'h2' })).toBeInTheDocument();
+    expect(screen.getByText('Jane Tester — 4155550100')).toBeInTheDocument();
+    expect(screen.getByText('Inactive Ida — 4155550101')).toBeInTheDocument();
+  });
+
+  test('adds a tester, requiring both name and phone', async () => {
+    await loginAsAdminWithTesters([]);
+    fireEvent.click(screen.getByText('📢 Testers'));
+    await screen.findByText('Testers', { selector: 'h2' });
+
+    fireEvent.click(screen.getByText('Add'));
+    expect(await screen.findByText('Name and phone are both required')).toBeInTheDocument();
+
+    await userEvent.type(screen.getByPlaceholderText('Name'), 'New Tester');
+    await userEvent.type(screen.getByPlaceholderText('(415) 555-0100'), '4155550199');
+    fireEvent.click(screen.getByText('Add'));
+    expect(await screen.findByText('New Tester — 4155550199')).toBeInTheDocument();
+  });
+
+  test('removes a tester from the list', async () => {
+    await loginAsAdminWithTesters();
+    fireEvent.click(screen.getByText('📢 Testers'));
+    await screen.findByText('Jane Tester — 4155550100');
+    const row = screen.getByText('Jane Tester — 4155550100').closest('div');
+    fireEvent.click(within(row).getByText('Remove'));
+    await waitFor(() => expect(screen.queryByText('Jane Tester — 4155550100')).not.toBeInTheDocument());
+  });
+
+  test('the broadcast button is disabled without a message, and counts only active testers', async () => {
+    await loginAsAdminWithTesters();
+    fireEvent.click(screen.getByText('📢 Testers'));
+    await screen.findByText('Testers', { selector: 'h2' });
+    // 1 of the 2 fixtures is active
+    const sendBtn = screen.getByText('Send to 1 tester');
+    expect(sendBtn).toBeDisabled();
+    await userEvent.type(screen.getByPlaceholderText(/I've just made some changes/), 'Check out the new map!');
+    expect(sendBtn).not.toBeDisabled();
+  });
+
+  test('sends the broadcast and shows how many were reached', async () => {
+    await loginAsAdminWithTesters();
+    fireEvent.click(screen.getByText('📢 Testers'));
+    await screen.findByText('Testers', { selector: 'h2' });
+    await userEvent.type(screen.getByPlaceholderText(/I've just made some changes/), 'Check out the new map!');
+    fireEvent.click(screen.getByText('Send to 1 tester'));
+
+    await waitFor(() => expect(supabase.functions.invoke).toHaveBeenCalledWith('testers', {
+      body: { password: 'correct-password', action: 'notify', message: 'Check out the new map!' },
+    }));
+    expect(await screen.findByText(/Sent to 1/)).toBeInTheDocument();
+  });
+
+  test('← All Dogs returns to the dog list', async () => {
+    await loginAsAdminWithTesters();
+    fireEvent.click(screen.getByText('📢 Testers'));
+    await screen.findByText('Testers', { selector: 'h2' });
     fireEvent.click(screen.getByText('← All Dogs'));
     expect(await screen.findByText('Bayview Boarding — Admin')).toBeInTheDocument();
   });

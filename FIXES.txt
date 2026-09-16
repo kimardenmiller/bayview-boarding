@@ -1,6 +1,6 @@
 BAYVIEW BOARDING — FIX LIST
 ============================
-Last updated: September 16, 2026 (Submit Idea: dropped category, one open list box; nav reorder)
+Last updated: September 17, 2026 (Tester broadcast list + SMS invite feature)
 
 NEXT CHANGE LIST (v1.5)
 -----------------------
@@ -79,6 +79,36 @@ TWILIO STATUS
 
 COMPLETED
 ---------
+- Sept 17, 2026: New tester broadcast feature. Kim maintains a list of
+  testers (name + phone) in a new admin "📢 Testers" section (sits next
+  to "💡 Ideas & Bugs"), and can compose a message there ("I've just made
+  some changes, please have a look") that texts every active tester -
+  with a fixed footer explaining how to get to "Submit Idea" appended
+  automatically, so directions never have to be re-typed. New `testers`
+  table (name, phone, email optional, active flag, same RLS-locked-with-
+  zero-policies pattern as everything else) and a new `testers` Edge
+  Function, entirely admin-password-gated with no public branch at all
+  (unlike settings/feedback) - listing, adding, removing, and sending are
+  all 4 the same "one function, action decides the branch" shape. Scoped
+  down deliberately: no active/inactive toggle in the UI for v1 (every
+  tester added is active; deactivating would require Remove + re-Add) -
+  can add a toggle later if that distinction actually matters in
+  practice.
+
+  Tests: 11 new Deno tests for the testers function (password gating on
+  every action, add validation, remove, the fixed footer text, notify
+  skipping inactive testers, a failed send counted without stopping the
+  rest, an unknown action rejected). React: a new admin "Testers"
+  describe block (list, add validation, remove, broadcast button
+  disabled without a message and counting only active testers, a
+  successful send). 153 React + 111 Deno = 264/264 passing, first run,
+  no bugs found. Verified live: the function is deployed and correctly
+  password-gated (a wrong-password check returns our own function's
+  error, not Supabase's platform gate) - could not verify the actual
+  admin UI/broadcast send live, since every action requires Kim's real
+  admin password, which isn't available in this session; unlike feedback
+  (which has a public submit path), testers has no public branch at all
+  to check against, so this one rests entirely on the test suite.
 - Sept 16, 2026 (9): Submit Idea simplified, right after shipping (8)
   below. Dropped the Type/category picker entirely - Kim's call: not
   needed and actively confusing for a long, unsorted list of things.
