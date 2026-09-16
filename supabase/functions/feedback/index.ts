@@ -45,12 +45,19 @@ export async function handleRequest(req: Request): Promise<Response> {
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
     if (!password) {
-      // Public submit.
+      // Public submit. Name is required (Sept 16, 2026 - the form dropped
+      // its Type/category picker in favor of one open message box the
+      // submitter can list as many things in as they like; requiring a
+      // name instead gives admin something to identify/follow up on when
+      // reviewing a long, unsorted list). category is no longer sent by
+      // the client at all - still accepted/validated here for backward
+      // compatibility, defaulting to 'idea', but carries no real signal.
+      if (!name?.trim()) return json({ error: 'Name is required' }, 400);
       if (!message?.trim()) return json({ error: 'Message is required' }, 400);
       const cat = category && CATEGORIES.includes(category) ? category : 'idea';
 
       const { error } = await supabase.from('feedback').insert({
-        name: name?.trim() || null,
+        name: name.trim(),
         contact: contact?.trim() || null,
         category: cat,
         message: message.trim(),

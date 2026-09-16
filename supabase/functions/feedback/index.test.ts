@@ -57,7 +57,19 @@ Deno.test('answers CORS preflight', async () => {
   assertEquals(res.status, 200);
 });
 
-Deno.test('public submit: requires a message, no password needed', async () => {
+Deno.test('public submit: requires a name, no password needed', async () => {
+  const stub = stubSupabase();
+  try {
+    const res = await handleRequest(postRequest({ message: 'Add dark mode' }));
+    assertEquals(res.status, 400);
+    const data = await res.json();
+    assert(data.error.includes('Name'));
+  } finally {
+    stub.restore();
+  }
+});
+
+Deno.test('public submit: requires a message', async () => {
   const stub = stubSupabase();
   try {
     const res = await handleRequest(postRequest({ name: 'Jane' }));
@@ -69,21 +81,24 @@ Deno.test('public submit: requires a message, no password needed', async () => {
   }
 });
 
-Deno.test('public submit: stores name/contact/category/message, defaults category to idea', async () => {
+Deno.test('public submit: stores name/contact/message (a list of several things in one message), defaults category to idea', async () => {
   const stub = stubSupabase();
   try {
-    const res = await handleRequest(postRequest({ message: 'The booking flow is confusing on step 2' }));
+    const res = await handleRequest(postRequest({
+      name: 'Jane', message: '1. The booking flow is confusing on step 2\n2. Add dark mode\n3. Map pin looks off on Safari',
+    }));
     assertEquals(res.status, 200);
     assertEquals((await res.json()).success, true);
     assertEquals(stub.db.feedback.length, 1);
     assertEquals(stub.db.feedback[0].category, 'idea');
     assertEquals(stub.db.feedback[0].status, 'open');
+    assertEquals(String(stub.db.feedback[0].message).includes('Add dark mode'), true);
   } finally {
     stub.restore();
   }
 });
 
-Deno.test('public submit: accepts a valid category, ignores an invalid one', async () => {
+Deno.test('public submit: stores contact if given, still accepts an explicit category for backward compatibility', async () => {
   const stub = stubSupabase();
   try {
     await handleRequest(postRequest({ message: 'Found a bug', category: 'bug', name: 'Jane', contact: 'jane@test.com' }));
@@ -91,7 +106,7 @@ Deno.test('public submit: accepts a valid category, ignores an invalid one', asy
     assertEquals(stub.db.feedback[0].name, 'Jane');
     assertEquals(stub.db.feedback[0].contact, 'jane@test.com');
 
-    await handleRequest(postRequest({ message: 'Second one', category: 'not-a-real-category' }));
+    await handleRequest(postRequest({ message: 'Second one', name: 'Jane', category: 'not-a-real-category' }));
     assertEquals(stub.db.feedback[1].category, 'idea'); // falls back to the default
   } finally {
     stub.restore();

@@ -48,11 +48,13 @@ Kim Miller and Estee Fletter at 210 Bayview Drive, San Rafael, CA.
   dates linking out to Rover, an approximate-location map). Reached via
   a real link on the landing page, clicking the "Bayview Boarding" title/
   header, or the nav menu (Sept 16, 2026)
-- Hamburger nav menu (every screen): About Us, Contact Us, Submit Idea,
-  Book a Stay, Admin (Sept 16, 2026)
+- Hamburger nav menu (every screen): Book a Stay, About Us, Contact Us,
+  Submit Idea, Admin (Sept 16, 2026; Book a Stay moved to the top Sept 16 (9))
 - "Contact Us" page — relays a name/email-or-phone/message submission to
   Kim & Estee by SMS via send-contact (Sept 16, 2026)
-- "Submit Idea" page (Sept 16 (8)) — testers report bugs/ideas/feedback,
+- "Submit Idea" page (Sept 16 (8), simplified (9)) — one open message box
+  (name required, invites listing as many things as you like in it -
+  deliberately no Type/category picker, which just confused a long list),
   persisted (not texted - see feedback below) so it's an actual triage
   queue in admin rather than scrollback in a text thread
 
@@ -100,15 +102,20 @@ src/waiver.js can never retroactively change what a past client is on
 record as having agreed to. submit-booking requires a non-empty array;
 admin can view it per-stay via a collapsed-by-default toggle.
 
-`feedback` (Sept 16 (8)) is the "Submit Idea" queue - one row per tester
-submission (name/contact optional, category bug|idea|other, message,
-status open|considered|done). Same RLS-locked-with-zero-policies pattern
-as everything else; public submit and password-gated list/status-update
-both go through supabase/functions/feedback/index.ts (one function, same
-"request shape decides the branch" style as settings). Deliberately not
-wired to any notification (SMS costs money; email would need a new
-provider account Kim hasn't set up) - the admin panel's open-count badge
-is the only "something's new" signal for now.
+`feedback` (Sept 16 (8), form simplified (9)) is the "Submit Idea" queue -
+one row per tester submission (name required, contact optional, message,
+status open|considered|done). `category` (bug|idea|other) still exists as
+a column and the Edge Function still accepts/validates it for backward
+compatibility, but the form no longer sends it - every row defaults to
+"idea" and admin no longer displays it; it's vestigial, not a real
+feature. Same RLS-locked-with-zero-policies pattern as everything else;
+public submit and password-gated list/status-update both go through
+supabase/functions/feedback/index.ts (one function, same "request shape
+decides the branch" style as settings). Deliberately not wired to any
+notification (SMS costs money; email would need a new provider account
+Kim hasn't set up) - the admin panel's open-count badge is the only
+"something's new" signal, plus a standing habit (see Rules) of checking
+this queue at the start of any work session, same as FIXES.txt itself.
 
 **Reproducing the reminder cron's secret** (Sept 16, 2026): the cron job
 (supabase/migrations/20260916000000_stay_reminders_cron.sql) calls
@@ -194,3 +201,11 @@ a DB/RLS change is made against production).
   (which is publicly readable) - see the Data model note on why.
 - Follow TDD — write tests before new features
 - Commit messages use format: "v1.x - description"
+- At the start of any work session here, check the "Submit Idea" queue
+  (admin panel > 💡 Ideas & Bugs) for open tester feedback, same habit as
+  checking FIXES.txt itself (Sept 16, 2026) - it's the mechanism Kim
+  built specifically so feedback doesn't need SMS/email to reach him.
+  Act on anything worth doing, moving it to Considered/Done from the
+  admin list; promote genuinely actionable items into FIXES.txt's NEXT
+  CHANGE LIST credited "Suggested by [name]". Recurring, not a
+  one-time task.

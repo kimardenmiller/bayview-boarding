@@ -848,7 +848,6 @@ function AdminView({
   const feedbackOpenCount = feedback.filter(f => f.status === 'open').length;
 
   if (showFeedback) {
-    const CATEGORY_LABEL = { bug: '🐛 Bug', idea: '💡 Idea', other: '📝 Other' };
     return (
       <div className="admin-overlay">
         <div className="admin-panel">
@@ -864,13 +863,11 @@ function AdminView({
           <div className="stay-history">
             {feedback.map(f => (
               <div key={f.id} className="stay-card">
-                <div className="stay-meta">{CATEGORY_LABEL[f.category] || f.category} · {formatDate(f.created_at?.slice(0, 10))}</div>
-                <div className="stay-notes" style={{ fontStyle: 'normal', marginTop: 6 }}>{f.message}</div>
-                {(f.name || f.contact) && (
-                  <div className="stay-meta" style={{ marginTop: 6 }}>
-                    {[f.name, f.contact].filter(Boolean).join(' · ')}
-                  </div>
-                )}
+                <div className="stay-meta">{formatDate(f.created_at?.slice(0, 10))}</div>
+                <div className="stay-notes" style={{ fontStyle: 'normal', marginTop: 6, whiteSpace: 'pre-wrap' }}>{f.message}</div>
+                <div className="stay-meta" style={{ marginTop: 6 }}>
+                  {[f.name, f.contact].filter(Boolean).join(' · ')}
+                </div>
                 <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 10 }}>
                   {['open', 'considered', 'done'].map(s => (
                     <button
@@ -1332,10 +1329,10 @@ function NavMenu({ onAbout, onContact, onSubmitIdea, onBookStay, onAdmin }) {
         <>
           <div className="nav-menu-backdrop" onClick={() => setOpen(false)} />
           <div className="nav-menu-panel">
+            <button className="nav-menu-item" onClick={() => go(onBookStay)}>Book a Stay</button>
             <button className="nav-menu-item" onClick={() => go(onAbout)}>About Us</button>
             <button className="nav-menu-item" onClick={() => go(onContact)}>Contact Us</button>
             <button className="nav-menu-item" onClick={() => go(onSubmitIdea)}>Submit Idea</button>
-            <button className="nav-menu-item" onClick={() => go(onBookStay)}>Book a Stay</button>
             <button className="nav-menu-item" onClick={() => go(onAdmin)}>Admin</button>
           </div>
         </>
@@ -1432,7 +1429,7 @@ function ContactUs({ onBack }) {
 // admin (open/considered/done) instead of scrollback in a text thread -
 // see the migration for the full rationale.
 function SubmitIdea({ onBack }) {
-  const [form, setForm] = useState({ category: 'idea', message: '', name: '', contact: '' });
+  const [form, setForm] = useState({ message: '', name: '', contact: '' });
   const [errors, setErrors] = useState({});
   const [status, setStatus] = useState('idle'); // idle | sending | sent | error
 
@@ -1440,6 +1437,7 @@ function SubmitIdea({ onBack }) {
 
   function getErrors() {
     const e = {};
+    if (!form.name.trim()) e.name = 'Required';
     if (!form.message.trim()) e.message = 'Required';
     return e;
   }
@@ -1477,21 +1475,19 @@ function SubmitIdea({ onBack }) {
         <button className="back-btn" onClick={onBack}>← Back</button>
         <h1 className="about-title about-title--center" style={{ marginTop: 20 }}>Submit Idea</h1>
         <p>
-          Found a bug, or have an idea to make this better? Let us know -
-          every submission gets reviewed.
+          Found a bug, or have an idea to make this better? List as many as
+          you'd like in one message - every one gets reviewed.
         </p>
-        <Field label="Type">
-          <select value={form.category} onChange={e => update('category', e.target.value)}>
-            <option value="idea">Idea / suggestion</option>
-            <option value="bug">Something's broken</option>
-            <option value="other">Other</option>
-          </select>
-        </Field>
-        <Field label="Message" error={errors.message}>
-          <textarea value={form.message} onChange={e => update('message', e.target.value)} placeholder="What's on your mind?" rows={5} />
-        </Field>
-        <Field label="Your Name (optional)">
+        <Field label="Your Name" error={errors.name}>
           <input value={form.name} onChange={e => update('name', e.target.value)} placeholder="Jane Smith" />
+        </Field>
+        <Field label="Ideas / Bugs" error={errors.message}>
+          <textarea
+            value={form.message}
+            onChange={e => update('message', e.target.value)}
+            placeholder={'Feel free to list as many as you\'d like, e.g.:\n1. ...\n2. ...\n3. ...'}
+            rows={8}
+          />
         </Field>
         <Field label="Email or Phone (optional, in case we follow up)">
           <input value={form.contact} onChange={e => update('contact', e.target.value)} placeholder="jane@email.com" />

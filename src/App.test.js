@@ -50,6 +50,7 @@ function mockInvokeDefaults(overrides = {}) {
     if (fn === 'feedback') {
       const { password, id, status, message, category, name, contact } = opts?.body || {};
       if (!password) {
+        if (!name?.trim()) return Promise.resolve({ data: null, error: { message: 'Name is required' } });
         if (!message?.trim()) return Promise.resolve({ data: null, error: { message: 'Message is required' } });
         currentFeedback = [
           { id: `fb-${currentFeedback.length + 1}`, status: 'open', created_at: '2026-09-16T12:00:00Z', category: category || 'idea', name: name || null, contact: contact || null, message },
@@ -785,29 +786,35 @@ describe('Submit Idea', () => {
     fireEvent.click(screen.getByText('Submit Idea'));
   }
 
-  test('defaults to "Idea / suggestion" and requires only a message', async () => {
+  test('no Type/category field - requires a name and a message', async () => {
     goToSubmitIdea();
     await screen.findByText('Submit Idea', { selector: 'h1' });
-    expect(screen.getByDisplayValue('Idea / suggestion')).toBeInTheDocument();
+    expect(screen.queryByText('Type')).not.toBeInTheDocument();
+    expect(document.querySelector('select')).not.toBeInTheDocument();
+
     const submit = screen.getByText('Submit');
     expect(submit).toBeDisabled();
-    await userEvent.type(screen.getByPlaceholderText("What's on your mind?"), 'Add dark mode');
+    await userEvent.type(screen.getByPlaceholderText('Jane Smith'), 'Jane Tester');
+    expect(submit).toBeDisabled(); // still no message
+    await userEvent.type(screen.getByPlaceholderText(/Feel free to list/), 'Add dark mode');
     expect(submit).not.toBeDisabled();
   });
 
-  test('submits with category/name/contact and shows a thank-you', async () => {
+  test('invites a list in one message box, submits name/message/contact (no category), shows a thank-you', async () => {
     goToSubmitIdea();
     await screen.findByText('Submit Idea', { selector: 'h1' });
-    fireEvent.change(screen.getByDisplayValue('Idea / suggestion'), { target: { value: 'bug' } });
-    await userEvent.type(screen.getByPlaceholderText("What's on your mind?"), 'The map pin looks wrong on Safari');
     await userEvent.type(screen.getByPlaceholderText('Jane Smith'), 'Jane Tester');
+    await userEvent.type(
+      screen.getByPlaceholderText(/Feel free to list/),
+      '1. Map pin looks wrong on Safari{Enter}2. Add dark mode',
+    );
     await userEvent.type(screen.getByPlaceholderText('jane@email.com'), 'jane@test.com');
     fireEvent.click(screen.getByText('Submit'));
 
     await waitFor(() => {
       expect(supabase.functions.invoke).toHaveBeenCalledWith('feedback', {
         body: {
-          category: 'bug', message: 'The map pin looks wrong on Safari',
+          message: '1. Map pin looks wrong on Safari\n2. Add dark mode',
           name: 'Jane Tester', contact: 'jane@test.com',
         },
       });
@@ -819,7 +826,8 @@ describe('Submit Idea', () => {
     mockInvokeDefaults({ 'feedback': async () => ({ data: null, error: { message: 'network down' } }) });
     goToSubmitIdea();
     await screen.findByText('Submit Idea', { selector: 'h1' });
-    await userEvent.type(screen.getByPlaceholderText("What's on your mind?"), 'Hi');
+    await userEvent.type(screen.getByPlaceholderText('Jane Smith'), 'Jane Tester');
+    await userEvent.type(screen.getByPlaceholderText(/Feel free to list/), 'Hi');
     fireEvent.click(screen.getByText('Submit'));
     expect(await screen.findByText(/Something went wrong sending this/)).toBeInTheDocument();
     expect(screen.queryByText('Thanks!')).not.toBeInTheDocument();
@@ -1527,7 +1535,7 @@ describe('Admin — logged in — Ideas & Bugs', () => {
     expect(within(entry).queryByText('1')).not.toBeInTheDocument();
   });
 
-  test('opens the list showing every submission with its category, message, and submitter', async () => {
+  test('opens the list showing every submission with its message and submitter (no category shown)', async () => {
     await loginAsAdminWithFeedback();
     fireEvent.click(screen.getByText('💡 Ideas & Bugs'));
     expect(await screen.findByText('Ideas & Bugs', { selector: 'h2' })).toBeInTheDocument();

@@ -1,6 +1,6 @@
 BAYVIEW BOARDING — FIX LIST
 ============================
-Last updated: September 16, 2026 ("Submit Idea" feedback feature)
+Last updated: September 16, 2026 (Submit Idea: dropped category, one open list box; nav reorder)
 
 NEXT CHANGE LIST (v1.5)
 -----------------------
@@ -23,6 +23,16 @@ NEXT CHANGE LIST (v1.5)
    maintain. Not urgent by itself; do this the next time a DB schema or
    RLS change is about to be made against production, rather than
    testing it live the way this session's changes have been.
+3. STANDING: check the "Submit Idea" queue (admin panel > 💡 Ideas & Bugs)
+   at the start of any work session in this project, not just when Kim
+   flags something - this is the actual mechanism for surfacing tester
+   feedback (deliberately not SMS/email, see Sept 16 (8) below). Act on
+   anything worth doing the normal way: implement it, then move that
+   submission to Considered/Done from the admin list. If something's
+   worth tracking before it's actually built, promote it into this file's
+   own list, crediting "Suggested by <name>" from what was submitted.
+   This item itself never gets "done" - it's a recurring habit, not a
+   one-time task.
 
 DEFERRED (revisit only if it actually blocks something)
 ---------------------------------------------------------
@@ -69,6 +79,28 @@ TWILIO STATUS
 
 COMPLETED
 ---------
+- Sept 16, 2026 (9): Submit Idea simplified, right after shipping (8)
+  below. Dropped the Type/category picker entirely - Kim's call: not
+  needed and actively confusing for a long, unsorted list of things.
+  The single message box now explicitly invites listing as many items as
+  you want in one submission (numbered-list placeholder text, 8 rows
+  instead of 5, admin view renders it with real line breaks via
+  white-space: pre-wrap so a submitted list still reads as a list).
+  Name is now required (both client and server) rather than optional -
+  since there's no more category to skim, a name is what actually lets
+  admin identify/follow up on a long unsorted submission. category is
+  still accepted server-side for backward compatibility (defaults to
+  "idea", carries no real signal anymore) but the admin list no longer
+  displays it. Nav menu reordered per request: Book a Stay first.
+
+  Tests: feedback function gained a dedicated "requires a name" test and
+  the category tests were reframed as "still accepted for backward
+  compatibility" rather than a real feature (11 Deno tests total, up
+  from 10). React: Submit Idea's tests rewritten for the no-category/
+  required-name form and a multi-line list submission. 147 React + 100
+  Deno = 247/247 passing. Verified live: menu order, no Type field, the
+  name-then-message disabled-button progression, and a real multi-item
+  submission (found and deleted afterward).
 - Sept 16, 2026 (8): New "Submit Idea" feature - a nav menu item where
   testers report bugs/ideas/feedback through the site instead of a text
   message. Deliberately NOT SMS (costs money per send, and a text thread
