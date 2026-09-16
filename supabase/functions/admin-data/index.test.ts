@@ -38,20 +38,24 @@ const DOGS_FIXTURE = [
 function stubSupabase(opts: { dogs?: unknown[]; totalStays?: number } = {}) {
   const dogs = opts.dogs ?? DOGS_FIXTURE;
   const totalStays = opts.totalStays ?? 2;
-  const calls: { method: string; table: string }[] = [];
+  const calls: { method: string; table: string; body?: unknown; search?: string }[] = [];
 
   const original = globalThis.fetch;
   globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
     const url = new URL(String(input instanceof Request ? input.url : input));
     const method = (init?.method || 'GET').toUpperCase();
     const table = url.pathname.split('/').pop()!;
-    calls.push({ method, table });
+    const body = init?.body ? JSON.parse(String(init.body)) : undefined;
+    calls.push({ method, table, body, search: url.search });
 
     if (table === 'dogs' && method === 'GET') {
       return new Response(JSON.stringify(dogs), { status: 200 });
     }
     if (table === 'stays' && method === 'HEAD') {
       return new Response(null, { status: 200, headers: { 'content-range': `0-0/${totalStays}` } });
+    }
+    if (table === 'stays' && method === 'PATCH') {
+      return new Response(JSON.stringify([{ id: url.searchParams.get('id')?.replace('eq.', ''), ...body }]), { status: 200 });
     }
     throw new Error(`stubSupabase: unhandled request ${method} ${url.pathname}`);
   }) as typeof fetch;
@@ -140,6 +144,62 @@ Deno.test('a dog with no stays gets an empty stays array, not an error', async (
     const res = await handleRequest(postRequest({ password: ADMIN_PASSWORD }));
     const data = await res.json();
     assertEquals(data.dogs[0].stays, []);
+  } finally {
+    stub.restore();
+  }
+});
+
+Deno.test('billStay: requires stayId', async () => {
+  const stub = stubSupabase();
+  try {
+    const res = await handleRequest(postRequest({ password: ADMIN_PASSWORD, action: 'billStay' }));
+    assertEquals(res.status, 400);
+  } finally {
+    stub.restore();
+  }
+});
+
+Deno.test('billStay: patches only the fields given, plus billed_at, then returns the refreshed dog list', async () => {
+  const stub = stubSupabase();
+  try {
+    const res = await handleRequest(postRequest({
+      password: ADMIN_PASSWORD, action: 'billStay', stayId: 'stay-2',
+      checkOut: '2026-10-04', pickupTime: '11:00:00', estimatedCost: 250,
+    }));
+    assertEquals(res.status, 200);
+    const data = await res.json();
+    assertEquals(data.dogs.length, 1); // still returns the normal dogs+totalStays shape
+
+    const patchCall = stub.calls.find((c) => c.table === 'stays' && c.method === 'PATCH')!;
+    assertEquals(patchCall.search, '?id=eq.stay-2');
+    const body = patchCall.body as Record<string, unknown>;
+    assertEquals(body.check_out, '2026-10-04');
+    assertEquals(body.pickup_time, '11:00:00');
+    assertEquals(body.estimated_cost, 250);
+    assertEquals(typeof body.billed_at, 'string');
+    assertEquals('check_in' in body, false); // not sent, not touched
+  } finally {
+    stub.restore();
+  }
+});
+
+Deno.test('billStay: marks billed_at even with no date/cost corrections', async () => {
+  const stub = stubSupabase();
+  try {
+    await handleRequest(postRequest({ password: ADMIN_PASSWORD, action: 'billStay', stayId: 'stay-2' }));
+    const patchCall = stub.calls.find((c) => c.table === 'stays' && c.method === 'PATCH')!;
+    const body = patchCall.body as Record<string, unknown>;
+    assertEquals(Object.keys(body), ['billed_at']);
+  } finally {
+    stub.restore();
+  }
+});
+
+Deno.test('rejects an unknown action', async () => {
+  const stub = stubSupabase();
+  try {
+    const res = await handleRequest(postRequest({ password: ADMIN_PASSWORD, action: 'deleteEverything' }));
+    assertEquals(res.status, 400);
   } finally {
     stub.restore();
   }

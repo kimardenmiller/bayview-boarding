@@ -54,6 +54,8 @@ export const SETTINGS = {
 
   SMS_BILLING: `Hi {firstName}! {dogName} is ready for pickup. Your total for this stay is ${'{finalCost}'}. Thanks for choosing Bayview Boarding! Reply STOP to opt out. — Kim & Estee\nReplies to this number aren't monitored. For questions, please group-text Kim {kimPhone} & Estee {esteePhone}.`,
 
+  SMS_PICKUP_REMINDER: `It's been wonderful having {dogName}! We have you down for pick up at {pickupDate} {pickupTime}. Please let us know in our shared group text thread if anything has changed. Otherwise, we'll see you tomorrow at {pickupTime}.`,
+
   // ── Vet Dropdown ──────────────────────────────────────────────────────────
   SAN_RAFAEL_VETS: [
     'Select a Vet',

@@ -34,10 +34,11 @@ interface SettingsRow {
   sms_confirmation: string;
   sms_reminder: string;
   sms_billing: string;
+  sms_pickup_reminder: string;
 }
 
 const SETTINGS_COLUMNS =
-  "day_rate, multi_dog_discount, holiday_upcharge, vets, packing_list, sms_confirmation, sms_reminder, sms_billing";
+  "day_rate, multi_dog_discount, holiday_upcharge, vets, packing_list, sms_confirmation, sms_reminder, sms_billing, sms_pickup_reminder";
 
 function toClientShape(row: SettingsRow) {
   return {
@@ -49,6 +50,7 @@ function toClientShape(row: SettingsRow) {
     smsConfirmation: row.sms_confirmation,
     smsReminder: row.sms_reminder,
     smsBilling: row.sms_billing,
+    smsPickupReminder: row.sms_pickup_reminder,
   };
 }
 
@@ -61,6 +63,7 @@ interface UpdatesInput {
   smsConfirmation?: string;
   smsReminder?: string;
   smsBilling?: string;
+  smsPickupReminder?: string;
 }
 
 // Shared by vets/packingList - both are "non-empty list of non-blank,
@@ -128,6 +131,9 @@ function validateUpdates(updates: UpdatesInput): string[] {
   if (updates.smsBilling !== undefined && !updates.smsBilling?.trim()) {
     errors.push("smsBilling must not be blank");
   }
+  if (updates.smsPickupReminder !== undefined && !updates.smsPickupReminder?.trim()) {
+    errors.push("smsPickupReminder must not be blank");
+  }
 
   return errors;
 }
@@ -165,6 +171,7 @@ export async function handleRequest(req: Request): Promise<Response> {
       if (updates.smsConfirmation !== undefined) patch.sms_confirmation = updates.smsConfirmation.trim();
       if (updates.smsReminder !== undefined) patch.sms_reminder = updates.smsReminder.trim();
       if (updates.smsBilling !== undefined) patch.sms_billing = updates.smsBilling.trim();
+      if (updates.smsPickupReminder !== undefined) patch.sms_pickup_reminder = updates.smsPickupReminder.trim();
       patch.updated_at = new Date().toISOString();
 
       const { data, error } = await supabase

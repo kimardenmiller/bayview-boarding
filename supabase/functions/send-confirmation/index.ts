@@ -74,7 +74,7 @@ export async function handleRequest(req: Request): Promise<Response> {
       // here - that would duplicate it.
       message = fillTemplate(message_template, {
         firstName, dogName: dog_name || "", dropDate, dropTime: dropTimeStr,
-        pickDate, pickTime: pickTimeStr,
+        pickDate, pickTime: pickTimeStr, pickupDate: pickDate, pickupTime: pickTimeStr,
         estimatedCost: estimated_cost != null ? String(estimated_cost) : "",
         finalCost: final_cost != null ? String(final_cost) : "",
         packingList: packingListStr, kimPhone: KIM_PHONE, esteePhone: ESTEE_PHONE,
@@ -85,6 +85,8 @@ export async function handleRequest(req: Request): Promise<Response> {
     } else if (type === "billing") {
       message = `Hi ${firstName}! ${dog_name} is ready for pickup. Your total for this stay is $${final_cost}. Thanks for choosing Bayview Boarding! Reply STOP to opt out. — Kim & Estee`;
       message = appendContactNote(message, KIM_PHONE, ESTEE_PHONE);
+    } else if (type === "pickup") {
+      message = `It's been wonderful having ${dog_name}! We have you down for pick up at ${pickDate} ${pickTimeStr}. Please let us know in our shared group text thread if anything has changed. Otherwise, we'll see you tomorrow at ${pickTimeStr}.`;
     } else {
       // Default: confirmation
       message = `Hi ${firstName}! ${dog_name}'s stay at Bayview Boarding is confirmed. Drop-off: ${dropDate} at ${dropTimeStr}. Pick-up: ${pickDate} at ${pickTimeStr}. Estimated cost: $${estimated_cost}. — Kim & Estee`;

@@ -61,13 +61,21 @@ function shapeDog(d: RawDog) {
   return { ...currentProfile, stays };
 }
 
+const DOGS_SELECT =
+  "id, name, breed, dob, spay_neuter, aggression_history, aggression_detail, health_concerns, health_detail, owner:owners(name, phone, email), stay_dogs(name, breed, dob, spay_neuter, aggression_history, aggression_detail, health_concerns, health_detail, stay:stays(id, check_in, check_out, drop_time, pickup_time, notes, estimated_cost, number_of_dogs, submitted_at, waiver_snapshot, billed_at))";
+
 export async function handleRequest(req: Request): Promise<Response> {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
   }
 
   try {
-    const { password } = await req.json();
+    const body = await req.json();
+    const { password, action, stayId, checkIn, checkOut, dropTime, pickupTime, estimatedCost } = body as {
+      password?: string; action?: string; stayId?: string;
+      checkIn?: string; checkOut?: string; dropTime?: string | null; pickupTime?: string | null;
+      estimatedCost?: number;
+    };
 
     if (password !== ADMIN_PASSWORD) {
       return json({ error: "Incorrect password" }, 401);
@@ -77,21 +85,43 @@ export async function handleRequest(req: Request): Promise<Response> {
     // verified the password above, server-side.
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
-    const [dogsResult, staysResult] = await Promise.all([
-      supabase.from("dogs").select(
-        "id, name, breed, dob, spay_neuter, aggression_history, aggression_detail, health_concerns, health_detail, owner:owners(name, phone, email), stay_dogs(name, breed, dob, spay_neuter, aggression_history, aggression_detail, health_concerns, health_detail, stay:stays(id, check_in, check_out, drop_time, pickup_time, notes, estimated_cost, number_of_dogs, submitted_at, waiver_snapshot))"
-      ),
-      // Total signed agreements on file is a count of stays (bookings),
-      // not of dogs - a 2-dog booking is still one signature.
-      supabase.from("stays").select("id", { count: "exact", head: true }),
-    ]);
+    // Shared by the plain read and the tail end of billStay - both return
+    // the same {dogs, totalStays} shape, so a write can just hand back
+    // the fresh state rather than the client patching its own copy.
+    async function fetchDogsAndTotals() {
+      const [dogsResult, staysResult] = await Promise.all([
+        supabase.from("dogs").select(DOGS_SELECT),
+        // Total signed agreements on file is a count of stays (bookings),
+        // not of dogs - a 2-dog booking is still one signature.
+        supabase.from("stays").select("id", { count: "exact", head: true }),
+      ]);
+      if (dogsResult.error) throw dogsResult.error;
+      if (staysResult.error) throw staysResult.error;
+      const dogs = (dogsResult.data as unknown as RawDog[]).map(shapeDog);
+      return { dogs, totalStays: staysResult.count ?? 0 };
+    }
 
-    if (dogsResult.error) throw dogsResult.error;
-    if (staysResult.error) throw staysResult.error;
+    if (action === "billStay") {
+      // "Review and edit, then send the bill" (Sept 17, 2026) - any of
+      // the date/time/cost fields the admin corrected are saved here
+      // alongside marking the stay billed; the actual SMS send is a
+      // separate client-side call to send-confirmation (this function
+      // doesn't talk to Twilio), same as the original per-dog billing flow.
+      if (!stayId) return json({ error: "stayId is required" }, 400);
+      const patch: Record<string, unknown> = { billed_at: new Date().toISOString() };
+      if (checkIn !== undefined) patch.check_in = checkIn;
+      if (checkOut !== undefined) patch.check_out = checkOut;
+      if (dropTime !== undefined) patch.drop_time = dropTime;
+      if (pickupTime !== undefined) patch.pickup_time = pickupTime;
+      if (estimatedCost !== undefined) patch.estimated_cost = estimatedCost;
 
-    const dogs = (dogsResult.data as unknown as RawDog[]).map(shapeDog);
+      const { error: updateErr } = await supabase.from("stays").update(patch).eq("id", stayId);
+      if (updateErr) throw updateErr;
+    } else if (action) {
+      return json({ error: `Unknown action: ${action}` }, 400);
+    }
 
-    return json({ dogs, totalStays: staysResult.count ?? 0 });
+    return json(await fetchDogsAndTotals());
   } catch (err) {
     console.error("admin-data error:", err);
     return json({ error: (err as Error).message }, 500);

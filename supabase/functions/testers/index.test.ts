@@ -1,4 +1,4 @@
-import { assertEquals, assert } from 'https://deno.land/std@0.168.0/testing/asserts.ts';
+import { assertEquals } from 'https://deno.land/std@0.168.0/testing/asserts.ts';
 
 const ADMIN_PASSWORD = 'test-admin-password';
 Deno.env.set('ADMIN_PASSWORD', ADMIN_PASSWORD);
@@ -9,7 +9,7 @@ Deno.env.set('TWILIO_AUTH_TOKEN', 'test-token');
 Deno.env.set('TWILIO_PHONE', '+14155550100');
 Deno.env.set('APP_URL', 'https://kimardenmiller.github.io/bayview-boarding');
 
-const { handleRequest, buildTesterInvite } = await import('./index.ts');
+const { handleRequest, buildTesterMessage } = await import('./index.ts');
 
 function stubEnvironment(initialTesters: Record<string, unknown>[] = [], opts: { smsFails?: boolean } = {}) {
   const db = { testers: initialTesters.map((t) => ({ ...t })) };
@@ -126,11 +126,13 @@ Deno.test('remove: deletes by id', async () => {
   }
 });
 
-Deno.test('buildTesterInvite: appends the fixed "how to submit feedback" footer', () => {
-  const result = buildTesterInvite("I've just made some changes, please have a look");
-  assert(result.startsWith("I've just made some changes, please have a look\n\n"));
-  assert(result.includes('Submit Idea'));
-  assert(result.includes('kimardenmiller.github.io/bayview-boarding'));
+Deno.test('buildTesterMessage: greets the tester by their first name, then the message verbatim', () => {
+  const result = buildTesterMessage('Jane Tester', "We've made a few changes, please have a look!");
+  assertEquals(result, "Hi Jane, We've made a few changes, please have a look!");
+});
+
+Deno.test('buildTesterMessage: falls back to "there" for a blank name', () => {
+  assertEquals(buildTesterMessage('', 'Hello!'), 'Hi there, Hello!');
 });
 
 Deno.test('notify: requires a message', async () => {
@@ -144,15 +146,15 @@ Deno.test('notify: requires a message', async () => {
   }
 });
 
-Deno.test('notify: texts only active testers, appending the standard footer', async () => {
+Deno.test('notify: texts only active testers, each personally greeted by their own first name', async () => {
   const stub = stubEnvironment([
-    { id: 't1', name: 'Jane', phone: '4155550100', active: true, created_at: '2026-09-17T12:00:00Z' },
+    { id: 't1', name: 'Jane Tester', phone: '4155550100', active: true, created_at: '2026-09-17T12:00:00Z' },
     { id: 't2', name: 'Bob', phone: '4155550101', active: false, created_at: '2026-09-16T12:00:00Z' },
     { id: 't3', name: 'Sam', phone: '4155550102', active: true, created_at: '2026-09-15T12:00:00Z' },
   ]);
   try {
     const res = await handleRequest(postRequest({
-      password: ADMIN_PASSWORD, action: 'notify', message: "I've just made some changes, please have a look",
+      password: ADMIN_PASSWORD, action: 'notify', message: "We've made a few changes, please have a look!",
     }));
     assertEquals(res.status, 200);
     const data = await res.json();
@@ -160,7 +162,8 @@ Deno.test('notify: texts only active testers, appending the standard footer', as
     assertEquals(data.failed, 0);
     assertEquals(data.total, 2);
     assertEquals(stub.smsCalls.length, 2); // Bob (inactive) never texted
-    assert(stub.smsCalls.every((c) => c.body.includes('Submit Idea')));
+    assertEquals(stub.smsCalls[0].body, "Hi Jane, We've made a few changes, please have a look!");
+    assertEquals(stub.smsCalls[1].body, "Hi Sam, We've made a few changes, please have a look!");
   } finally {
     stub.restore();
   }

@@ -29,18 +29,23 @@ Kim Miller and Estee Fletter at 210 Bayview Drive, San Rafael, CA.
   pick-up must be after its drop-off (no such constraint across days)
 - Twilio SMS: booking confirmations (sent at submission), stay reminders
   (a daily cron job texts everyone checking in the next day, Sept 16 —
-  see supabase/functions/send-reminders), and billing texts (admin-
-  triggered from the stay detail view with an editable final cost, not
-  auto-sent — the estimate can be wrong by pickup). A2P 10DLC is APPROVED
-  (confirmed via the API Sept 16, 2026) - real sends actually go through
-- Admin panel: browse by dog, each with its always-current profile and full
-  stay history (each past stay shows its own frozen declared/signed
-  snapshot, not just the dog's latest profile — see Data model below), a
-  "Send Billing Text" control and a "View waiver as signed" toggle (Sept
-  16 (5) — see waiver_snapshot below) on every stay, plus a "💡 Ideas &
-  Bugs" section (Sept 16 (8) — see feedback below) with an open-count
-  badge and a "📢 Testers" section (Sept 17, 2026 — see testers below) to
-  maintain a tester list and broadcast an SMS invite to all of them.
+  see supabase/functions/send-reminders), pickup reminders (the same
+  idea for the day before check_out instead of check_in, Sept 17 - see
+  supabase/functions/send-pickup-reminders), and billing texts (admin-
+  triggered, editable final cost, not auto-sent — the estimate can be
+  wrong by pickup). A2P 10DLC is APPROVED (confirmed via the API Sept
+  16, 2026) - real sends actually go through
+- Admin panel, top to bottom (reordered Sept 17, 2026 (2) - the dog list
+  used to be at the very bottom, settings first): an "Unbilled Stays"
+  review list (every checked-out, never-billed stay, editable dates/
+  times/cost before sending - see billed_at below); the owner search +
+  dog list; a "💡 Ideas & Bugs" section (Sept 16 (8) — see feedback
+  below) with an open-count badge and a "📢 Testers" section (Sept 17 —
+  see testers below) to maintain a tester list and broadcast a
+  personally-greeted SMS to all of them; then day rate/discount/holiday/
+  vet-list/packing-list/SMS-template settings. Each stay in a dog's
+  history also still shows a "Send Billing Text" control and a "View
+  waiver as signed" toggle (Sept 16 (5) — see waiver_snapshot below).
   Reached via the nav menu's "Admin" item (Sept 16, 2026 — reversed the
   earlier "no visible entry point" decision on request) or the
   bookmarked ?admin URL; either way it's still fully password-gated
@@ -92,9 +97,18 @@ so putting personal cell numbers there would leak them to every visitor.
 They remain KIM_PHONE/ESTEE_PHONE Supabase secrets, changed via
 `supabase secrets set` rather than through the admin UI.
 
-`stays.reminder_sent_at` (Sept 16, 2026) marks a stay's reminder text as
-already sent, so the daily cron job can't double-text someone on a
-retried or overlapping run.
+`stays.reminder_sent_at` (Sept 16, 2026) marks a stay's drop-off reminder
+text as already sent, so the daily cron job can't double-text someone on
+a retried or overlapping run. `stays.pickup_reminder_sent_at` (Sept 17,
+2026) is the same idea for the pickup-side reminder (see send-pickup-
+reminders below) - a separate column since it's a separate cron/message.
+
+`stays.billed_at` (Sept 17, 2026) marks a stay as billed - previously
+nothing at all tracked whether a bill had been sent, so "which stays
+still need billing" wasn't something the app could actually answer. Set
+by admin-data's billStay action (see Rules/Key files) only once the
+billing SMS has actually been sent successfully, never just on admin
+clicking a button.
 
 `stays.waiver_snapshot` (Sept 16 (5), jsonb) captures the exact
 WAIVER_SECTIONS content (array of {title, body}) as shown and signed at
@@ -124,16 +138,26 @@ email (optional), active (default true, no toggle in the UI yet - see
 supabase/functions/testers/index.ts). Unlike settings/feedback, this one
 has NO public branch at all: list/add/remove/notify are all admin-
 password-gated (same shape as admin-data), since a phone number is
-contact info nobody but Kim should read or add to. "notify" texts every
-active tester the composed message plus a fixed footer (buildTesterInvite)
-explaining how to reach "Submit Idea", reusing the same Twilio sendSms
+contact info nobody but Kim should read or add to. "notify" texts each
+active tester their own personal "Hi {their first name}, " followed by
+the composed message verbatim (buildTesterMessage) - the admin compose
+box starts pre-filled with a suggested default (DEFAULT_BROADCAST_MESSAGE
+in App.js) that already includes the site link and "Submit Idea"
+directions, fully editable before each send and reset back to that
+default afterward, rather than a fixed server-side footer (that was the
+Sept 17 design, replaced same-day once "Hi {name}," was added - a
+server-appended footer would have meant the greeting landed at the very
+end of the text instead of the start). Reuses the same Twilio sendSms
 pattern as receive-sms/send-confirmation.
 
 **Reproducing the reminder cron's secret** (Sept 16, 2026): the cron job
 (supabase/migrations/20260916000000_stay_reminders_cron.sql) calls
 send-reminders via pg_net with an x-cron-secret header, read from
 `vault.decrypted_secrets where name = 'cron_secret'` - the actual value
-is deliberately not in any git-tracked file. If the cron job or the
+is deliberately not in any git-tracked file. send-pickup-reminders (Sept
+17, 2026) reuses this exact same secret/vault entry, just a second cron
+schedule (send-stay-pickup-reminders-daily, 5 min offset) pointed at a
+different function - no separate secret needed. If the cron job or the
 vault secret is ever lost/needs rotating: generate a random value, run
 `select vault.create_secret('<value>', 'cron_secret');` directly against
 the live database (not saved as a migration), and
@@ -153,18 +177,19 @@ call itself is dropped, not for a routine secret rotation.
 - src/App.js — main app
 - src/settings.js — all configurable values (rates, vets, messages, packing list)
 - src/waiver.js — full waiver text
-- src/App.test.js — 153 passing tests (TDD), Supabase mocked via src/__mocks__/supabase.js
+- src/App.test.js — 158 passing tests (TDD), Supabase mocked via src/__mocks__/supabase.js
 - supabase/functions/send-contact/index.ts — public Contact Us form handler: relays name/email-or-phone/message to Kim & Estee by SMS (reuses KIM_PHONE/ESTEE_PHONE). Deployed normally (no --no-verify-jwt) since it's called via the Supabase JS client like settings/lookup-client/submit-booking
 - supabase/functions/feedback/index.ts — "Submit Idea": public submit (no password) + admin list/status-update (password) for the feedback queue
-- supabase/functions/testers/index.ts — tester broadcast list: entirely admin-password-gated list/add/remove/notify (no public branch at all)
+- supabase/functions/testers/index.ts — tester broadcast list: entirely admin-password-gated list/add/remove/notify (no public branch at all); notify greets each active tester by their own first name
+- supabase/functions/send-pickup-reminders/index.ts — daily cron target, the pickup-side counterpart to send-reminders: finds stays checking out tomorrow, texts each via send-confirmation (type "pickup"), marks pickup_reminder_sent_at. Deployed with `--no-verify-jwt` - same care needed on redeploy as send-reminders
 - public/img/about/ — the 6 numbered photos on the About page, served from the public folder (not bundled) and referenced via process.env.PUBLIC_URL since the app is hosted at a subpath
 - supabase/functions/send-reminders/index.ts — daily cron target (pg_cron + pg_net, see the migration): finds stays checking in tomorrow, fetches the current sms_reminder template + packing_list from `settings`, texts each via send-confirmation, marks reminder_sent_at. Deployed with `--no-verify-jwt`; checks its own CRON_SECRET instead (see Data model for how that secret is set up without ever being committed) - be careful to keep that flag on every redeploy (a plain `supabase functions deploy send-reminders` silently re-enables JWT verification and would break the cron, same bug class as the receive-sms incident)
-- supabase/functions/settings/index.ts — public read / password-gated write of day rate, multi-dog discount, holiday upcharge, vet list, packing list, and the 3 SMS templates
+- supabase/functions/settings/index.ts — public read / password-gated write of day rate, multi-dog discount, holiday upcharge, vet list, packing list, and the 4 SMS templates (confirmation/drop-off reminder/pickup reminder/billing)
 - supabase/functions/submit-booking/index.ts — handles booking submission: find-or-create owner (by phone) and each dog (by owner+name), inserts the stay (incl. waiver_snapshot) + stay_dogs snapshot links (service role key)
-- supabase/functions/send-confirmation/index.ts — Twilio SMS function (outbound); accepts an optional message_template (the admin-edited settings text, with {placeholders} filled by fillTemplate) + packing_list from the caller; falls back to its own hardcoded 3-message-type logic if no template is given. Called directly by the client at booking time, and by send-reminders and the admin panel for the other two - has its own Deno test suite (index.test.ts) now, added Sept 16 (5)
+- supabase/functions/send-confirmation/index.ts — Twilio SMS function (outbound); accepts an optional message_template (the admin-edited settings text, with {placeholders} filled by fillTemplate) + packing_list from the caller; falls back to its own hardcoded 4-message-type logic (confirmation/reminder/billing/pickup) if no template is given. Called directly by the client at booking time, and by send-reminders/send-pickup-reminders/the admin panel for the other three - has its own Deno test suite (index.test.ts), added Sept 16 (5)
 - supabase/functions/receive-sms/index.ts — inbound SMS webhook: auto-reply + relay to Kim/Estee. Deploy with `--no-verify-jwt` (see comment at top of file) or Twilio's webhook calls silently fail
 - supabase/functions/_shared/contact.ts — pure text builders + Twilio signature validator, shared by send-confirmation and receive-sms, unit-tested via `deno test`
-- supabase/functions/admin-data/index.ts — server-side admin password check + every dog (profile + owner + stay history) (service role key, never exposed to client)
+- supabase/functions/admin-data/index.ts — server-side admin password check + every dog (profile + owner + stay history) (service role key, never exposed to client). Also handles billStay (Sept 17, 2026): saves corrected check-in/out/drop/pickup/cost and marks billed_at, returning the refreshed dog list
 - supabase/functions/lookup-client/index.ts — returning-client autofill by phone: vet + every dog on file (returns only safe fields, never aggression/health)
 - supabase/migrations/ — schema history, including the Sept 14 dog-profiles reorg (owners/dogs/stays/stay_dogs) and the RLS lockdown history for the old flat `stays` table
 - FIXES.txt — current fix list and backlog

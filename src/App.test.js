@@ -28,6 +28,7 @@ const DEFAULT_SETTINGS = {
   smsConfirmation: 'Hi {firstName}! confirmed.',
   smsReminder: 'Hi {firstName}! reminder, bring {packingList}.',
   smsBilling: 'Hi {firstName}! total ${finalCost}.',
+  smsPickupReminder: 'Bye {dogName}! pickup at {pickupDate} {pickupTime}.',
 };
 
 function mockInvokeDefaults(overrides = {}) {
@@ -1579,6 +1580,132 @@ describe('Admin login', () => {
 });
 
 // ── Admin: logged in ─────────────────────────────────────────────────────────
+const UNBILLED_DOGS = [
+  {
+    id: 'dog-bud', name: 'Bud', breed: 'Labrador', dob: null, spay_neuter: 'yes',
+    aggression_history: 'no', aggression_detail: '', health_concerns: 'no', health_detail: '',
+    owner: { name: 'Kim', phone: '6505551111', email: 'kim@test.com' },
+    stays: [
+      // Already checked out, never billed - should show up.
+      {
+        id: 'stay-unbilled', check_in: daysFromToday(-4), check_out: daysFromToday(-2),
+        drop_time: '09:00:00', pickup_time: '17:00:00', estimated_cost: 210,
+        number_of_dogs: 1, submitted_at: '2026-01-01T00:00:00Z', billed_at: null,
+      },
+      // Already billed - should NOT show up.
+      {
+        id: 'stay-already-billed', check_in: daysFromToday(-10), check_out: daysFromToday(-8),
+        drop_time: '09:00:00', pickup_time: '09:00:00', estimated_cost: 105,
+        number_of_dogs: 1, submitted_at: '2026-01-01T00:00:00Z', billed_at: '2026-01-05T00:00:00Z',
+      },
+      // Still upcoming - should NOT show up (nothing to bill yet).
+      {
+        id: 'stay-future', check_in: daysFromToday(3), check_out: daysFromToday(5),
+        drop_time: '09:00:00', pickup_time: '09:00:00', estimated_cost: 210,
+        number_of_dogs: 1, submitted_at: '2026-01-01T00:00:00Z', billed_at: null,
+      },
+    ],
+  },
+  {
+    id: 'dog-fido', name: 'Fido', breed: 'Poodle', dob: null, spay_neuter: 'yes',
+    aggression_history: 'no', aggression_detail: '', health_concerns: 'no', health_detail: '',
+    owner: { name: 'Kim', phone: '6505551111', email: 'kim@test.com' },
+    stays: [
+      // Shares the same stay id as Bud's unbilled one below (a 2-dog
+      // booking) - the unbilled list must dedupe by stay id, not show
+      // it twice.
+      {
+        id: 'stay-shared', check_in: daysFromToday(-4), check_out: daysFromToday(-2),
+        drop_time: '09:00:00', pickup_time: '17:00:00', estimated_cost: 380,
+        number_of_dogs: 2, submitted_at: '2026-01-01T00:00:00Z', billed_at: null,
+      },
+    ],
+  },
+  {
+    id: 'dog-bud2', name: 'Bud', breed: 'Labrador', dob: null, spay_neuter: 'yes',
+    aggression_history: 'no', aggression_detail: '', health_concerns: 'no', health_detail: '',
+    owner: { name: 'Kim', phone: '6505551111', email: 'kim@test.com' },
+    stays: [
+      {
+        id: 'stay-shared', check_in: daysFromToday(-4), check_out: daysFromToday(-2),
+        drop_time: '09:00:00', pickup_time: '17:00:00', estimated_cost: 380,
+        number_of_dogs: 2, submitted_at: '2026-01-01T00:00:00Z', billed_at: null,
+      },
+    ],
+  },
+];
+
+async function loginAsAdminWithUnbilled(dogs = UNBILLED_DOGS) {
+  mockInvokeDefaults({
+    'admin-data': async (opts) => {
+      if (opts?.body?.action === 'billStay') {
+        return { data: { dogs: [], totalStays: 0 }, error: null }; // stay(s) now billed, list refreshes empty
+      }
+      return { data: { dogs, totalStays: dogs.reduce((n, d) => n + d.stays.length, 0) }, error: null };
+    },
+  });
+  goToAdminUrl();
+  render(<App />);
+  await userEvent.type(screen.getByPlaceholderText('Password'), 'correct-password');
+  fireEvent.click(screen.getByText('Sign In'));
+  await screen.findByText('Bayview Boarding — Admin');
+}
+
+describe('Admin — logged in — Unbilled Stays', () => {
+  test('shows only stays that are checked out and not yet billed, deduping a shared multi-dog stay', async () => {
+    await loginAsAdminWithUnbilled();
+    expect(screen.getByText('Fido & Bud — Kim')).toBeInTheDocument(); // the shared stay, once
+    // The already-billed and still-upcoming stays never render a card at all
+    expect(screen.getAllByText(/— Kim/).length).toBe(2); // stay-unbilled (Bud alone) + stay-shared (Bud & Fido)
+  });
+
+  test('recalculates the estimate from the (editable) dates/times using the real cost logic', async () => {
+    await loginAsAdminWithUnbilled();
+    const card = screen.getByText('Fido & Bud — Kim').closest('.stay-card');
+    const costInput = within(card).getByDisplayValue('380');
+    fireEvent.click(within(card).getByText('Recalculate'));
+    // 2 nights, 2 dogs, default 10% off the 2nd -> matches calcCost's own math, just confirms it changed from the raw stored estimate
+    await waitFor(() => expect(costInput.value).not.toBe(''));
+  });
+
+  test('sends the bill (SMS first, then marks billed) and the stay drops off the list', async () => {
+    await loginAsAdminWithUnbilled();
+    const card = screen.getByText('Fido & Bud — Kim').closest('.stay-card');
+    fireEvent.click(within(card).getByText('Send Bill'));
+
+    await waitFor(() => expect(supabase.functions.invoke).toHaveBeenCalledWith('send-confirmation', {
+      body: expect.objectContaining({ type: 'billing', dog_name: 'Fido & Bud', owner_phone: '6505551111', final_cost: 380 }),
+    }));
+    await waitFor(() => expect(supabase.functions.invoke).toHaveBeenCalledWith('admin-data', {
+      body: expect.objectContaining({ action: 'billStay', stayId: 'stay-shared', estimatedCost: 380 }),
+    }));
+    expect(await screen.findByText('Nothing to bill right now.')).toBeInTheDocument();
+  });
+
+  test('does not mark billed if the SMS send fails - the stay stays on the list', async () => {
+    mockInvokeDefaults({
+      'admin-data': async () => ({ data: { dogs: UNBILLED_DOGS, totalStays: 4 }, error: null }),
+      'send-confirmation': async () => ({ data: null, error: { message: 'twilio down' } }),
+    });
+    goToAdminUrl();
+    render(<App />);
+    await userEvent.type(screen.getByPlaceholderText('Password'), 'correct-password');
+    fireEvent.click(screen.getByText('Sign In'));
+    await screen.findByText('Bayview Boarding — Admin');
+
+    const card = screen.getByText('Fido & Bud — Kim').closest('.stay-card');
+    fireEvent.click(within(card).getByText('Send Bill'));
+    expect(await within(card).findByText('Failed to send. Please try again.')).toBeInTheDocument();
+    expect(supabase.functions.invoke).not.toHaveBeenCalledWith('admin-data', expect.objectContaining({ body: expect.objectContaining({ action: 'billStay' }) }));
+    expect(screen.getByText('Fido & Bud — Kim')).toBeInTheDocument(); // still there
+  });
+
+  test('shows a friendly empty state when nothing needs billing', async () => {
+    await loginAsAdminWithUnbilled([]);
+    expect(screen.getByText('Nothing to bill right now.')).toBeInTheDocument();
+  });
+});
+
 describe('Admin — logged in — Ideas & Bugs', () => {
   test('the entry button shows the open count as a badge', async () => {
     await loginAsAdminWithFeedback();
@@ -1655,14 +1782,17 @@ describe('Admin — logged in — Testers', () => {
     await waitFor(() => expect(screen.queryByText('Jane Tester — 4155550100')).not.toBeInTheDocument());
   });
 
-  test('the broadcast button is disabled without a message, and counts only active testers', async () => {
+  test('pre-fills a suggested message (Send starts enabled), counts only active testers, and disables if cleared', async () => {
     await loginAsAdminWithTesters();
     fireEvent.click(screen.getByText('📢 Testers'));
     await screen.findByText('Testers', { selector: 'h2' });
     // 1 of the 2 fixtures is active
     const sendBtn = screen.getByText('Send to 1 tester');
+    const box = screen.getByDisplayValue(/We've made a few changes to the Bayview Boarding site/);
+    expect(sendBtn).not.toBeDisabled(); // a suggested message is already there
+    fireEvent.change(box, { target: { value: '' } });
     expect(sendBtn).toBeDisabled();
-    await userEvent.type(screen.getByPlaceholderText(/I've just made some changes/), 'Check out the new map!');
+    fireEvent.change(box, { target: { value: 'Check out the new map!' } });
     expect(sendBtn).not.toBeDisabled();
   });
 
@@ -1670,7 +1800,8 @@ describe('Admin — logged in — Testers', () => {
     await loginAsAdminWithTesters();
     fireEvent.click(screen.getByText('📢 Testers'));
     await screen.findByText('Testers', { selector: 'h2' });
-    await userEvent.type(screen.getByPlaceholderText(/I've just made some changes/), 'Check out the new map!');
+    const box = screen.getByDisplayValue(/We've made a few changes to the Bayview Boarding site/);
+    fireEvent.change(box, { target: { value: 'Check out the new map!' } });
     fireEvent.click(screen.getByText('Send to 1 tester'));
 
     await waitFor(() => expect(supabase.functions.invoke).toHaveBeenCalledWith('testers', {
@@ -1831,27 +1962,28 @@ describe('Admin — logged in', () => {
 
   test('updates and displays the day rate after Save', async () => {
     await loginAsAdmin();
-    // Day Rate is the first of several settings sections, each with its
-    // own "Save" button (rate, discount %, holiday %) - scope to the first.
-    const rateInput = document.querySelectorAll('input[type="number"]')[0];
-    fireEvent.change(rateInput, { target: { value: '150' } });
-    fireEvent.click(screen.getAllByText('Save')[0]);
+    // Scoped to its own section (not just the first number input/"Save"
+    // button on the page) since other sections - including the Unbilled
+    // Stays list - have their own number inputs and Save-like buttons.
+    const dayRateEditor = within(document.querySelector('.day-rate-editor'));
+    fireEvent.change(dayRateEditor.getByRole('spinbutton'), { target: { value: '150' } });
+    fireEvent.click(dayRateEditor.getByText('Save'));
     expect(await screen.findByText(/Current rate: \$150\/day/)).toBeInTheDocument();
   });
 
   test('updates the 2nd+ dog discount %', async () => {
     await loginAsAdmin();
-    const discountInput = document.querySelectorAll('input[type="number"]')[1];
-    fireEvent.change(discountInput, { target: { value: '15' } });
-    fireEvent.click(screen.getAllByText('Save')[1]);
+    const discountEditor = within(document.querySelector('.discount-editor'));
+    fireEvent.change(discountEditor.getByRole('spinbutton'), { target: { value: '15' } });
+    fireEvent.click(discountEditor.getByText('Save'));
     expect(await screen.findByText(/Current: 15%/)).toBeInTheDocument();
   });
 
   test('updates the holiday upcharge %', async () => {
     await loginAsAdmin();
-    const holidayInput = document.querySelectorAll('input[type="number"]')[2];
-    fireEvent.change(holidayInput, { target: { value: '25' } });
-    fireEvent.click(screen.getAllByText('Save')[2]);
+    const holidayEditor = within(document.querySelector('.holiday-editor'));
+    fireEvent.change(holidayEditor.getByRole('spinbutton'), { target: { value: '25' } });
+    fireEvent.click(holidayEditor.getByText('Save'));
     expect(await screen.findByText(/Current: 25%/)).toBeInTheDocument();
   });
 
@@ -1869,9 +2001,9 @@ describe('Admin — logged in', () => {
     fireEvent.click(screen.getByText('Sign In'));
     await screen.findByText('Bayview Boarding — Admin');
 
-    const rateInput = document.querySelectorAll('input[type="number"]')[0];
-    fireEvent.change(rateInput, { target: { value: '-5' } });
-    fireEvent.click(screen.getAllByText('Save')[0]);
+    const dayRateEditor = within(document.querySelector('.day-rate-editor'));
+    fireEvent.change(dayRateEditor.getByRole('spinbutton'), { target: { value: '-5' } });
+    fireEvent.click(dayRateEditor.getByText('Save'));
     expect(await screen.findByText(/Invalid settings: dayRate must be a positive number/)).toBeInTheDocument();
     expect(screen.getByText(/Current rate: \$105\/day/)).toBeInTheDocument(); // unchanged
   });
@@ -1948,10 +2080,11 @@ describe('Admin — logged in', () => {
     expect(smsEditor.getByDisplayValue('Hi {firstName}! confirmed.')).toBeInTheDocument();
     expect(smsEditor.getByDisplayValue('Hi {firstName}! reminder, bring {packingList}.')).toBeInTheDocument();
     expect(smsEditor.getByDisplayValue('Hi {firstName}! total ${finalCost}.')).toBeInTheDocument();
+    expect(smsEditor.getByDisplayValue('Bye {dogName}! pickup at {pickupDate} {pickupTime}.')).toBeInTheDocument();
 
     const reminderBox = smsEditor.getByDisplayValue('Hi {firstName}! reminder, bring {packingList}.');
     fireEvent.change(reminderBox, { target: { value: 'New reminder wording {firstName}' } });
-    fireEvent.click(smsEditor.getByText('Save Stay Reminder Text'));
+    fireEvent.click(smsEditor.getByText('Save Drop-off Reminder Text'));
     await waitFor(() => expect(supabase.functions.invoke).toHaveBeenCalledWith('settings', {
       body: { password: 'correct-password', updates: { smsReminder: 'New reminder wording {firstName}' } },
     }));

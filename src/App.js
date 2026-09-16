@@ -21,7 +21,17 @@ const DEFAULT_SMS_TEMPLATES = {
   confirmation: SETTINGS.SMS_CONFIRMATION,
   reminder: SETTINGS.SMS_REMINDER,
   billing: SETTINGS.SMS_BILLING,
+  pickupReminder: SETTINGS.SMS_PICKUP_REMINDER,
 };
+
+// Suggested starting text for the admin "Testers" broadcast box (Sept 17,
+// 2026) - a static block admin can fully edit before each send, distinct
+// from "Hi {name}, " which the server prepends per-recipient using each
+// tester's own name, not something typed here at all.
+const DEFAULT_BROADCAST_MESSAGE =
+  "We've made a few changes to the Bayview Boarding site below. Please have a look and tell us what you think!\n" +
+  'https://kimardenmiller.github.io/bayview-boarding\n' +
+  'Then just tap the (☰) menu and choose "Submit Idea" to share your feedback with us.';
 
 function vetDropdownOptions(vets) {
   return ['Select a Vet', ...vets, 'Other — see notes'];
@@ -682,9 +692,16 @@ function AdminView({
   const [newTesterPhone, setNewTesterPhone] = useState('');
   const [testersError, setTestersError] = useState('');
   const [savingTester, setSavingTester] = useState(false);
-  const [broadcastMessage, setBroadcastMessage] = useState('');
+  const [broadcastMessage, setBroadcastMessage] = useState(DEFAULT_BROADCAST_MESSAGE);
   const [broadcastStatus, setBroadcastStatus] = useState('idle'); // idle | sending | sent | error
   const [broadcastResult, setBroadcastResult] = useState(null);
+  // Unbilled-stays review (Sept 17, 2026) - local edits per stay id, only
+  // committed (and the stay marked billed) once the bill is actually
+  // sent; a failed send leaves the stay in the list with edits intact
+  // rather than silently marking it billed anyway.
+  const [billingEdits, setBillingEdits] = useState({});
+  const [unbilledStatus, setUnbilledStatus] = useState({});
+  const [sendingBillId, setSendingBillId] = useState(null);
   // Billing SMS is admin-triggered (not auto-sent at pickup time) - the
   // estimated cost can be wrong by pickup (early/late pickup, extra
   // services), so an admin reviews/adjusts the actual final amount before
@@ -796,11 +813,12 @@ function AdminView({
       setPackingList(data.packingList);
       setEditPackingList(data.packingList);
     }
-    if (data.smsConfirmation || data.smsReminder || data.smsBilling) {
+    if (data.smsConfirmation || data.smsReminder || data.smsBilling || data.smsPickupReminder) {
       const next = {
         confirmation: data.smsConfirmation ?? smsTemplates.confirmation,
         reminder: data.smsReminder ?? smsTemplates.reminder,
         billing: data.smsBilling ?? smsTemplates.billing,
+        pickupReminder: data.smsPickupReminder ?? smsTemplates.pickupReminder,
       };
       setSmsTemplates(next);
       setEditSms(next);
@@ -879,7 +897,81 @@ function AdminView({
     }
     setBroadcastResult(data);
     setBroadcastStatus('sent');
-    setBroadcastMessage('');
+    // Reset to the suggested default rather than leaving it blank - it's
+    // meant to be a reusable starting point, ready for next time.
+    setBroadcastMessage(DEFAULT_BROADCAST_MESSAGE);
+  }
+
+  // Lazily falls back to the stay's actual stored value until admin
+  // touches that field - same pattern as billingDraftFor above.
+  function billingFieldFor(stay, field, fallback) {
+    return billingEdits[stay.id]?.[field] ?? fallback;
+  }
+
+  function updateBillingField(stayId, field, value) {
+    setBillingEdits(prev => ({ ...prev, [stayId]: { ...prev[stayId], [field]: value } }));
+  }
+
+  // Recomputes a suggested total from the (possibly-just-edited)
+  // dates/times using the site's real cost logic - still just a
+  // suggestion, landing in the same editable Final Cost field so admin
+  // can hand-adjust it further before sending.
+  function recalculateBilling(stay) {
+    const checkIn = billingFieldFor(stay, 'checkIn', stay.check_in);
+    const checkOut = billingFieldFor(stay, 'checkOut', stay.check_out);
+    const dropTime = billingFieldFor(stay, 'dropTime', stay.drop_time ? stay.drop_time.slice(0, 5) : '');
+    const pickupTime = billingFieldFor(stay, 'pickupTime', stay.pickup_time ? stay.pickup_time.slice(0, 5) : '');
+    const cost = calcCost(checkIn, checkOut, dropTime, pickupTime, rate, stay.number_of_dogs || 1, multiDogDiscount, holidayUpcharge);
+    updateBillingField(stay.id, 'finalCost', cost || '');
+  }
+
+  // Sends the bill THEN marks it billed - in that order, deliberately:
+  // "billed" should mean the text actually went out, not just that admin
+  // clicked a button. If the send fails, nothing is persisted and the
+  // stay stays on the unbilled list with the edits still in place to
+  // retry. Any corrected dates/times/cost are saved in the same call
+  // that marks it billed (admin-data's billStay action).
+  async function sendBill(stay) {
+    const checkIn = billingFieldFor(stay, 'checkIn', stay.check_in);
+    const checkOut = billingFieldFor(stay, 'checkOut', stay.check_out);
+    const dropTime = billingFieldFor(stay, 'dropTime', stay.drop_time ? stay.drop_time.slice(0, 5) : '');
+    const pickupTime = billingFieldFor(stay, 'pickupTime', stay.pickup_time ? stay.pickup_time.slice(0, 5) : '');
+    const finalCost = Number(billingFieldFor(stay, 'finalCost', stay.estimated_cost != null ? String(stay.estimated_cost) : ''));
+    if (!finalCost || finalCost <= 0) {
+      setUnbilledStatus(prev => ({ ...prev, [stay.id]: 'Enter a valid amount first' }));
+      return;
+    }
+    setSendingBillId(stay.id);
+    setUnbilledStatus(prev => ({ ...prev, [stay.id]: null }));
+
+    const { data: smsData, error: smsErr } = await supabase.functions.invoke('send-confirmation', {
+      body: {
+        type: 'billing', owner_name: stay.ownerName, owner_phone: stay.ownerPhone,
+        dog_name: stay.dogNames.join(' & '), final_cost: finalCost, message_template: smsTemplates.billing,
+      },
+    });
+    if (smsErr || smsData?.error) {
+      setSendingBillId(null);
+      setUnbilledStatus(prev => ({ ...prev, [stay.id]: 'Failed to send. Please try again.' }));
+      return;
+    }
+
+    const { data, error: fnError } = await supabase.functions.invoke('admin-data', {
+      body: {
+        password: pw, action: 'billStay', stayId: stay.id,
+        checkIn, checkOut, dropTime: dropTime || null, pickupTime: pickupTime || null, estimatedCost: finalCost,
+      },
+    });
+    setSendingBillId(null);
+    if (fnError || data?.error) {
+      // The text already went out - just couldn't record it as billed.
+      // Log-worthy but not something to block the admin over; the stay
+      // stays on the unbilled list so it isn't lost.
+      setUnbilledStatus(prev => ({ ...prev, [stay.id]: 'Sent, but failed to save - it may show as unbilled again.' }));
+      return;
+    }
+    setDogs(data.dogs);
+    setTotalStays(data.totalStays);
   }
 
   if (!authed) {
@@ -903,6 +995,26 @@ function AdminView({
     d.owner?.name?.toLowerCase().includes(search.toLowerCase())
   );
   const feedbackOpenCount = feedback.filter(f => f.status === 'open').length;
+
+  // Every dog's stay history already carries billed_at and check_out -
+  // no separate fetch needed, just flatten across dogs and dedupe by
+  // stay id (a shared multi-dog stay otherwise appears once per dog).
+  // "Unbilled" = already checked out (or checking out today) and never
+  // billed - a future stay doesn't need billing yet.
+  const today = todayISO();
+  const unbilledByStayId = new Map();
+  dogs.forEach(d => {
+    (d.stays || []).forEach(s => {
+      if (!s.billed_at && s.check_out && s.check_out <= today) {
+        if (unbilledByStayId.has(s.id)) {
+          unbilledByStayId.get(s.id).dogNames.push(d.name);
+        } else {
+          unbilledByStayId.set(s.id, { ...s, dogNames: [d.name], ownerName: d.owner?.name, ownerPhone: d.owner?.phone });
+        }
+      }
+    });
+  });
+  const unbilledStays = Array.from(unbilledByStayId.values()).sort((a, b) => a.check_out.localeCompare(b.check_out));
 
   if (showFeedback) {
     return (
@@ -959,13 +1071,13 @@ function AdminView({
           <div className="rate-setting">
             <label className="field-label">Broadcast a Message</label>
             <div style={{ fontSize: '0.72rem', color: '#6B7A8A', marginBottom: 8 }}>
-              Sent to every active tester below, with directions to "Submit Idea" added automatically.
+              Each active tester gets their own text starting "Hi [their name], " followed by
+              whatever's below - a suggested starting point, fully editable before you send.
             </div>
             <textarea
               value={broadcastMessage}
               onChange={e => setBroadcastMessage(e.target.value)}
-              placeholder="I've just made some changes, please have a look..."
-              rows={3}
+              rows={5}
               style={{ width: '100%', padding: '8px 10px', border: '1.5px solid #D5D9DE', borderRadius: 6, fontSize: '0.85rem', fontFamily: 'inherit' }}
             />
             <div style={{ marginTop: 8, display: 'flex', gap: 8, alignItems: 'center' }}>
@@ -1109,6 +1221,79 @@ function AdminView({
           <h2>Bayview Boarding — Admin</h2>
           <button className="close-btn" onClick={onClose}>✕</button>
         </div>
+
+        <div className="rate-setting unbilled-section">
+          <label className="field-label">
+            Unbilled Stays {unbilledStays.length > 0 && <span className="feedback-badge" style={{ marginLeft: 6 }}>{unbilledStays.length}</span>}
+          </label>
+          {unbilledStays.length === 0 && <p className="empty" style={{ padding: '8px 0' }}>Nothing to bill right now.</p>}
+          <div className="stay-history">
+            {unbilledStays.map(s => (
+              <div key={s.id} className="stay-card">
+                <div className="stay-dates">
+                  <span>{s.dogNames.join(' & ')} — {s.ownerName}</span>
+                </div>
+                <div className="stay-meta">{s.ownerPhone}</div>
+                <div className="field-row" style={{ marginTop: 8 }}>
+                  <Field label="Check-in">
+                    <input type="date" value={billingFieldFor(s, 'checkIn', s.check_in)} onChange={e => updateBillingField(s.id, 'checkIn', e.target.value)} />
+                  </Field>
+                  <Field label="Check-out">
+                    <input type="date" value={billingFieldFor(s, 'checkOut', s.check_out)} onChange={e => updateBillingField(s.id, 'checkOut', e.target.value)} />
+                  </Field>
+                </div>
+                <div className="field-row">
+                  <Field label="Drop-off time">
+                    <input type="time" value={billingFieldFor(s, 'dropTime', s.drop_time ? s.drop_time.slice(0, 5) : '')} onChange={e => updateBillingField(s.id, 'dropTime', e.target.value)} />
+                  </Field>
+                  <Field label="Pickup time">
+                    <input type="time" value={billingFieldFor(s, 'pickupTime', s.pickup_time ? s.pickup_time.slice(0, 5) : '')} onChange={e => updateBillingField(s.id, 'pickupTime', e.target.value)} />
+                  </Field>
+                </div>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 8, flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: '0.85rem' }}>$</span>
+                  <input
+                    type="number"
+                    value={billingFieldFor(s, 'finalCost', s.estimated_cost != null ? String(s.estimated_cost) : '')}
+                    onChange={e => updateBillingField(s.id, 'finalCost', e.target.value)}
+                    style={{ width: 80, padding: '6px 10px', border: '1.5px solid #D5D9DE', borderRadius: 6, fontSize: '0.85rem' }}
+                  />
+                  <button className="btn-secondary" style={{ padding: '4px 10px', fontSize: '0.78rem' }} onClick={() => recalculateBilling(s)}>Recalculate</button>
+                  <button
+                    className="btn-primary"
+                    style={{ padding: '4px 10px', fontSize: '0.78rem' }}
+                    disabled={sendingBillId === s.id}
+                    onClick={() => sendBill(s)}
+                  >
+                    {sendingBillId === s.id ? 'Sending...' : 'Send Bill'}
+                  </button>
+                  {unbilledStatus[s.id] && (
+                    <span className="field-error" style={{ fontSize: '0.78rem' }}>{unbilledStatus[s.id]}</span>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <input className="search-input" placeholder="Search by dog or owner name..." value={search} onChange={e => setSearch(e.target.value)} />
+        <div className="admin-count">{loading ? 'Loading...' : `${totalStays} signed agreement${totalStays !== 1 ? 's' : ''} on file`}</div>
+        {filtered.length === 0 && !loading && <p className="empty">No records found.</p>}
+        <div className="dog-list">
+          {filtered.map((d, i) => (
+            <div key={i} className="dog-row" onClick={() => setSelected(d)}>
+              <div className="dog-row-left">
+                <div className="dog-row-name">{d.name}</div>
+                <div className="dog-row-owner">{d.owner?.name}</div>
+              </div>
+              <div className="dog-row-right">
+                <span className="stay-count">{d.stays.length} stay{d.stays.length !== 1 ? 's' : ''}</span>
+                <span className="chevron">›</span>
+              </div>
+            </div>
+          ))}
+        </div>
+
         <div className="admin-entry-row">
           <button className="btn-secondary feedback-entry" onClick={() => setShowFeedback(true)}>
             <span>💡 Ideas &amp; Bugs</span>
@@ -1118,7 +1303,7 @@ function AdminView({
             <span>📢 Testers</span>
           </button>
         </div>
-        <div className="rate-setting">
+        <div className="rate-setting day-rate-editor">
           <label className="field-label">Day Rate (per 24 hours)</label>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
             <span>$</span>
@@ -1128,7 +1313,7 @@ function AdminView({
           <div style={{ fontSize: '0.75rem', color: '#6B7A8A', marginTop: 4 }}>24-hour minimum · Current rate: ${formatMoney(rate)}/day</div>
         </div>
 
-        <div className="rate-setting">
+        <div className="rate-setting discount-editor">
           <label className="field-label">2nd+ Dog Discount</label>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
             <input type="number" value={editMultiDogDiscount} onChange={e => setEditMultiDogDiscount(e.target.value)} style={{ width: 80, padding: '6px 10px', border: '1.5px solid #D5D9DE', borderRadius: 6, fontSize: '0.95rem' }} />
@@ -1138,7 +1323,7 @@ function AdminView({
           <div style={{ fontSize: '0.75rem', color: '#6B7A8A', marginTop: 4 }}>Off each additional dog's nightly rate · Current: {multiDogDiscount * 100}%</div>
         </div>
 
-        <div className="rate-setting">
+        <div className="rate-setting holiday-editor">
           <label className="field-label">Holiday Upcharge</label>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
             <input type="number" value={editHolidayUpcharge} onChange={e => setEditHolidayUpcharge(e.target.value)} style={{ width: 80, padding: '6px 10px', border: '1.5px solid #D5D9DE', borderRadius: 6, fontSize: '0.95rem' }} />
@@ -1205,8 +1390,9 @@ function AdminView({
           </div>
           {[
             { key: 'confirmation', label: 'Booking Confirmation' },
-            { key: 'reminder', label: 'Stay Reminder' },
-            { key: 'billing', label: 'Billing / Pickup' },
+            { key: 'reminder', label: 'Drop-off Reminder' },
+            { key: 'pickupReminder', label: 'Pickup Reminder' },
+            { key: 'billing', label: 'Billing' },
           ].map(({ key, label }) => (
             <div key={key} style={{ marginBottom: 12 }}>
               <div style={{ fontSize: '0.8rem', fontWeight: 500, color: '#2C3E50', marginBottom: 4 }}>{label}</div>
@@ -1228,24 +1414,6 @@ function AdminView({
           ))}
         </div>
         {settingsError && <div className="field-error" style={{ marginBottom: 12 }}>{settingsError}</div>}
-
-        <input className="search-input" placeholder="Search by dog or owner name..." value={search} onChange={e => setSearch(e.target.value)} />
-        <div className="admin-count">{loading ? 'Loading...' : `${totalStays} signed agreement${totalStays !== 1 ? 's' : ''} on file`}</div>
-        {filtered.length === 0 && !loading && <p className="empty">No records found.</p>}
-        <div className="dog-list">
-          {filtered.map((d, i) => (
-            <div key={i} className="dog-row" onClick={() => setSelected(d)}>
-              <div className="dog-row-left">
-                <div className="dog-row-name">{d.name}</div>
-                <div className="dog-row-owner">{d.owner?.name}</div>
-              </div>
-              <div className="dog-row-right">
-                <span className="stay-count">{d.stays.length} stay{d.stays.length !== 1 ? 's' : ''}</span>
-                <span className="chevron">›</span>
-              </div>
-            </div>
-          ))}
-        </div>
       </div>
     </div>
   );
@@ -1675,11 +1843,12 @@ export default function App() {
       if (typeof data.holidayUpcharge === 'number') setHolidayUpcharge(data.holidayUpcharge);
       if (Array.isArray(data.vets)) setVets(data.vets);
       if (Array.isArray(data.packingList)) setPackingList(data.packingList);
-      if (data.smsConfirmation || data.smsReminder || data.smsBilling) {
+      if (data.smsConfirmation || data.smsReminder || data.smsBilling || data.smsPickupReminder) {
         setSmsTemplates({
           confirmation: data.smsConfirmation ?? DEFAULT_SMS_TEMPLATES.confirmation,
           reminder: data.smsReminder ?? DEFAULT_SMS_TEMPLATES.reminder,
           billing: data.smsBilling ?? DEFAULT_SMS_TEMPLATES.billing,
+          pickupReminder: data.smsPickupReminder ?? DEFAULT_SMS_TEMPLATES.pickupReminder,
         });
       }
     }).catch(() => {}); // network hiccup - keep the defaults, don't crash the page

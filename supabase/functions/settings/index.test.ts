@@ -16,6 +16,7 @@ const DEFAULT_ROW = {
   sms_confirmation: 'Hi {firstName}! confirmed.',
   sms_reminder: 'Hi {firstName}! reminder, bring: {packingList}.',
   sms_billing: 'Hi {firstName}! total: ${finalCost}.',
+  sms_pickup_reminder: 'Bye {dogName}! pickup at {pickupDate} {pickupTime}.',
 };
 
 function stubSupabase(initial: typeof DEFAULT_ROW = DEFAULT_ROW) {
@@ -76,6 +77,7 @@ Deno.test('a plain read requires no password (public)', async () => {
       smsConfirmation: DEFAULT_ROW.sms_confirmation,
       smsReminder: DEFAULT_ROW.sms_reminder,
       smsBilling: DEFAULT_ROW.sms_billing,
+      smsPickupReminder: DEFAULT_ROW.sms_pickup_reminder,
     });
     assertEquals(stub.calls[0].method, 'GET');
   } finally {
@@ -282,6 +284,21 @@ Deno.test('updates an SMS template, trimming it', async () => {
   }
 });
 
+Deno.test('updates the pickup-reminder template, trimming it', async () => {
+  const stub = stubSupabase();
+  try {
+    const res = await handleRequest(postRequest({
+      password: ADMIN_PASSWORD,
+      updates: { smsPickupReminder: '  New pickup text {dogName}  ' },
+    }));
+    assertEquals(res.status, 200);
+    const data = await res.json();
+    assertEquals(data.smsPickupReminder, 'New pickup text {dogName}');
+  } finally {
+    stub.restore();
+  }
+});
+
 Deno.test('rejects a blank SMS template, without touching the database', async () => {
   const stub = stubSupabase();
   try {
@@ -289,6 +306,8 @@ Deno.test('rejects a blank SMS template, without touching the database', async (
     assertEquals(confirmation.status, 400);
     const billing = await handleRequest(postRequest({ password: ADMIN_PASSWORD, updates: { smsBilling: '' } }));
     assertEquals(billing.status, 400);
+    const pickup = await handleRequest(postRequest({ password: ADMIN_PASSWORD, updates: { smsPickupReminder: '   ' } }));
+    assertEquals(pickup.status, 400);
     assertEquals(stub.calls.length, 0);
   } finally {
     stub.restore();

@@ -8,16 +8,18 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 //   list   - every tester
 //   add    - { name, phone, email? }
 //   remove - { id }
-//   notify - { message } -> texts every ACTIVE tester: the composed
-//            message plus a fixed footer explaining how to get to
-//            "Submit Idea", so Kim never has to re-type directions.
+//   notify - { message } -> texts every ACTIVE tester their own personal
+//            "Hi {their first name}, " followed by the composed message
+//            verbatim (Sept 17, 2026 - no fixed footer appended anymore;
+//            the client's own suggested default message already includes
+//            the site link and "Submit Idea" instructions, and the admin
+//            can freely edit or remove them before sending).
 const ADMIN_PASSWORD = Deno.env.get('ADMIN_PASSWORD')!;
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 const TWILIO_ACCOUNT_SID = Deno.env.get('TWILIO_ACCOUNT_SID')!;
 const TWILIO_AUTH_TOKEN = Deno.env.get('TWILIO_AUTH_TOKEN')!;
 const TWILIO_FROM = Deno.env.get('TWILIO_PHONE')!;
-const APP_URL = Deno.env.get('APP_URL') || 'https://kimardenmiller.github.io/bayview-boarding';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -32,9 +34,11 @@ function json(body: unknown, status = 200): Response {
 }
 
 // Exported so it can be checked directly in tests without needing a real
-// Twilio send.
-export function buildTesterInvite(message: string): string {
-  return `${message}\n\nTap the menu (☰) at ${APP_URL} and choose "Submit Idea" to share feedback.`;
+// Twilio send. First name only, matching how send-confirmation greets
+// booking clients (owner_name.split(" ")[0]).
+export function buildTesterMessage(testerName: string, message: string): string {
+  const firstName = testerName.trim().split(' ')[0] || 'there';
+  return `Hi ${firstName}, ${message}`;
 }
 
 async function sendSms(to: string, body: string): Promise<boolean> {
@@ -91,13 +95,12 @@ export async function handleRequest(req: Request): Promise<Response> {
     } else if (action === 'notify') {
       if (!message?.trim()) return json({ error: 'Message is required' }, 400);
       const { data: activeTesters, error: fetchErr } = await supabase
-        .from('testers').select('id, phone').eq('active', true);
+        .from('testers').select('id, name, phone').eq('active', true);
       if (fetchErr) throw fetchErr;
 
-      const text = buildTesterInvite(message.trim());
       let sent = 0, failed = 0;
       for (const t of activeTesters ?? []) {
-        const ok = await sendSms(t.phone, text);
+        const ok = await sendSms(t.phone, buildTesterMessage(t.name, message.trim()));
         if (ok) sent++; else failed++;
       }
       return json({ sent, failed, total: (activeTesters ?? []).length });

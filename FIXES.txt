@@ -1,6 +1,6 @@
 BAYVIEW BOARDING — FIX LIST
 ============================
-Last updated: September 17, 2026 (Tester broadcast list + SMS invite feature)
+Last updated: September 17, 2026 (per-tester greeting, unbilled-stays review, pickup reminder)
 
 NEXT CHANGE LIST (v1.5)
 -----------------------
@@ -79,6 +79,72 @@ TWILIO STATUS
 
 COMPLETED
 ---------
+- Sept 17, 2026 (2): Four related pieces, all following the same
+  Sept 17 request:
+
+  1. Tester broadcast now greets each recipient personally - "Hi
+  {their own first name}, " prepended per-recipient server-side, then the
+  composed message verbatim. Replaces the fixed "tap the menu..." footer
+  from earlier today entirely: the admin compose box now starts pre-filled
+  with a suggested default message (site link + "Submit Idea" directions
+  already included) that's fully editable before each send and resets
+  back to that same default afterward, rather than going blank -
+  DEFAULT_BROADCAST_MESSAGE in App.js is the single source of that text.
+
+  2. Admin panel reordered: Unbilled Stays (new, see below) is now the
+  very top of the panel, then the owner search/dog list (moved up from
+  the bottom), then Ideas & Bugs / Testers, then the day rate/discount/
+  holiday/vet/packing/SMS settings sections - previously the settings
+  sections came first and the dog list was last.
+
+  3. New "Unbilled Stays" review list - every stay that's checked out (or
+  checking out today) and never billed, deduped across dogs on a shared
+  multi-dog stay. Each card lets admin correct check-in/check-out/drop-
+  off/pickup before billing (a "Recalculate" button re-runs the real
+  calcCost logic against whatever's currently in those fields, landing in
+  an editable Final Cost field), then "Send Bill" - which sends the SMS
+  FIRST and only marks the stay billed (and saves any corrections) if
+  that send actually succeeds, via a new admin-data action (billStay).
+  A failed send leaves the stay on the list with edits intact, ready to
+  retry - "billed" means the text actually went out, not just that admin
+  clicked a button. New stays.billed_at column (previously nothing at
+  all tracked whether a bill had been sent). The existing per-dog "Send
+  Billing Text" control in the dog-detail view is untouched - this is an
+  additional, faster entry point, not a replacement.
+
+  4. New automated "see you tomorrow for pickup" text, the day before
+  check_out - the pickup-side counterpart to the existing day-before-
+  drop-off reminder. New send-pickup-reminders Edge Function (mirrors
+  send-reminders closely: same fixed-daily-batch/idempotency reasoning,
+  new stays.pickup_reminder_sent_at column, same CRON_SECRET), a new
+  send-stay-pickup-reminders-daily cron job (5 min offset from the
+  existing one), and a 4th admin-editable SMS template (sms_pickup_
+  reminder in settings, with a new {pickupDate}/{pickupTime} placeholder
+  pair alongside the existing {pickDate}/{pickTime} names other
+  templates already use) - editable from the same admin SMS Templates
+  section, relabeled "Drop-off Reminder" / "Pickup Reminder" / "Billing"
+  for clarity now that there are two reminder types.
+
+  Tests: 11 new Deno tests for send-pickup-reminders (mirrors send-
+  reminders' suite almost exactly), 2 new for send-confirmation's
+  "pickup" type, 3 new for settings' 4th template, 3 new for admin-data's
+  billStay action, testers' notify tests rewritten for the per-recipient
+  greeting instead of the old fixed footer. React: a new "Unbilled
+  Stays" describe block (list/dedupe, recalculate, send-then-bill,
+  failed-send-does-not-bill, empty state); the 3 rate-setting sections
+  gained their own scoping classNames (day-rate-editor/discount-editor/
+  holiday-editor) after discovering the reorder broke 3 existing tests
+  that located inputs by page-wide position rather than by section - a
+  reminder that positional selectors are fragile the moment page layout
+  changes, scoped selectors aren't. 158 React + 129 Deno = 287/287
+  passing. Verified live: settings now serves smsPickupReminder
+  publicly; testers/admin-data/send-pickup-reminders all correctly
+  password/secret-gated (checked send-pickup-reminders' cron auth
+  specifically, given the exact same --no-verify-jwt mistake has bitten
+  this project twice before). Did not verify the admin UI itself live -
+  everything in this round except the two public/cron checks just named
+  requires the real admin password, not available in this session;
+  resting on the test suite for that, as usual for admin-only features.
 - Sept 17, 2026: New tester broadcast feature. Kim maintains a list of
   testers (name + phone) in a new admin "📢 Testers" section (sits next
   to "💡 Ideas & Bugs"), and can compose a message there ("I've just made

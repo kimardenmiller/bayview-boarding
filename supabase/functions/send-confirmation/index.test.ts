@@ -128,6 +128,36 @@ Deno.test('with a message_template: fills {finalCost} for a billing send', async
   }
 });
 
+Deno.test('with no message_template, type pickup: builds the pickup-tomorrow message', async () => {
+  const stub = stubTwilio();
+  try {
+    await handleRequest(sendRequest({
+      type: 'pickup', owner_name: 'Kim Miller', owner_phone: '4155550199', dog_name: 'Rex',
+      check_out: '2026-10-03', pickup_time: '09:00:00',
+    }));
+    assertEquals(
+      stub.calls[0].body,
+      "It's been wonderful having Rex! We have you down for pick up at Sat, Oct 3 09:00. Please let us know in our shared group text thread if anything has changed. Otherwise, we'll see you tomorrow at 09:00.",
+    );
+  } finally {
+    stub.restore();
+  }
+});
+
+Deno.test('with a message_template: fills {pickupDate}/{pickupTime} for a pickup send', async () => {
+  const stub = stubTwilio();
+  try {
+    await handleRequest(sendRequest({
+      type: 'pickup', owner_name: 'Kim Miller', owner_phone: '4155550199', dog_name: 'Rex',
+      check_out: '2026-10-03', pickup_time: '09:00:00',
+      message_template: 'Bye {dogName}! See you {pickupDate} at {pickupTime}.',
+    }));
+    assertEquals(stub.calls[0].body, 'Bye Rex! See you Sat, Oct 3 at 09:00.');
+  } finally {
+    stub.restore();
+  }
+});
+
 Deno.test('returns 500 with the Twilio error body if the send fails', async () => {
   const original = globalThis.fetch;
   globalThis.fetch = (async () => new Response(JSON.stringify({ message: 'bad request' }), { status: 400 })) as typeof fetch;
