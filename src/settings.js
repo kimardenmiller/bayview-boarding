@@ -44,21 +44,25 @@ export const SETTINGS = {
   //            {dropDate}, {dropTime}, {pickDate}, {pickTime},
   //            {estimatedCost}, {finalCost} (both already formatted as
   //            "1,234.56" - a bare $ prefix is baked into the template
-  //            text itself, not part of the placeholder), {packingList},
-  //            {kimPhone}, {esteePhone}
+  //            text itself, not part of the placeholder), {billingBreakdown}
+  //            (the full line-item math behind {finalCost}, already
+  //            formatted as its own multi-line block - see
+  //            formatCostBreakdownText in App.js), {packingList} (already
+  //            formatted as one "• item" bullet per line), {kimPhone},
+  //            {esteePhone}
   //
   // {kimPhone}/{esteePhone} are placeholders, not real numbers — the actual
   // values live only as the KIM_PHONE/ESTEE_PHONE Supabase secrets, read
   // server-side. This file ships in the public client JS bundle, so real
   // personal phone numbers must never be filled in here directly.
 
-  SMS_CONFIRMATION: `Hi {firstName}! {dogName}'s stay at Bayview Boarding is confirmed. Drop-off: {dropDate} at {dropTime}. Pick-up: {pickDate} at {pickTime}. Estimated cost: ${'{estimatedCost}'}. — Kim & Estee\nReplies to this number aren't monitored. For questions, please group-text Kim {kimPhone} & Estee {esteePhone}.`,
+  SMS_CONFIRMATION: `Hi {firstName}! {dogName}'s stay at Bayview Boarding is confirmed. Drop-off: {dropDate} at {dropTime}. Pick-up: {pickDate} at {pickTime}. Estimated cost: ${'{estimatedCost}'}. — Kim & Estee\n\nReply STOP to opt out.\nReplies to this number aren't monitored. For questions, please group-text Kim {kimPhone} & Estee {esteePhone}.`,
 
-  SMS_REMINDER: `Hi {firstName}! Just a reminder that {dogName}'s stay at Bayview Boarding starts tomorrow at {dropTime}. Here's what to bring: {packingList}. See you then! — Kim & Estee\n\nReply STOP to opt out.\nReplies to this number aren't monitored. For questions, please group-text Kim {kimPhone} & Estee {esteePhone}.`,
+  SMS_REMINDER: `Hi {firstName}! Just a reminder that {dogName}'s stay at Bayview Boarding starts tomorrow at {dropTime}. Here's what to bring:\n{packingList}\nSee you then! — Kim & Estee\n\nReply STOP to opt out.\nReplies to this number aren't monitored. For questions, please group-text Kim {kimPhone} & Estee {esteePhone}.`,
 
-  SMS_BILLING: `Hi {firstName}! {dogName} {dogVerb} ready for pickup. Your total for this stay is ${'{finalCost}'}. Thanks for choosing Bayview Boarding! — Kim & Estee\n\nReply STOP to opt out.\nReplies to this number aren't monitored. For questions, please group-text Kim {kimPhone} & Estee {esteePhone}.`,
+  SMS_BILLING: `Hi {firstName}! Thank you for visiting Bayview Boarding with {dogName}. Here's your billing detail:\n{billingBreakdown}\nTotal: ${'{finalCost}'}\n\nThanks for choosing Bayview Boarding! — Kim & Estee\n\nReply STOP to opt out.\nReplies to this number aren't monitored. For questions, please group-text Kim {kimPhone} & Estee {esteePhone}.`,
 
-  SMS_PICKUP_REMINDER: `It's been wonderful having {dogName}! We have you down for pick up at {pickupDate} {pickupTime}. Please let us know in our shared group text thread if anything has changed. Otherwise, we'll see you tomorrow at {pickupTime}.`,
+  SMS_PICKUP_REMINDER: `It's been wonderful having {dogName}! We have you down for pick up at {pickupDate} {pickupTime}. Please let us know in our shared group text thread if anything has changed. Otherwise, we'll see you tomorrow at {pickupTime}. — Kim & Estee\n\nReply STOP to opt out.\nReplies to this number aren't monitored. For questions, please group-text Kim {kimPhone} & Estee {esteePhone}.`,
 
   // ── Vet Dropdown ──────────────────────────────────────────────────────────
   SAN_RAFAEL_VETS: [

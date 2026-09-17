@@ -77,41 +77,46 @@ Deno.test('with no message_template: builds the default confirmation message and
     assertEquals(res.status, 200);
     assertEquals(
       stub.calls[0].body,
-      "Hi Kim! Rex's stay at Bayview Boarding is confirmed. Drop-off: Thu, Oct 1 at 09:00. Pick-up: Sat, Oct 3 at 10:00. Estimated cost: $210. — Kim & Estee\nReplies to this number aren't monitored. For questions, please group-text Kim 4155550101 & Estee 4155550102.",
+      "Hi Kim! Rex's stay at Bayview Boarding is confirmed. Drop-off: Thu, Oct 1 at 09:00. Pick-up: Sat, Oct 3 at 10:00. Estimated cost: $210. — Kim & Estee\n\nReply STOP to opt out.\nReplies to this number aren't monitored. For questions, please group-text Kim 4155550101 & Estee 4155550102.",
     );
   } finally {
     stub.restore();
   }
 });
 
-Deno.test('with no message_template, type billing: "is" for one dog, formatted cost, STOP below the signature', async () => {
+Deno.test('with no message_template, type billing: "Thank you for visiting" wording (not "ready for pickup"), full math before the total, STOP below signature', async () => {
   const stub = stubTwilio();
   try {
     await handleRequest(sendRequest({
       type: 'billing', owner_name: 'Kim Miller', owner_phone: '4155550199', dog_name: 'Rex', final_cost: 1795.5, // rounds up to $1,796
+      billing_breakdown: '$105.00/day × 2.0 days × 1st dog = $210.00',
     }));
     assertEquals(
       stub.calls[0].body,
-      "Hi Kim! Rex is ready for pickup. Your total for this stay is $1,796. Thanks for choosing Bayview Boarding! — Kim & Estee\n\nReply STOP to opt out.\nReplies to this number aren't monitored. For questions, please group-text Kim 4155550101 & Estee 4155550102.",
+      "Hi Kim! Thank you for visiting Bayview Boarding with Rex. Here's your billing detail:\n$105.00/day × 2.0 days × 1st dog = $210.00\n\nTotal: $1,796\n\nThanks for choosing Bayview Boarding! — Kim & Estee\n\nReply STOP to opt out.\nReplies to this number aren't monitored. For questions, please group-text Kim 4155550101 & Estee 4155550102.",
     );
+    assertEquals(stub.calls[0].body.includes('ready for pickup'), false);
   } finally {
     stub.restore();
   }
 });
 
-Deno.test('with no message_template, type billing: "are" for a shared multi-dog stay', async () => {
+Deno.test('with no message_template, type billing: still works (just skips the math block) with no billing_breakdown given', async () => {
   const stub = stubTwilio();
   try {
     await handleRequest(sendRequest({
       type: 'billing', owner_name: 'Kim Miller', owner_phone: '4155550199', dog_name: 'Don & Bob', final_cost: 210,
     }));
-    assertEquals(stub.calls[0].body.startsWith('Hi Kim! Don & Bob are ready for pickup.'), true);
+    assertEquals(
+      stub.calls[0].body.startsWith("Hi Kim! Thank you for visiting Bayview Boarding with Don & Bob. Here's your billing detail:\nTotal: $210"),
+      true,
+    );
   } finally {
     stub.restore();
   }
 });
 
-Deno.test('with no message_template, type reminder: STOP moved below the signature, with a blank line before it', async () => {
+Deno.test('with no message_template, type reminder: bullet-list packing items (one per line), STOP below the signature', async () => {
   const stub = stubTwilio();
   try {
     await handleRequest(sendRequest({
@@ -120,7 +125,7 @@ Deno.test('with no message_template, type reminder: STOP moved below the signatu
     }));
     assertEquals(
       stub.calls[0].body,
-      "Hi Kim! Just a reminder that Rex's stay at Bayview Boarding starts tomorrow at 09:00. Please bring: Food, Leash. See you then! — Kim & Estee\n\nReply STOP to opt out.\nReplies to this number aren't monitored. For questions, please group-text Kim 4155550101 & Estee 4155550102.",
+      "Hi Kim! Just a reminder that Rex's stay at Bayview Boarding starts tomorrow at 09:00. Here's what to bring:\n• Food\n• Leash\nSee you then! — Kim & Estee\n\nReply STOP to opt out.\nReplies to this number aren't monitored. For questions, please group-text Kim 4155550101 & Estee 4155550102.",
     );
   } finally {
     stub.restore();
@@ -134,14 +139,14 @@ Deno.test('with no message_template, type reminder: uses packing_list if given, 
       type: 'reminder', owner_name: 'Kim Miller', owner_phone: '4155550199', dog_name: 'Rex',
       drop_time: '09:00:00', packing_list: 'Food, Leash',
     }));
-    assertEquals(stub.calls[0].body.includes('Please bring: Food, Leash.'), true);
+    assertEquals(stub.calls[0].body.includes('• Food\n• Leash'), true);
 
     await handleRequest(sendRequest({
       type: 'reminder', owner_name: 'Kim Miller', owner_phone: '4155550199', dog_name: 'Rex', drop_time: '09:00:00',
     }));
     // Each send fires 3 Twilio calls now (client, then Kim, then Estee) -
     // the 2nd invocation's client call is the 4th call overall.
-    assertEquals(stub.calls[3].body.includes('Please bring: Food, Leash & doggy bags,'), true);
+    assertEquals(stub.calls[3].body.includes('• Food\n• Leash & doggy bags\n'), true);
   } finally {
     stub.restore();
   }
@@ -167,7 +172,7 @@ Deno.test('with a message_template: substitutes placeholders including kimPhone/
   }
 });
 
-Deno.test('with a message_template: fills {packingList} from an array packing_list, joined', async () => {
+Deno.test('with a message_template: fills {packingList} from an array packing_list, one bullet per line', async () => {
   const stub = stubTwilio();
   try {
     await handleRequest(sendRequest({
@@ -175,7 +180,7 @@ Deno.test('with a message_template: fills {packingList} from an array packing_li
       packing_list: ['Food', 'Leash'],
       message_template: 'Bring: {packingList}',
     }));
-    assertEquals(stub.calls[0].body, 'Bring: Food, Leash');
+    assertEquals(stub.calls[0].body, 'Bring: • Food\n• Leash');
   } finally {
     stub.restore();
   }
@@ -194,6 +199,26 @@ Deno.test('with a message_template: fills {finalCost} for a billing send', async
   }
 });
 
+Deno.test('with a message_template: fills {billingBreakdown} for a billing send, empty string when none was given', async () => {
+  const stub = stubTwilio();
+  try {
+    await handleRequest(sendRequest({
+      type: 'billing', owner_name: 'Kim Miller', owner_phone: '4155550199', dog_name: 'Rex',
+      final_cost: 210, billing_breakdown: '$105.00/day × 2.0 days × 1st dog = $210.00',
+      message_template: 'Math:\n{billingBreakdown}\nTotal: ${finalCost}',
+    }));
+    assertEquals(stub.calls[0].body, 'Math:\n$105.00/day × 2.0 days × 1st dog = $210.00\nTotal: $210');
+
+    await handleRequest(sendRequest({
+      type: 'billing', owner_name: 'Kim Miller', owner_phone: '4155550199', dog_name: 'Rex',
+      final_cost: 210, message_template: 'Math:[{billingBreakdown}]',
+    }));
+    assertEquals(stub.calls[3].body, 'Math:[]');
+  } finally {
+    stub.restore();
+  }
+});
+
 Deno.test('with a message_template: fills {dogVerb} for a billing send, agreeing with the dog name', async () => {
   const stub = stubTwilio();
   try {
@@ -207,7 +232,7 @@ Deno.test('with a message_template: fills {dogVerb} for a billing send, agreeing
   }
 });
 
-Deno.test('with no message_template, type pickup: builds the pickup-tomorrow message', async () => {
+Deno.test('with no message_template, type pickup: builds the pickup-tomorrow message, signed off and STOP below it like every other text', async () => {
   const stub = stubTwilio();
   try {
     await handleRequest(sendRequest({
@@ -216,7 +241,7 @@ Deno.test('with no message_template, type pickup: builds the pickup-tomorrow mes
     }));
     assertEquals(
       stub.calls[0].body,
-      "It's been wonderful having Rex! We have you down for pick up at Sat, Oct 3 09:00. Please let us know in our shared group text thread if anything has changed. Otherwise, we'll see you tomorrow at 09:00.",
+      "It's been wonderful having Rex! We have you down for pick up at Sat, Oct 3 09:00. Please let us know in our shared group text thread if anything has changed. Otherwise, we'll see you tomorrow at 09:00. — Kim & Estee\n\nReply STOP to opt out.\nReplies to this number aren't monitored. For questions, please group-text Kim 4155550101 & Estee 4155550102.",
     );
   } finally {
     stub.restore();

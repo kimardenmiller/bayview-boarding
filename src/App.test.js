@@ -1,6 +1,6 @@
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import App, { formatDate, calcAge, calcCost, calcCostBreakdown, isHolidayNight, getHolidayWindows, todayISO, formatMoney } from './App';
+import App, { formatDate, calcAge, calcCost, calcCostBreakdown, formatCostBreakdownText, isHolidayNight, getHolidayWindows, todayISO, formatMoney } from './App';
 import { supabase } from './supabase';
 
 jest.mock('./supabase');
@@ -483,6 +483,36 @@ describe('calcCostBreakdown', () => {
     expect(b.subtotal).toBe(25);
     expect(b.holidayExtra).toBe(7.5);
     expect(b.total).toBe(32.5);
+  });
+});
+
+describe('formatCostBreakdownText', () => {
+  test('returns an empty string for a null breakdown', () => {
+    expect(formatCostBreakdownText(null, 0.10)).toBe('');
+  });
+
+  test('one line for a single dog, no holiday - the plain-text form of what <CostBreakdown> shows on screen', () => {
+    const b = calcCostBreakdown('2026-03-10', '2026-03-12', '09:00', '09:00', 100);
+    expect(formatCostBreakdownText(b, 0.10)).toBe('$100/day × 2.0 days × 1st dog = $200');
+  });
+
+  test('adds an additional-dogs line, naming the discount %', () => {
+    const b = calcCostBreakdown('2026-03-10', '2026-03-12', '09:00', '09:00', 100, 2, 0.10);
+    const text = formatCostBreakdownText(b, 0.10);
+    expect(text).toContain('1st dog = $200');
+    expect(text).toContain('1 additional dog × 90% (10% off each) = $180');
+  });
+
+  test('adds a holiday-upcharge line when any billed night falls in a holiday window', () => {
+    const b = calcCostBreakdown('2026-01-01', '2026-01-02', '09:00', '09:00', 100, 1, 0.10, 0.30);
+    const text = formatCostBreakdownText(b, 0.10);
+    expect(text).toContain('+ Holiday upcharge: 1.0 day × 30% = $30');
+  });
+
+  test('never includes the final total - the SMS states that separately, since admin can hand-adjust it', () => {
+    const b = calcCostBreakdown('2026-03-10', '2026-03-12', '09:00', '09:00', 100);
+    expect(formatCostBreakdownText(b, 0.10)).not.toContain('=  $200\n');
+    expect(formatCostBreakdownText(b, 0.10).split('\n').pop()).not.toMatch(/^= \$/);
   });
 });
 
@@ -2106,6 +2136,7 @@ describe('Admin — logged in', () => {
         dog_name: 'Bud',
         final_cost: 210,
         message_template: expect.any(String), // the admin-editable billing template (settings.sms_billing)
+        billing_breakdown: expect.any(String), // the full line-item math behind final_cost
       },
     }));
   });
@@ -2347,5 +2378,22 @@ describe('Admin — logged in', () => {
     expect(supabase.functions.invoke).not.toHaveBeenCalledWith('settings', {
       body: expect.objectContaining({ updates: expect.objectContaining({ smsConfirmation: expect.anything() }) }),
     });
+  });
+
+  test('"Reset to Default" loads the current built-in template into the box without saving it - admin still has to click Save', async () => {
+    await loginAsAdmin();
+    const smsEditor = within(document.querySelector('.sms-editor'));
+    const billingBox = smsEditor.getByDisplayValue('Hi {firstName}! total ${finalCost}.');
+    fireEvent.change(billingBox, { target: { value: 'Something admin typed' } });
+
+    const billingBlock = billingBox.closest('div');
+    fireEvent.click(within(billingBlock).getByText('Reset to Default'));
+
+    expect(billingBox.value).toContain('Thank you for visiting Bayview Boarding');
+    expect(billingBox).not.toHaveValue('Something admin typed');
+    // loading the default is purely local - nothing is sent until Save is clicked
+    expect(supabase.functions.invoke).not.toHaveBeenCalledWith('settings', expect.objectContaining({
+      body: expect.objectContaining({ updates: expect.objectContaining({ smsBilling: expect.anything() }) }),
+    }));
   });
 });

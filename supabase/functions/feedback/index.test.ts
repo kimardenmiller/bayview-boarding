@@ -4,17 +4,34 @@ const ADMIN_PASSWORD = 'test-admin-password';
 Deno.env.set('ADMIN_PASSWORD', ADMIN_PASSWORD);
 Deno.env.set('SUPABASE_URL', 'https://example.supabase.co');
 Deno.env.set('SUPABASE_SERVICE_ROLE_KEY', 'test-service-role-key');
+Deno.env.set('TWILIO_ACCOUNT_SID', 'ACtest');
+Deno.env.set('TWILIO_AUTH_TOKEN', 'test-token');
+Deno.env.set('TWILIO_PHONE', '+14155550100');
+Deno.env.set('KIM_PHONE', '4155550101');
+Deno.env.set('ESTEE_PHONE', '4155550102');
 
 const { handleRequest } = await import('./index.ts');
 
-function stubSupabase(initial: Record<string, unknown>[] = []) {
+// smsOk: whether the stubbed Twilio leg should succeed - lets a test
+// exercise "the SMS notify failed but the submission still succeeded".
+function stubSupabase(initial: Record<string, unknown>[] = [], smsOk = true) {
   const db = { feedback: initial.map((f) => ({ ...f })) };
   const calls: { method: string; body: unknown; search: string }[] = [];
+  const smsCalls: { to: string; body: string }[] = [];
   const original = globalThis.fetch;
 
   globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
     const url = new URL(String(input instanceof Request ? input.url : input));
     const method = (init?.method || 'GET').toUpperCase();
+
+    if (url.hostname === 'api.twilio.com') {
+      const params = new URLSearchParams(String(init?.body));
+      smsCalls.push({ to: params.get('To') || '', body: params.get('Body') || '' });
+      return smsOk
+        ? new Response(JSON.stringify({ sid: 'SMtest' }), { status: 200 })
+        : new Response(JSON.stringify({ message: 'Twilio down' }), { status: 400 });
+    }
+
     const body = init?.body ? JSON.parse(String(init.body)) : undefined;
     calls.push({ method, body, search: url.search });
 
@@ -37,7 +54,7 @@ function stubSupabase(initial: Record<string, unknown>[] = []) {
     throw new Error(`stubSupabase: unhandled request ${method} ${url.pathname}${url.search}`);
   }) as typeof fetch;
 
-  return { db, calls, restore: () => { globalThis.fetch = original; } };
+  return { db, calls, smsCalls, restore: () => { globalThis.fetch = original; } };
 }
 
 function postRequest(body: unknown): Request {
@@ -93,6 +110,34 @@ Deno.test('public submit: stores name/contact/message (a list of several things 
     assertEquals(stub.db.feedback[0].category, 'idea');
     assertEquals(stub.db.feedback[0].status, 'open');
     assertEquals(String(stub.db.feedback[0].message).includes('Add dark mode'), true);
+  } finally {
+    stub.restore();
+  }
+});
+
+Deno.test('public submit: texts both Kim and Estee with the submitter\'s name and message', async () => {
+  const stub = stubSupabase();
+  try {
+    await handleRequest(postRequest({ name: 'Jane Tester', message: 'Add dark mode' }));
+    assertEquals(stub.smsCalls.length, 2);
+    const toNumbers = stub.smsCalls.map((c) => c.to).sort();
+    assertEquals(toNumbers, ['+14155550101', '+14155550102']);
+    for (const call of stub.smsCalls) {
+      assert(call.body.includes('Jane Tester'));
+      assert(call.body.includes('Add dark mode'));
+    }
+  } finally {
+    stub.restore();
+  }
+});
+
+Deno.test('public submit: still succeeds even if the notify text fails to send', async () => {
+  const stub = stubSupabase([], false);
+  try {
+    const res = await handleRequest(postRequest({ name: 'Jane', message: 'Add dark mode' }));
+    assertEquals(res.status, 200);
+    assertEquals((await res.json()).success, true);
+    assertEquals(stub.db.feedback.length, 1); // the submission itself is unaffected
   } finally {
     stub.restore();
   }

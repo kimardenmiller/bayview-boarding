@@ -1,10 +1,26 @@
 BAYVIEW BOARDING — FIX LIST
 ============================
-Last updated: September 18, 2026 (4) (itemized 1st-dog/additional-dog/holiday cost lines; Kim & Estee get a copy of every client text)
+Last updated: September 19, 2026 (billing text shows full math, drops "ready for pickup"; bullet packing list; STOP everywhere; feedback texts Kim & Estee)
 
 NEXT CHANGE LIST (v1.5)
 -----------------------
-1. SECURITY: confirm the Twilio debug API key(s) Kim has shared in chat
+1. ACTION NEEDED FROM KIM: the 4 SMS templates stored in the live
+   `settings` table have never been updated since the row was first
+   created Sept 14, 2026 - every wording/formatting fix made to these
+   templates since then (STOP-below-signature, whole-dollar amounts,
+   dogVerb, and now the Sept 19 billing/packing-list/STOP-everywhere
+   round) has had ZERO effect on real outbound texts, because
+   send-confirmation always prefers the admin-editable message_template
+   from the database over its own hardcoded fallback - and nobody has
+   ever actually saved a change to that row. Confirmed via a direct
+   read-only query Sept 19, 2026. Fix: open Admin > SMS Message
+   Templates, click "Reset to Default" (new button, Sept 19) then "Save"
+   for each of the 4 templates - Claude cannot do this step, since it
+   requires the real ADMIN_PASSWORD which Claude has never been given,
+   and going around that password via direct database access wasn't
+   judged appropriate for content this front-facing. Until this is done,
+   every real client text is still using the very first Sept 14 wording.
+2. SECURITY: confirm the Twilio debug API key(s) Kim has shared in chat
    are actually deleted. Used again Sept 16, 2026 (a key named
    "debug_attempt_3_persit", possibly a freshly-created one - SID shared
    didn't match the one on file from Sept 15) to confirm A2P finally
@@ -13,7 +29,7 @@ NEXT CHANGE LIST (v1.5)
    confirmed, Kim said he'd delete it (Twilio Console > Account > API
    keys & tokens) - leaving this open only until that's confirmed done,
    since it isn't something Claude can verify or do on his behalf.
-2. Set up a staging environment now that real client PII/bookings are
+3. Set up a staging environment now that real client PII/bookings are
    flowing through production (discussed Sept 16, 2026). Recommended
    shape: same repo, a `staging` branch deployed to a second GitHub
    Pages target, pointed at a second Supabase project (so test bookings/
@@ -23,7 +39,7 @@ NEXT CHANGE LIST (v1.5)
    maintain. Not urgent by itself; do this the next time a DB schema or
    RLS change is about to be made against production, rather than
    testing it live the way this session's changes have been.
-3. STANDING: check the "Submit Idea" queue (admin panel > 💡 Ideas & Bugs)
+4. STANDING: check the "Submit Idea" queue (admin panel > 💡 Ideas & Bugs)
    at the start of any work session in this project, not just when Kim
    flags something - this is the actual mechanism for surfacing tester
    feedback (deliberately not SMS/email, see Sept 16 (8) below). Act on
@@ -79,6 +95,79 @@ TWILIO STATUS
 
 COMPLETED
 ---------
+- Sept 19, 2026: Five pieces of feedback, all on the SMS side:
+
+  1. The billing SMS text itself now includes the full line-item math
+  (same shape as the on-screen CostBreakdown, via new formatCostBreakdownText
+  in App.js) ahead of the total, not just the final dollar figure -
+  previously only admin's own on-screen edit view showed the breakdown;
+  the actual text the client received never did. sendBill computes it
+  from the exact same edited dates/rate/holiday-% admin just reviewed and
+  sends it as a new billing_breakdown field; send-confirmation exposes it
+  to the admin-editable template as {billingBreakdown} too.
+
+  2. Billing text wording changed from "{dogName} is/are ready for
+  pickup" to "Thank you for visiting Bayview Boarding with {dogName}.
+  Here's your billing detail:" - the old framing read oddly for a
+  same-week-later resend or a corrected re-bill, not just literal
+  pickup-day billing.
+
+  3. Packing list items in the drop-off reminder text are now one
+  "• item" bullet per line instead of a single comma-separated run-on
+  sentence - packingListStr in send-confirmation now always builds a
+  bullet block regardless of whether packing_list arrived as an array or
+  (legacy callers) a comma-joined string.
+
+  4. "Reply STOP to opt out." now sits below the "— Kim & Estee"
+  signature line (with a blank line before it) in EVERY outbound client
+  text, not just reminder/billing as of the last STOP fix - confirmation
+  and pickup-reminder both previously had no STOP line and no signature
+  at all; both now match the same shape.
+
+  5. New: submitting "Submit Idea" now texts both Kim and Estee
+  immediately ("New \"Submit Idea\" from {name}: \"{message}\""),
+  reversing the earlier "deliberately not wired to any notification"
+  decision - feedback/index.ts gained the same Twilio-relay pattern
+  send-contact already uses. Awaited (not fire-and-forget), same
+  reasoning as send-confirmation's owner-copy notice: an Edge Function's
+  runtime isn't guaranteed to outlive its own response. A failed text
+  never turns a successful submission into an error - the admin badge
+  remains the fallback way to notice it.
+
+  IMPORTANT FINDING while verifying this round: the actual `settings`
+  table row (the real, admin-editable source of these 4 SMS templates)
+  has never been updated since Sept 14, 2026 - confirmed via a read-only
+  query. Every wording fix made across the last several sessions
+  (including this one) has had no effect on real texts, since
+  send-confirmation always prefers the stored message_template over its
+  own hardcoded fallback. Added a "Reset to Default" button next to each
+  SMS template in Admin (loads the current built-in default into the
+  edit box, still requires clicking Save to actually persist - Claude
+  deliberately did not write directly to the settings table to force
+  this through, since that bypasses the admin password protecting
+  exactly this kind of front-facing content). See NEXT CHANGE LIST item
+  1 - Kim needs to click Reset to Default + Save for all 4 templates for
+  any of these fixes to reach real clients.
+
+  Tests: formatCostBreakdownText gets its own describe block (empty
+  breakdown, 1-dog/multi-dog/holiday line content, confirms the total is
+  deliberately never included); send-confirmation's Deno suite rewritten
+  for the new billing wording (with and without a breakdown given),
+  bullet-list packing, and STOP added to confirmation/pickup; feedback's
+  Deno suite gained a stubbed-Twilio path (previously only stubbed
+  Supabase) plus 2 new tests (both Kim/Estee texted with name+message;
+  submission still succeeds if the text fails); a new Admin "Reset to
+  Default" Jest test confirms it's local-only until Save is clicked. 181
+  React + 144 Deno = 325/325 passing.
+
+  Verified live: send-confirmation invoked directly with a "Don & Bob"
+  billing payload + a sample billing_breakdown string (200 OK); feedback
+  invoked with a throwaway public submission to confirm the Kim/Estee
+  notify path runs end-to-end without erroring (200 OK) - the test
+  feedback row was deleted immediately after and confirmed gone via a
+  follow-up count query. Deployed JS bundle confirmed to contain "Reset
+  to Default", "Thank you for visiting", the additional-dog breakdown
+  line text, and {billingBreakdown}.
 - Sept 18, 2026 (4):
 
   1. The shared CostBreakdown component (Stay Dates, Confirmation, both

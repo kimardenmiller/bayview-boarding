@@ -47,15 +47,30 @@ Kim Miller and Estee Fletter at 210 Bayview Drive, San Rafael, CA.
   supabase/functions/send-pickup-reminders), and billing texts (admin-
   triggered, editable final cost, not auto-sent — the estimate can be
   wrong by pickup). A2P 10DLC is APPROVED (confirmed via the API Sept
-  16, 2026) - real sends actually go through. The billing text correctly
-  pluralizes for a shared multi-dog stay ("Don & Bob are ready for
-  pickup", not "is" - dogVerb(), Sept 18, 2026) and every dollar amount
-  is a whole dollar with commas, rounded up at exactly .50 ("$1,796",
-  not "$1795.5" - formatDollars(); briefly showed cents earlier the same
-  day before this same-day follow-up dropped them again on request);
-  "Reply STOP to opt out." sits below the "— Kim & Estee" signature line
-  (with a blank line before it) in both the billing and drop-off-
-  reminder texts, not directly above it
+  16, 2026) - real sends actually go through. Every dollar amount is a
+  whole dollar with commas, rounded up at exactly .50 ("$1,796", not
+  "$1795.5" - formatDollars()). "Reply STOP to opt out." sits below the
+  "— Kim & Estee" signature line (with a blank line before it) in EVERY
+  outbound client text (Sept 19, 2026 - confirmation and pickup-reminder
+  used to have no STOP line or signature at all; now all four match).
+  The billing text (Sept 19, 2026) opens with "Thank you for visiting
+  Bayview Boarding with {dogName}. Here's your billing detail:" instead
+  of "{dogName} is/are ready for pickup" (the old framing read oddly for
+  a days-later resend), followed by the actual line-item math - not just
+  the final total - via a new {billingBreakdown} placeholder
+  (formatCostBreakdownText in App.js, the plain-text twin of the
+  on-screen CostBreakdown component). The drop-off reminder's packing
+  list is one "• item" bullet per line, not a comma-separated sentence.
+  Kim and Estee also get a text copy of every client-facing message sent
+  (confirmation/reminder/billing/pickup), identifying who it went to
+  (Sept 18, 2026, notifyOwnersOfClientText) - best-effort and awaited,
+  never allowed to affect the client send's own success/failure.
+  IMPORTANT: the live `settings` table's 4 stored templates have never
+  actually been updated since Sept 14, 2026 (confirmed via a read-only
+  query Sept 19) - every wording fix above only reaches real texts once
+  Kim clicks "Reset to Default" then "Save" for each one in Admin > SMS
+  Message Templates (new button, Sept 19); see FIXES.txt NEXT CHANGE
+  LIST item 1
 - Admin panel, top to bottom (reordered Sept 17 (2)(4), math/grouping
   Sept 18): an "Unbilled Stays" review list — every never-billed stay at
   all, past, in-progress, or future, sorted earliest check-in first
@@ -170,11 +185,15 @@ compatibility, but the form no longer sends it - every row defaults to
 feature. Same RLS-locked-with-zero-policies pattern as everything else;
 public submit and password-gated list/status-update both go through
 supabase/functions/feedback/index.ts (one function, same "request shape
-decides the branch" style as settings). Deliberately not wired to any
-notification (SMS costs money; email would need a new provider account
-Kim hasn't set up) - the admin panel's open-count badge is the only
-"something's new" signal, plus a standing habit (see Rules) of checking
-this queue at the start of any work session, same as FIXES.txt itself.
+decides the branch" style as settings). A public submit now also texts
+both Kim and Estee immediately (Sept 19, 2026, reversing the earlier
+"deliberately not wired to any notification" decision - same Twilio
+relay pattern send-contact uses, awaited so it can't be dropped by the
+Edge Function's runtime tearing down after the response returns; a
+failed text never turns a successful submission into an error). The
+admin panel's open-count badge remains the fallback "something's new"
+signal, plus a standing habit (see Rules) of checking this queue at the
+start of any work session, same as FIXES.txt itself.
 
 `testers` (Sept 17, 2026) is the tester broadcast list - name, phone,
 email (optional), active (default true, no toggle in the UI yet - see
@@ -220,16 +239,16 @@ call itself is dropped, not for a routine secret rotation.
 - src/App.js — main app
 - src/settings.js — all configurable values (rates, vets, messages, packing list)
 - src/waiver.js — full waiver text
-- src/App.test.js — 168 passing tests (TDD), Supabase mocked via src/__mocks__/supabase.js
+- src/App.test.js — 181 passing tests (TDD), Supabase mocked via src/__mocks__/supabase.js
 - supabase/functions/send-contact/index.ts — public Contact Us form handler: relays name/email-or-phone/message to Kim & Estee by SMS (reuses KIM_PHONE/ESTEE_PHONE). Deployed normally (no --no-verify-jwt) since it's called via the Supabase JS client like settings/lookup-client/submit-booking
-- supabase/functions/feedback/index.ts — "Submit Idea": public submit (no password) + admin list/status-update (password) for the feedback queue
+- supabase/functions/feedback/index.ts — "Submit Idea": public submit (no password, also texts Kim & Estee - Sept 19, 2026) + admin list/status-update (password) for the feedback queue
 - supabase/functions/testers/index.ts — tester broadcast list: entirely admin-password-gated list/add/remove/notify (no public branch at all); notify greets each active tester by their own first name
 - supabase/functions/send-pickup-reminders/index.ts — daily cron target, the pickup-side counterpart to send-reminders: finds stays checking out tomorrow, texts each via send-confirmation (type "pickup"), marks pickup_reminder_sent_at. Deployed with `--no-verify-jwt` - same care needed on redeploy as send-reminders
 - public/img/about/ — the 6 numbered photos on the About page, served from the public folder (not bundled) and referenced via process.env.PUBLIC_URL since the app is hosted at a subpath
 - supabase/functions/send-reminders/index.ts — daily cron target (pg_cron + pg_net, see the migration): finds stays checking in tomorrow, fetches the current sms_reminder template + packing_list from `settings`, texts each via send-confirmation, marks reminder_sent_at. Deployed with `--no-verify-jwt`; checks its own CRON_SECRET instead (see Data model for how that secret is set up without ever being committed) - be careful to keep that flag on every redeploy (a plain `supabase functions deploy send-reminders` silently re-enables JWT verification and would break the cron, same bug class as the receive-sms incident)
 - supabase/functions/settings/index.ts — public read / password-gated write of day rate, multi-dog discount, holiday upcharge, vet list, packing list, and the 4 SMS templates (confirmation/drop-off reminder/pickup reminder/billing)
 - supabase/functions/submit-booking/index.ts — handles booking submission: find-or-create owner (by phone) and each dog (by owner+name), inserts the stay (incl. waiver_snapshot) + stay_dogs snapshot links (service role key)
-- supabase/functions/send-confirmation/index.ts — Twilio SMS function (outbound); accepts an optional message_template (the admin-edited settings text, with {placeholders} filled by fillTemplate, including {dogVerb} - "is"/"are", Sept 18, 2026) + packing_list from the caller; falls back to its own hardcoded 4-message-type logic (confirmation/reminder/billing/pickup) if no template is given. Every dollar placeholder ({finalCost}/{estimatedCost}) is run through formatDollars() first (comma + always 2 decimals). Called directly by the client at booking time, and by send-reminders/send-pickup-reminders/the admin panel for the other three - has its own Deno test suite (index.test.ts), added Sept 16 (5)
+- supabase/functions/send-confirmation/index.ts — Twilio SMS function (outbound); accepts an optional message_template (the admin-edited settings text, with {placeholders} filled by fillTemplate, including {dogVerb} - "is"/"are" - and {billingBreakdown} - the full cost math, Sept 19, 2026) + packing_list from the caller; falls back to its own hardcoded 4-message-type logic (confirmation/reminder/billing/pickup) if no template is given. Every dollar placeholder ({finalCost}/{estimatedCost}) is run through formatDollars() first (whole dollars, comma-separated). Also texts Kim/Estee a copy of every client send (notifyOwnersOfClientText, Sept 18, 2026). Called directly by the client at booking time, and by send-reminders/send-pickup-reminders/the admin panel for the other three - has its own Deno test suite (index.test.ts), added Sept 16 (5)
 - supabase/functions/receive-sms/index.ts — inbound SMS webhook: auto-reply + relay to Kim/Estee. Deploy with `--no-verify-jwt` (see comment at top of file) or Twilio's webhook calls silently fail
 - supabase/functions/_shared/contact.ts — pure text builders + Twilio signature validator, shared by send-confirmation and receive-sms, unit-tested via `deno test`
 - supabase/functions/admin-data/index.ts — server-side admin password check + every dog (profile + owner + stay history) (service role key, never exposed to client). Also handles billStay (Sept 17, 2026): saves corrected check-in/out/drop/pickup/cost and marks billed_at, returning the refreshed dog list
@@ -264,10 +283,15 @@ call itself is dropped, not for a routine secret rotation.
   the cleanup actually took.
 
 ## Current priorities (v1.5)
-See FIXES.txt for the live list - nothing outstanding here as of Sept
-16, 2026 beyond that file's own items (confirming the debug Twilio API
-key is actually deleted, and setting up a staging environment next time
-a DB/RLS change is made against production).
+See FIXES.txt for the live list. As of Sept 19, 2026 the top item is
+action Kim needs to take, not code: the live `settings` table's 4 SMS
+templates have never been re-saved since Sept 14, so every wording fix
+since then (this session's included) has had no effect on real texts -
+Kim needs to click "Reset to Default" then "Save" for each one in
+Admin > SMS Message Templates. Beyond that, FIXES.txt's own backlog
+(confirming the debug Twilio API key is actually deleted, and setting
+up a staging environment next time a DB/RLS change is made against
+production).
 
 ## Rules
 - Always run tests before committing (npm test -- --watchAll=false)

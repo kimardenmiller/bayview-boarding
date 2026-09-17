@@ -226,7 +226,7 @@ function calcCost(
 // Named exports alongside the default App export, purely so pure helper
 // functions can be unit-tested directly instead of only through full
 // multi-step form flows. No behavior change.
-export { formatDate, calcAge, calcCost, calcCostBreakdown, isHolidayNight, getHolidayWindows, todayISO, formatMoney, vetDropdownOptions };
+export { formatDate, calcAge, calcCost, calcCostBreakdown, formatCostBreakdownText, isHolidayNight, getHolidayWindows, todayISO, formatMoney, vetDropdownOptions };
 
 function Header({ onTitleClick }) {
   return (
@@ -554,6 +554,33 @@ function CostBreakdown({ breakdown, multiDogDiscount }) {
       <br />= ${formatMoney(breakdown.total)}
     </div>
   );
+}
+
+// Plain-text equivalent of <CostBreakdown> above (kept in sync by hand -
+// same reasoning as dogIsComplete/StepDogPage's getErrors: small enough
+// that sharing a single implementation across JSX and plain text wasn't
+// worth the indirection), embedded directly in the outbound billing SMS
+// itself (Sept 19, 2026, on request: "text should show full billing math
+// that makes up the total", not just admin's own on-screen display).
+// Deliberately omits the final "= $total" line - the SMS states the
+// total separately (via {finalCost}), which can differ from this
+// calculated total if admin hand-adjusted the amount after Recalculate,
+// and showing two potentially-different totals would be more confusing
+// than showing one.
+function formatCostBreakdownText(breakdown, multiDogDiscount) {
+  if (!breakdown) return '';
+  const days = formatDays(breakdown.nights);
+  const additionalDogs = breakdown.dogs - 1;
+  const lines = [
+    `$${formatMoney(breakdown.rate)}/day × ${days} day${breakdown.nights !== 1 ? 's' : ''} × 1st dog = $${formatMoney(breakdown.firstDogSubtotal)}`,
+  ];
+  if (additionalDogs > 0) {
+    lines.push(`$${formatMoney(breakdown.rate)}/day × ${days} day${breakdown.nights !== 1 ? 's' : ''} × ${additionalDogs} additional dog${additionalDogs !== 1 ? 's' : ''} × ${100 - multiDogDiscount * 100}% (${multiDogDiscount * 100}% off each) = $${formatMoney(breakdown.additionalDogsSubtotal)}`);
+  }
+  if (breakdown.holidayNights > 0) {
+    lines.push(`+ Holiday upcharge: ${formatDays(breakdown.holidayNights)} day${breakdown.holidayNights !== 1 ? 's' : ''} × ${breakdown.holidayUpcharge * 100}% = $${formatMoney(breakdown.holidayExtra)}`);
+  }
+  return lines.join('\n');
 }
 
 function StepDates({ data, onChange, onNext, onBack, rate, multiDogDiscount, holidayUpcharge }) {
@@ -1012,10 +1039,16 @@ function AdminView({
     setSendingBillId(stay.id);
     setBillingSendStatus(prev => ({ ...prev, [stay.id]: null }));
 
+    // The actual outbound text includes the full line-item math via
+    // {billingBreakdown} (Sept 19, 2026), built from the same edited
+    // dates/times/rate/holiday-% admin just reviewed - not just the
+    // final total.
+    const billingBreakdown = formatCostBreakdownText(costBreakdownFor(stay), multiDogDiscount);
     const { data: smsData, error: smsErr } = await supabase.functions.invoke('send-confirmation', {
       body: {
         type: 'billing', owner_name: stay.ownerName, owner_phone: stay.ownerPhone,
         dog_name: stay.dogNames.join(' & '), final_cost: finalCost, message_template: smsTemplates.billing,
+        billing_breakdown: billingBreakdown,
       },
     });
     if (smsErr || smsData?.error) {
@@ -1523,7 +1556,7 @@ function AdminView({
         <div className="rate-setting sms-editor">
           <label className="field-label">SMS Message Templates</label>
           <div style={{ fontSize: '0.72rem', color: '#6B7A8A', marginBottom: 10 }}>
-            Placeholders: {'{firstName} {dogName} {dropDate} {dropTime} {pickDate} {pickTime} {estimatedCost} {finalCost} {packingList} {kimPhone} {esteePhone}'}
+            Placeholders: {'{firstName} {dogName} {dogVerb} {dropDate} {dropTime} {pickDate} {pickTime} {estimatedCost} {finalCost} {billingBreakdown} {packingList} {kimPhone} {esteePhone}'}
           </div>
           {[
             { key: 'confirmation', label: 'Booking Confirmation' },
@@ -1539,14 +1572,24 @@ function AdminView({
                 rows={3}
                 style={{ width: '100%', padding: '8px 10px', border: '1.5px solid #D5D9DE', borderRadius: 6, fontSize: '0.82rem', fontFamily: 'inherit' }}
               />
-              <button
-                className="btn-primary"
-                style={{ padding: '6px 14px', marginTop: 6 }}
-                disabled={savingSettings}
-                onClick={() => saveSettings({ [`sms${key.charAt(0).toUpperCase()}${key.slice(1)}`]: editSms[key] })}
-              >
-                Save {label} Text
-              </button>
+              <div style={{ display: 'flex', gap: 8, marginTop: 6, flexWrap: 'wrap' }}>
+                <button
+                  className="btn-primary"
+                  style={{ padding: '6px 14px' }}
+                  disabled={savingSettings}
+                  onClick={() => saveSettings({ [`sms${key.charAt(0).toUpperCase()}${key.slice(1)}`]: editSms[key] })}
+                >
+                  Save {label} Text
+                </button>
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  style={{ padding: '6px 14px' }}
+                  onClick={() => setEditSms(s => ({ ...s, [key]: DEFAULT_SMS_TEMPLATES[key] }))}
+                >
+                  Reset to Default
+                </button>
+              </div>
             </div>
           ))}
         </div>

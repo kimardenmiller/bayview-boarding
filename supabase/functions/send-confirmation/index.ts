@@ -114,7 +114,7 @@ export async function handleRequest(req: Request): Promise<Response> {
     const {
       type, owner_name, owner_phone, dog_name, check_in, check_out,
       drop_time, pickup_time, estimated_cost, final_cost,
-      message_template, packing_list,
+      message_template, packing_list, billing_breakdown,
     } = JSON.parse(text);
 
     const firstName = owner_name?.split(" ")[0] || "there";
@@ -122,7 +122,11 @@ export async function handleRequest(req: Request): Promise<Response> {
     const pickDate = check_out ? new Date(check_out + "T12:00:00").toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" }) : "";
     const dropTimeStr = drop_time ? drop_time.slice(0, 5) : "";
     const pickTimeStr = pickup_time ? pickup_time.slice(0, 5) : "";
-    const packingListStr = Array.isArray(packing_list) ? packing_list.join(", ") : (packing_list || DEFAULT_PACKING_LIST);
+    // One bullet per line (Sept 19, 2026, on request - was a single
+    // comma-separated run-on sentence) - a leading "• " on the first item
+    // too, so it reads as a list from the very first line, not just the
+    // ones after a line break.
+    const packingListStr = "• " + (Array.isArray(packing_list) ? packing_list : (packing_list ? packing_list.split(", ") : DEFAULT_PACKING_LIST.split(", "))).join("\n• ");
 
     let message = "";
 
@@ -136,19 +140,29 @@ export async function handleRequest(req: Request): Promise<Response> {
         pickDate, pickTime: pickTimeStr, pickupDate: pickDate, pickupTime: pickTimeStr,
         estimatedCost: formatDollars(estimated_cost),
         finalCost: formatDollars(final_cost),
+        billingBreakdown: billing_breakdown || "",
         packingList: packingListStr, kimPhone: KIM_PHONE, esteePhone: ESTEE_PHONE,
       });
     } else if (type === "reminder") {
-      message = `Hi ${firstName}! Just a reminder that ${dog_name}'s stay at Bayview Boarding starts tomorrow at ${dropTimeStr}. Please bring: ${packingListStr}. See you then! — Kim & Estee\n\nReply STOP to opt out.`;
+      message = `Hi ${firstName}! Just a reminder that ${dog_name}'s stay at Bayview Boarding starts tomorrow at ${dropTimeStr}. Here's what to bring:\n${packingListStr}\nSee you then! — Kim & Estee\n\nReply STOP to opt out.`;
       message = appendContactNote(message, KIM_PHONE, ESTEE_PHONE);
     } else if (type === "billing") {
-      message = `Hi ${firstName}! ${dog_name} ${dogVerb(dog_name)} ready for pickup. Your total for this stay is $${formatDollars(final_cost)}. Thanks for choosing Bayview Boarding! — Kim & Estee\n\nReply STOP to opt out.`;
+      // "Thank you for visiting" (Sept 19, 2026, on request) - dropped
+      // the "ready for pickup" framing entirely, since this text goes out
+      // whenever admin bills a stay, not only right at pickup time (e.g.
+      // a corrected resend days later would have read oddly). The full
+      // line-item math (billing_breakdown, built client-side from the
+      // same admin-reviewed dates/rate - see App.js's sendBill) comes
+      // before the total, not just the total alone.
+      const breakdownBlock = billing_breakdown ? `\n${billing_breakdown}\n` : "";
+      message = `Hi ${firstName}! Thank you for visiting Bayview Boarding with ${dog_name}. Here's your billing detail:${breakdownBlock}\nTotal: $${formatDollars(final_cost)}\n\nThanks for choosing Bayview Boarding! — Kim & Estee\n\nReply STOP to opt out.`;
       message = appendContactNote(message, KIM_PHONE, ESTEE_PHONE);
     } else if (type === "pickup") {
-      message = `It's been wonderful having ${dog_name}! We have you down for pick up at ${pickDate} ${pickTimeStr}. Please let us know in our shared group text thread if anything has changed. Otherwise, we'll see you tomorrow at ${pickTimeStr}.`;
+      message = `It's been wonderful having ${dog_name}! We have you down for pick up at ${pickDate} ${pickTimeStr}. Please let us know in our shared group text thread if anything has changed. Otherwise, we'll see you tomorrow at ${pickTimeStr}. — Kim & Estee\n\nReply STOP to opt out.`;
+      message = appendContactNote(message, KIM_PHONE, ESTEE_PHONE);
     } else {
       // Default: confirmation
-      message = `Hi ${firstName}! ${dog_name}'s stay at Bayview Boarding is confirmed. Drop-off: ${dropDate} at ${dropTimeStr}. Pick-up: ${pickDate} at ${pickTimeStr}. Estimated cost: $${formatDollars(estimated_cost)}. — Kim & Estee`;
+      message = `Hi ${firstName}! ${dog_name}'s stay at Bayview Boarding is confirmed. Drop-off: ${dropDate} at ${dropTimeStr}. Pick-up: ${pickDate} at ${pickTimeStr}. Estimated cost: $${formatDollars(estimated_cost)}. — Kim & Estee\n\nReply STOP to opt out.`;
       message = appendContactNote(message, KIM_PHONE, ESTEE_PHONE);
     }
 

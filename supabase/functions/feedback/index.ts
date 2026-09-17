@@ -11,6 +11,11 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 const ADMIN_PASSWORD = Deno.env.get('ADMIN_PASSWORD')!;
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+const TWILIO_ACCOUNT_SID = Deno.env.get('TWILIO_ACCOUNT_SID')!;
+const TWILIO_AUTH_TOKEN = Deno.env.get('TWILIO_AUTH_TOKEN')!;
+const TWILIO_FROM = Deno.env.get('TWILIO_PHONE')!;
+const KIM_PHONE = Deno.env.get('KIM_PHONE')!;
+const ESTEE_PHONE = Deno.env.get('ESTEE_PHONE')!;
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -22,6 +27,29 @@ function json(body: unknown, status = 200): Response {
     status,
     headers: { 'Content-Type': 'application/json', ...corsHeaders },
   });
+}
+
+// Same relay pattern as send-contact - one Twilio send, best-effort. A
+// new submission is already saved by the time this runs, so a failed
+// text here only means Kim/Estee find out from the admin badge instead
+// of immediately, not that the idea/bug itself was lost.
+async function sendSms(to: string, body: string): Promise<boolean> {
+  const toDigits = to.replace(/\D/g, '');
+  const formattedTo = toDigits.startsWith('1') ? `+${toDigits}` : `+1${toDigits}`;
+  const response = await fetch(
+    `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`,
+    {
+      method: 'POST',
+      headers: {
+        Authorization: 'Basic ' + btoa(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`),
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: new URLSearchParams({ From: TWILIO_FROM, To: formattedTo, Body: body }),
+    },
+  );
+  const result = await response.json();
+  if (!response.ok) console.error('feedback: notify send failed', JSON.stringify(result));
+  return response.ok;
 }
 
 const CATEGORIES = ['bug', 'idea', 'other'];
@@ -63,6 +91,23 @@ export async function handleRequest(req: Request): Promise<Response> {
         message: message.trim(),
       });
       if (error) throw error;
+
+      // Text Kim & Estee the moment a new idea/bug comes in (Sept 19,
+      // 2026, on request - previously deliberately NOT wired to any
+      // notification, relying solely on the admin panel's open-count
+      // badge). Awaited, not fire-and-forget - an Edge Function's runtime
+      // isn't guaranteed to keep running once a response is returned, so
+      // a background send here could just never go out (same lesson as
+      // send-confirmation's owner-copy notice). The submission already
+      // succeeded above either way, so a failed text is only logged,
+      // never turned into an error response - the admin badge remains
+      // the fallback way to notice it.
+      const notifyText = `New "Submit Idea" from ${name.trim()}: "${message.trim()}"`;
+      await Promise.all([
+        sendSms(KIM_PHONE, notifyText).catch((err) => console.error('feedback: notify Kim failed', err)),
+        sendSms(ESTEE_PHONE, notifyText).catch((err) => console.error('feedback: notify Estee failed', err)),
+      ]);
+
       return json({ success: true });
     }
 
