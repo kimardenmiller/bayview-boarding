@@ -27,6 +27,13 @@ export function buildRelayWarning(fromNumber: string, body: string): string {
   return `⚠️ ${fromNumber} replied directly instead of using the group text: "${body}"`;
 }
 
+/** The copy sent to Kim & Estee whenever a client-facing text actually goes
+ * out (confirmation, reminder, billing, pickup) - lets them see exactly
+ * what a client received without being on the thread themselves. */
+export function buildOwnerCopyNotice(ownerName: string, ownerPhone: string, message: string): string {
+  return `📤 Sent to ${ownerName} (${ownerPhone}):\n\n${message}`;
+}
+
 /**
  * Validates that an inbound webhook request genuinely came from Twilio.
  * Implements Twilio's documented request-validation algorithm:

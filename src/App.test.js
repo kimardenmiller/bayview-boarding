@@ -453,6 +453,19 @@ describe('calcCostBreakdown', () => {
     expect(b.total.toFixed(2)).toBe(calcCost('2026-01-01', '2026-01-02', '09:00', '09:00', 100, 2));
   });
 
+  test('splits subtotal into a 1st-dog line and an additional-dogs line', () => {
+    // 2 nights, 3 dogs @ $100: dog1 $200, dogs 2&3 $180 each -> $560 total
+    const b = calcCostBreakdown('2026-03-10', '2026-03-12', '09:00', '09:00', 100, 3);
+    expect(b.firstDogSubtotal).toBe(200);
+    expect(b.additionalDogsSubtotal).toBe(360);
+    expect(b.firstDogSubtotal + b.additionalDogsSubtotal).toBe(b.subtotal);
+  });
+
+  test('carries the holidayUpcharge rate used, for display', () => {
+    const b = calcCostBreakdown('2026-01-01', '2026-01-02', '09:00', '09:00', 100, 1, 0.10, 0.30);
+    expect(b.holidayUpcharge).toBe(0.30);
+  });
+
   test('reports a fractional nights count for a partial-day stay', () => {
     // 36 hrs = 1.5 days, no holiday
     const b = calcCostBreakdown('2026-03-10', '2026-03-11', '09:00', '21:00', 100);
@@ -1837,12 +1850,14 @@ describe('Admin — logged in — Unbilled Stays', () => {
     const dayRateInput = within(card).getByDisplayValue('105'); // defaults to the global day rate
     within(card).getByDisplayValue('30'); // defaults to the global holiday upcharge %
 
-    // The breakdown line must show the multi-dog discount is being
-    // applied, not just say "x 2 dogs" as if it were a flat doubling
-    // (that label used to be shown even though the total underneath it
-    // already had the 10% 2nd-dog discount baked in, which read as a
-    // math error - Sept 18, 2026 fix).
-    expect(within(card).getByText(/× 2 dogs \(10% off each additional\)/)).toBeInTheDocument();
+    // The breakdown must show the 1st dog and additional dog(s) as their
+    // own line items with the actual discounted rate, not just "x 2 dogs"
+    // as if it were a flat doubling (that label used to be shown even
+    // though the total underneath it already had the 10% 2nd-dog discount
+    // baked in, which read as a math error - Sept 18, 2026 fix; split into
+    // separate 1st-dog/additional-dog lines the same day, on request).
+    expect(within(card).getByText(/1st dog/)).toBeInTheDocument();
+    expect(within(card).getByText(/1 additional dog × 90% \(10% off each\)/)).toBeInTheDocument();
 
     fireEvent.change(dayRateInput, { target: { value: '200' } });
     fireEvent.click(within(card).getByText('Recalculate'));

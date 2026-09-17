@@ -4,6 +4,7 @@ import {
   appendContactNote,
   buildAutoReply,
   buildRelayWarning,
+  buildOwnerCopyNotice,
   validateTwilioSignature,
   escapeXml,
 } from './contact.ts';
@@ -37,6 +38,13 @@ Deno.test('buildRelayWarning includes the sender, the message, and a warning mar
   assertEquals(warning.includes('+14155551234'), true);
   assertEquals(warning.includes('Can I drop off early?'), true);
   assertEquals(warning.includes('⚠️'), true);
+});
+
+Deno.test('buildOwnerCopyNotice includes the owner name, phone, and the full original message', () => {
+  const notice = buildOwnerCopyNotice('Jane Smith', '4155550199', 'Hi Jane! Your stay is confirmed.');
+  assertEquals(notice.includes('Jane Smith'), true);
+  assertEquals(notice.includes('4155550199'), true);
+  assertEquals(notice.includes('Hi Jane! Your stay is confirmed.'), true);
 });
 
 Deno.test('escapeXml escapes all five reserved XML characters', () => {

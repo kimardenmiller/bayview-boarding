@@ -1,6 +1,6 @@
 BAYVIEW BOARDING — FIX LIST
 ============================
-Last updated: September 18, 2026 (3) (fractional-day billing; show cost math everywhere; production stays cleared)
+Last updated: September 18, 2026 (4) (itemized 1st-dog/additional-dog/holiday cost lines; Kim & Estee get a copy of every client text)
 
 NEXT CHANGE LIST (v1.5)
 -----------------------
@@ -79,6 +79,37 @@ TWILIO STATUS
 
 COMPLETED
 ---------
+- Sept 18, 2026 (4):
+
+  1. The shared CostBreakdown component (Stay Dates, Confirmation, both
+  Admin stay-card views) now itemizes the math instead of blending it
+  into one "x N dogs" line: a days-shown-to-one-decimal figure, then a
+  "$rate/day x N.N days x 1st dog = $X" line, a separate "... x N
+  additional dog(s) x NN% (NN% off each) = $X" line when there's more
+  than one dog, then "+ Holiday upcharge: N.N days x NN% = $X" when any
+  holiday time is involved, ending "= $total". calcCostBreakdown itself
+  now returns firstDogSubtotal/additionalDogsSubtotal/holidayUpcharge so
+  the display never re-derives math the calculation function already
+  did - same principle as the Sept 18 (2) label-vs-total mismatch fix.
+
+  2. Whenever a client-facing text actually goes out (confirmation,
+  drop-off reminder, billing, or pickup reminder - any type send-
+  confirmation handles), Kim and Estee now each get their own copy by
+  SMS identifying who it was sent to and the exact message. On request,
+  so nothing a client receives is invisible to them without being
+  looped into every thread. Awaited (not fire-and-forget) since an Edge
+  Function isn't guaranteed to keep running after its response returns;
+  a failed copy only logs an error and never fails the client's own
+  send, which already succeeded by the time the copy fires. New
+  buildOwnerCopyNotice in _shared/contact.ts, unit-tested there and in
+  send-confirmation's own suite.
+
+  3. Fixed a deploy gap from Sept 18 (3): that session's fractional-
+  billing/cost-math fixes were committed but never actually deployed,
+  so the live site was still showing the old round-up-to-a-full-day
+  math ("8 nights x $105 = $840") when Kim checked it. Also fixed the
+  now-stale "24-hour minimum" caption under the admin Day Rate field.
+
 - Sept 18, 2026 (3):
 
   1. Every client- and admin-facing "Estimated cost"/"Billed cost" figure

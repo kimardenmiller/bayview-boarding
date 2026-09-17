@@ -55,10 +55,11 @@ function formatMoney(amount) {
   return Math.round(n).toLocaleString('en-US');
 }
 
-// Trims a fractional day count to at most 2 decimals for display (e.g.
-// 1.5, not 1.5000000000000002) without a trailing ".00" on whole days.
+// Always one decimal place (Sept 18, 2026, on request) - e.g. "1.5", "0.3",
+// "2.0" - so a fractional day reads clearly as a fraction everywhere the
+// math is shown, rather than trimming a whole day down to "2".
 function formatDays(n) {
-  return (Math.round(n * 100) / 100).toString();
+  return n.toFixed(1);
 }
 
 // NOT `new Date().toISOString().slice(0,10)` - toISOString() is always
@@ -200,7 +201,16 @@ function calcCostBreakdown(
       holidayExtra += rate * holidayUpcharge * perNightDogMultiplier * fraction;
     }
   }
-  return { nights, holidayNights, dogs, rate, perNightDogMultiplier, subtotal, holidayExtra, total: subtotal + holidayExtra };
+  // Split out of subtotal (not summed separately in the loop above) so the
+  // UI can show "1st dog" and "additional dogs" as their own line items -
+  // exact by construction: firstDogSubtotal + additionalDogsSubtotal ===
+  // subtotal, since perNightDogMultiplier is constant across every night.
+  const firstDogSubtotal = rate * nights;
+  const additionalDogsSubtotal = subtotal - firstDogSubtotal;
+  return {
+    nights, holidayNights, dogs, rate, holidayUpcharge, perNightDogMultiplier,
+    firstDogSubtotal, additionalDogsSubtotal, subtotal, holidayExtra, total: subtotal + holidayExtra,
+  };
 }
 
 // Same math as calcCostBreakdown, just the final total - kept as a
@@ -524,13 +534,22 @@ function StepDogPage({ data, onChange, index, onNext, onBack }) {
 // the exact same underlying calcCostBreakdown() result.
 function CostBreakdown({ breakdown, multiDogDiscount }) {
   if (!breakdown) return null;
+  const days = formatDays(breakdown.nights);
+  const additionalDogs = breakdown.dogs - 1;
   return (
     <div className="cost-breakdown">
-      {formatDays(breakdown.nights)} day{breakdown.nights !== 1 ? 's' : ''} × ${formatMoney(breakdown.rate)}
-      {breakdown.dogs > 1 && ` × ${breakdown.dogs} dogs (${multiDogDiscount * 100}% off each additional)`}
-      {' '}= ${formatMoney(breakdown.subtotal)}
+      ${formatMoney(breakdown.rate)}/day × {days} day{breakdown.nights !== 1 ? 's' : ''} × 1st dog = ${formatMoney(breakdown.firstDogSubtotal)}
+      {additionalDogs > 0 && (
+        <>
+          <br />
+          ${formatMoney(breakdown.rate)}/day × {days} day{breakdown.nights !== 1 ? 's' : ''} × {additionalDogs} additional dog{additionalDogs !== 1 ? 's' : ''} × {100 - multiDogDiscount * 100}% ({multiDogDiscount * 100}% off each) = ${formatMoney(breakdown.additionalDogsSubtotal)}
+        </>
+      )}
       {breakdown.holidayNights > 0 && (
-        <><br />+ Holiday upcharge ({formatDays(breakdown.holidayNights)} day{breakdown.holidayNights !== 1 ? 's' : ''}): ${formatMoney(breakdown.holidayExtra)}</>
+        <>
+          <br />
+          + Holiday upcharge: {formatDays(breakdown.holidayNights)} day{breakdown.holidayNights !== 1 ? 's' : ''} × {breakdown.holidayUpcharge * 100}% = ${formatMoney(breakdown.holidayExtra)}
+        </>
       )}
       <br />= ${formatMoney(breakdown.total)}
     </div>
@@ -1428,7 +1447,7 @@ function AdminView({
             <input type="number" value={editRate} onChange={e => setEditRate(e.target.value)} style={{ width: 80, padding: '6px 10px', border: '1.5px solid #D5D9DE', borderRadius: 6, fontSize: '0.95rem' }} />
             <button className="btn-primary" style={{ padding: '6px 14px' }} disabled={savingSettings} onClick={() => saveSettings({ dayRate: Number(editRate) })}>Save</button>
           </div>
-          <div style={{ fontSize: '0.75rem', color: '#6B7A8A', marginTop: 4 }}>24-hour minimum · Current rate: ${formatMoney(rate)}/day</div>
+          <div style={{ fontSize: '0.75rem', color: '#6B7A8A', marginTop: 4 }}>Billed by the fraction of a day · Current rate: ${formatMoney(rate)}/day</div>
         </div>
 
         <div className="rate-setting discount-editor">

@@ -1,5 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { appendContactNote } from "../_shared/contact.ts";
+import { appendContactNote, buildOwnerCopyNotice } from "../_shared/contact.ts";
 
 const TWILIO_ACCOUNT_SID = Deno.env.get("TWILIO_ACCOUNT_SID")!;
 const TWILIO_AUTH_TOKEN = Deno.env.get("TWILIO_AUTH_TOKEN")!;
@@ -62,6 +62,44 @@ export function dogVerb(dogName: string | undefined): string {
   return dogName && dogName.includes(" & ") ? "are" : "is";
 }
 
+// Shared by the client send and the Kim/Estee copy sends below - a plain
+// number of digits in, Twilio's E.164 format out.
+function toE164(rawNumber: string): string {
+  const digits = rawNumber.replace(/\D/g, "");
+  return digits.startsWith("1") ? `+${digits}` : `+1${digits}`;
+}
+
+async function sendTwilioSms(to: string, body: string): Promise<{ ok: boolean; result: unknown }> {
+  const response = await fetch(
+    `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`,
+    {
+      method: "POST",
+      headers: {
+        "Authorization": "Basic " + btoa(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`),
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body: new URLSearchParams({ From: TWILIO_FROM, To: to, Body: body }),
+    }
+  );
+  return { ok: response.ok, result: await response.json() };
+}
+
+// Fires the Kim/Estee copy of a just-sent client text - best-effort, on
+// request (Sept 18, 2026): they should see exactly what every client text
+// said without being on the thread themselves. Never allowed to affect the
+// client send's own success/failure - a failed copy is only logged.
+async function notifyOwnersOfClientText(ownerName: string, ownerPhone: string, message: string): Promise<void> {
+  const notice = buildOwnerCopyNotice(ownerName || "a client", ownerPhone || "", message);
+  for (const phone of [KIM_PHONE, ESTEE_PHONE]) {
+    try {
+      const { ok, result } = await sendTwilioSms(toE164(phone), notice);
+      if (!ok) console.error("Owner copy notice failed:", JSON.stringify(result));
+    } catch (err) {
+      console.error("Owner copy notice failed:", (err as Error).message);
+    }
+  }
+}
+
 // Exported (rather than only passed inline to serve()) so it can be unit
 // tested directly with a constructed Request - no live server needed.
 export async function handleRequest(req: Request): Promise<Response> {
@@ -114,33 +152,21 @@ export async function handleRequest(req: Request): Promise<Response> {
       message = appendContactNote(message, KIM_PHONE, ESTEE_PHONE);
     }
 
-    const toNumber = owner_phone.replace(/\D/g, "");
-    const formattedTo = toNumber.startsWith("1") ? `+${toNumber}` : `+1${toNumber}`;
-
-    const response = await fetch(
-      `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`,
-      {
-        method: "POST",
-        headers: {
-          "Authorization": "Basic " + btoa(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`),
-          "Content-Type": "application/x-www-form-urlencoded",
-        },
-        body: new URLSearchParams({
-          From: TWILIO_FROM,
-          To: formattedTo,
-          Body: message,
-        }),
-      }
-    );
-
-    const result = await response.json();
+    const { ok, result } = await sendTwilioSms(toE164(owner_phone), message);
     console.log("Twilio response:", JSON.stringify(result));
 
-    if (!response.ok) {
+    if (!ok) {
       return json({ error: result }, 500);
     }
 
-    return json({ success: true, sid: result.sid });
+    // Awaited, not fire-and-forget: an Edge Function's runtime isn't
+    // guaranteed to keep running once a response is returned, so a
+    // background send here could just never go out. A failed copy still
+    // can't fail the client send itself (already succeeded above) -
+    // notifyOwnersOfClientText only logs its own errors.
+    await notifyOwnersOfClientText(owner_name, owner_phone, message);
+
+    return json({ success: true, sid: (result as { sid?: string }).sid });
   } catch (err) {
     console.error("Function error:", err);
     return json({ error: (err as Error).message }, 500);

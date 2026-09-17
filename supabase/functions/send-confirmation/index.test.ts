@@ -10,9 +10,10 @@ const { handleRequest, fillTemplate, formatDollars, dogVerb } = await import('./
 
 function stubTwilio() {
   const original = globalThis.fetch;
-  const calls: { body: string }[] = [];
+  const calls: { to: string; body: string }[] = [];
   globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
-    calls.push({ body: new URLSearchParams(String(init?.body)).get('Body') || '' });
+    const params = new URLSearchParams(String(init?.body));
+    calls.push({ to: params.get('To') || '', body: params.get('Body') || '' });
     return new Response(JSON.stringify({ success: true, sid: 'SMtest' }), { status: 200 });
   }) as typeof fetch;
   return { calls, restore: () => { globalThis.fetch = original; } };
@@ -138,7 +139,9 @@ Deno.test('with no message_template, type reminder: uses packing_list if given, 
     await handleRequest(sendRequest({
       type: 'reminder', owner_name: 'Kim Miller', owner_phone: '4155550199', dog_name: 'Rex', drop_time: '09:00:00',
     }));
-    assertEquals(stub.calls[1].body.includes('Please bring: Food, Leash & doggy bags,'), true);
+    // Each send fires 3 Twilio calls now (client, then Kim, then Estee) -
+    // the 2nd invocation's client call is the 4th call overall.
+    assertEquals(stub.calls[3].body.includes('Please bring: Food, Leash & doggy bags,'), true);
   } finally {
     stub.restore();
   }
@@ -231,6 +234,78 @@ Deno.test('with a message_template: fills {pickupDate}/{pickupTime} for a pickup
     assertEquals(stub.calls[0].body, 'Bye Rex! See you Sat, Oct 3 at 09:00.');
   } finally {
     stub.restore();
+  }
+});
+
+// ── Kim/Estee copy of every client text (Sept 18, 2026) ─────────────────────
+
+Deno.test('after a successful client send, also texts Kim and Estee a copy identifying who it went to', async () => {
+  const stub = stubTwilio();
+  try {
+    await handleRequest(sendRequest({
+      owner_name: 'Jane Smith', owner_phone: '4155550199', dog_name: 'Rex',
+      check_in: '2026-10-01', check_out: '2026-10-03', drop_time: '09:00:00', pickup_time: '10:00:00',
+      estimated_cost: 210,
+    }));
+    assertEquals(stub.calls.length, 3); // client, then Kim, then Estee
+    const clientMessage = stub.calls[0].body;
+    assertEquals(stub.calls[1].to, '+14155550101'); // KIM_PHONE
+    assertEquals(stub.calls[2].to, '+14155550102'); // ESTEE_PHONE
+    for (const call of [stub.calls[1], stub.calls[2]]) {
+      assertEquals(call.body.includes('Jane Smith'), true);
+      assertEquals(call.body.includes('4155550199'), true);
+      assertEquals(call.body.includes(clientMessage), true);
+    }
+  } finally {
+    stub.restore();
+  }
+});
+
+Deno.test('sends a Kim/Estee copy for every message type (billing, reminder, pickup), not just confirmation', async () => {
+  const stub = stubTwilio();
+  try {
+    await handleRequest(sendRequest({
+      type: 'billing', owner_name: 'Jane Smith', owner_phone: '4155550199', dog_name: 'Rex', final_cost: 210,
+    }));
+    assertEquals(stub.calls.length, 3);
+  } finally {
+    stub.restore();
+  }
+});
+
+Deno.test('does not text Kim/Estee if the client send itself fails', async () => {
+  const original = globalThis.fetch;
+  let callCount = 0;
+  globalThis.fetch = (async () => {
+    callCount++;
+    return new Response(JSON.stringify({ message: 'bad request' }), { status: 400 });
+  }) as typeof fetch;
+  try {
+    const res = await handleRequest(sendRequest({ owner_name: 'Jane', owner_phone: '4155550199', dog_name: 'Rex' }));
+    assertEquals(res.status, 500);
+    assertEquals(callCount, 1); // only the (failed) client attempt - no copies fired
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
+Deno.test('a failed Kim/Estee copy does not fail the overall response - the client already got their text', async () => {
+  const original = globalThis.fetch;
+  let callCount = 0;
+  globalThis.fetch = (async () => {
+    callCount++;
+    // 1st call (to the client) succeeds; the Kim/Estee copies both fail.
+    if (callCount === 1) return new Response(JSON.stringify({ success: true, sid: 'SMtest' }), { status: 200 });
+    return new Response(JSON.stringify({ message: 'copy failed' }), { status: 500 });
+  }) as typeof fetch;
+  try {
+    const res = await handleRequest(sendRequest({
+      owner_name: 'Jane', owner_phone: '4155550199', dog_name: 'Rex', estimated_cost: 100,
+    }));
+    assertEquals(res.status, 200);
+    assertEquals(callCount, 3); // client + 2 attempted (failed) copies
+  } finally {
+    globalThis.fetch = original;
   }
 });
 
