@@ -1,6 +1,6 @@
 BAYVIEW BOARDING — FIX LIST
 ============================
-Last updated: September 18, 2026 (2) (fix multi-dog discount label bug; whole-dollar amounts everywhere)
+Last updated: September 18, 2026 (3) (fractional-day billing; show cost math everywhere; production stays cleared)
 
 NEXT CHANGE LIST (v1.5)
 -----------------------
@@ -79,6 +79,30 @@ TWILIO STATUS
 
 COMPLETED
 ---------
+- Sept 18, 2026 (3):
+
+  1. Every client- and admin-facing "Estimated cost"/"Billed cost" figure
+  now shows its full line-item math (days x rate x dog multiplier +
+  holiday upcharge = total) right next to the total, not just after
+  clicking into Admin's Edit view. New shared CostBreakdown component
+  (App.js) renders calcCostBreakdown()'s result identically on Stay
+  Dates, the Confirmation screen, and both Unbilled/Past Stays cards
+  once expanded - one render path so the number shown and the math
+  behind it can never drift apart.
+
+  2. Billing switched from "round every partial day up to a full day,
+  1-day minimum" to true fractional-day billing: calcCost/
+  calcCostBreakdown now charge the exact fraction of a day in care (e.g.
+  36 hours = 1.5x the daily rate; a 6-hour same-day stay = 0.25x), with
+  holiday upcharge and the multi-dog discount prorated across a partial
+  day the same way. calcCost is now just calcCostBreakdown's total, so
+  there's one source of the actual math. This is a real pricing change,
+  on request - most stays won't land on an exact 24-hour boundary, so
+  this generally charges less than the old round-up behavior did.
+
+  3. Cleared every row from `stays` and `stay_dogs` in production (owners
+  and dogs left untouched) at Kim's request.
+
 - Sept 18, 2026 (2): Feedback on (1) below, same day:
 
   1. BUG FIX: the Stay Editing breakdown label said "x 2 dogs" next to a

@@ -55,6 +55,12 @@ function formatMoney(amount) {
   return Math.round(n).toLocaleString('en-US');
 }
 
+// Trims a fractional day count to at most 2 decimals for display (e.g.
+// 1.5, not 1.5000000000000002) without a trailing ".00" on whole days.
+function formatDays(n) {
+  return (Math.round(n * 100) / 100).toString();
+}
+
 // NOT `new Date().toISOString().slice(0,10)` - toISOString() is always
 // UTC. In the evening Pacific time (after ~5pm PDT / 4pm PST), UTC has
 // already rolled to tomorrow, so that would compute "today" as tomorrow -
@@ -149,39 +155,19 @@ function isHolidayNight(dateISO) {
 }
 
 // numberOfDogs: additional dogs beyond the first are each charged at
-// (1 - multiDogDiscount) of that night's per-dog rate, uncapped. Holiday
+// (1 - multiDogDiscount) of that day's per-dog rate, uncapped. Holiday
 // nights (see getHolidayWindows) upcharge the base rate by
 // holidayUpcharge before the multi-dog discount is applied, so the
-// discount always tracks the actual (possibly holiday) nightly rate.
-// Both are admin-configurable (see the settings table) - the parameter
-// defaults here are only a fallback for direct/pure-function callers.
-function calcCost(
-  checkIn, checkOut, dropTime, pickupTime, rate, numberOfDogs = 1,
-  multiDogDiscount = DEFAULT_MULTI_DOG_DISCOUNT, holidayUpcharge = DEFAULT_HOLIDAY_UPCHARGE
-) {
-  if (!checkIn || !checkOut || !dropTime || !pickupTime) return null;
-  const drop = new Date(`${checkIn}T${dropTime}`);
-  const pickup = new Date(`${checkOut}T${pickupTime}`);
-  const hours = (pickup - drop) / 3600000;
-  if (hours <= 0) return null;
-  const days = Math.max(1, Math.ceil(hours / 24));
-  const dogs = Math.max(1, Number(numberOfDogs) || 1);
-  const perNightDogMultiplier = 1 + (dogs - 1) * (1 - multiDogDiscount);
-
-  const [y, m, d] = checkIn.split('-').map(Number);
-  let total = 0;
-  for (let i = 0; i < days; i++) {
-    const nightISO = isoFromLocalDate(new Date(y, m - 1, d + i));
-    const nightlyRate = isHolidayNight(nightISO) ? rate * (1 + holidayUpcharge) : rate;
-    total += nightlyRate * perNightDogMultiplier;
-  }
-  return total.toFixed(2);
-}
-
-// Same math as calcCost, but returns the line items instead of just the
-// final total - Admin: Stay Editing (Sept 18, 2026) shows this breakdown
-// next to the editable Daily Rate/Holiday Upcharge fields so admin can see
-// exactly how a correction changes the total, not just the total itself.
+// discount always tracks the actual (possibly holiday) rate. Both are
+// admin-configurable (see the settings table) - the parameter defaults
+// here are only a fallback for direct/pure-function callers.
+//
+// Billed fractionally, down to the actual fraction of a day (Sept 18,
+// 2026, on request - previously rounded every partial day UP to a full
+// day via Math.ceil, with a 1-day minimum even for a same-day stay of a
+// few hours). A stay of exactly N whole days still bills N full days;
+// anything in between bills the exact fraction (e.g. 36 hours = 1.5
+// days = 1.5x the daily rate). No minimum charge is applied.
 function calcCostBreakdown(
   checkIn, checkOut, dropTime, pickupTime, rate, numberOfDogs = 1,
   multiDogDiscount = DEFAULT_MULTI_DOG_DISCOUNT, holidayUpcharge = DEFAULT_HOLIDAY_UPCHARGE
@@ -191,7 +177,13 @@ function calcCostBreakdown(
   const pickup = new Date(`${checkOut}T${pickupTime}`);
   const hours = (pickup - drop) / 3600000;
   if (hours <= 0) return null;
-  const nights = Math.max(1, Math.ceil(hours / 24));
+  const nights = hours / 24; // fractional number of days billed
+  // Float-safe: an exact multiple of 24h (e.g. 48.00000000000001 due to
+  // DST-free millisecond math) must still count as whole days, not spill
+  // a near-zero fraction into an extra billed day.
+  const fullDays = Math.round(nights * 1e6) % 1e6 === 0 ? Math.round(nights) : Math.floor(nights);
+  const remainder = nights - fullDays;
+  const dayCount = remainder > 1e-9 ? fullDays + 1 : fullDays;
   const dogs = Math.max(1, Number(numberOfDogs) || 1);
   const perNightDogMultiplier = 1 + (dogs - 1) * (1 - multiDogDiscount);
 
@@ -199,15 +191,26 @@ function calcCostBreakdown(
   let holidayNights = 0;
   let subtotal = 0;
   let holidayExtra = 0;
-  for (let i = 0; i < nights; i++) {
+  for (let i = 0; i < dayCount; i++) {
+    const fraction = i < fullDays ? 1 : remainder;
     const nightISO = isoFromLocalDate(new Date(y, m - 1, d + i));
-    subtotal += rate * perNightDogMultiplier;
+    subtotal += rate * perNightDogMultiplier * fraction;
     if (isHolidayNight(nightISO)) {
-      holidayNights++;
-      holidayExtra += rate * holidayUpcharge * perNightDogMultiplier;
+      holidayNights += fraction;
+      holidayExtra += rate * holidayUpcharge * perNightDogMultiplier * fraction;
     }
   }
   return { nights, holidayNights, dogs, rate, perNightDogMultiplier, subtotal, holidayExtra, total: subtotal + holidayExtra };
+}
+
+// Same math as calcCostBreakdown, just the final total - kept as a
+// separate export since most call sites only need the number.
+function calcCost(
+  checkIn, checkOut, dropTime, pickupTime, rate, numberOfDogs = 1,
+  multiDogDiscount = DEFAULT_MULTI_DOG_DISCOUNT, holidayUpcharge = DEFAULT_HOLIDAY_UPCHARGE
+) {
+  const breakdown = calcCostBreakdown(checkIn, checkOut, dropTime, pickupTime, rate, numberOfDogs, multiDogDiscount, holidayUpcharge);
+  return breakdown ? breakdown.total.toFixed(2) : null;
 }
 
 // Named exports alongside the default App export, purely so pure helper
@@ -515,6 +518,25 @@ function StepDogPage({ data, onChange, index, onNext, onBack }) {
   );
 }
 
+// Shared line-item math display for every "Estimated cost" (StepDates,
+// Confirmation) and "Billed cost" (Admin Edit) figure in the app - one
+// place so a client and an admin see the exact same breakdown shape for
+// the exact same underlying calcCostBreakdown() result.
+function CostBreakdown({ breakdown, multiDogDiscount }) {
+  if (!breakdown) return null;
+  return (
+    <div className="cost-breakdown">
+      {formatDays(breakdown.nights)} day{breakdown.nights !== 1 ? 's' : ''} × ${formatMoney(breakdown.rate)}
+      {breakdown.dogs > 1 && ` × ${breakdown.dogs} dogs (${multiDogDiscount * 100}% off each additional)`}
+      {' '}= ${formatMoney(breakdown.subtotal)}
+      {breakdown.holidayNights > 0 && (
+        <><br />+ Holiday upcharge ({formatDays(breakdown.holidayNights)} day{breakdown.holidayNights !== 1 ? 's' : ''}): ${formatMoney(breakdown.holidayExtra)}</>
+      )}
+      <br />= ${formatMoney(breakdown.total)}
+    </div>
+  );
+}
+
 function StepDates({ data, onChange, onNext, onBack, rate, multiDogDiscount, holidayUpcharge }) {
   const [errors, setErrors] = useState({});
 
@@ -553,7 +575,7 @@ function StepDates({ data, onChange, onNext, onBack, rate, multiDogDiscount, hol
   // unexplained grey button once every field has *something* in it.
   const isComplete = !!(data.checkIn && data.checkOut && data.dropTime && data.pickupTime);
 
-  const cost = calcCost(data.checkIn, data.checkOut, data.dropTime, data.pickupTime, rate, data.dogs.length, multiDogDiscount, holidayUpcharge);
+  const breakdown = calcCostBreakdown(data.checkIn, data.checkOut, data.dropTime, data.pickupTime, rate, data.dogs.length, multiDogDiscount, holidayUpcharge);
 
   return (
     <div className="step">
@@ -574,12 +596,13 @@ function StepDates({ data, onChange, onNext, onBack, rate, multiDogDiscount, hol
           <input type="time" value={data.pickupTime} onChange={e => onChange('pickupTime', e.target.value)} />
         </Field>
       </div>
-      {cost && (
+      {breakdown && (
         <div className="cost-estimate">
           <span>Estimated cost</span>
-          <strong>${formatMoney(cost)}</strong>
+          <strong>${formatMoney(breakdown.total)}</strong>
+          <CostBreakdown breakdown={breakdown} multiDogDiscount={multiDogDiscount} />
           <div className="cost-note">
-            Based on ${formatMoney(rate)}/day · 24-hour minimum · +{holidayUpcharge * 100}% on holidays
+            Based on ${formatMoney(rate)}/day, billed for the actual length of your dog's stay · +{holidayUpcharge * 100}% on holidays
             {data.dogs.length > 1 && ` · ${multiDogDiscount * 100}% off each additional dog`}
             {' '}· Final invoice at pickup
           </div>
@@ -686,6 +709,7 @@ function Confirmation({ stay, onNewBooking }) {
         <div className="cost-estimate">
           <span>Estimated cost</span>
           <strong>${formatMoney(stay.estimated_cost)}</strong>
+          <CostBreakdown breakdown={stay.cost_breakdown} multiDogDiscount={stay.multi_dog_discount} />
           <div className="cost-note">Final invoice at pickup</div>
         </div>
       )}
@@ -1093,7 +1117,10 @@ function AdminView({
   function renderStayCard(s) {
     const isExpanded = expandedStayId === s.id;
     const isEditing = editingStayId === s.id;
-    const breakdown = isEditing ? costBreakdownFor(s) : null;
+    // Computed whenever the card is expanded, not just while editing, so
+    // the math behind "Estimated cost"/"Billed cost" is always visible
+    // once a card is opened - not only after clicking into Edit.
+    const breakdown = isExpanded ? costBreakdownFor(s) : null;
     return (
       <div key={s.id} className="stay-card">
         <div
@@ -1121,6 +1148,7 @@ function AdminView({
                     return fc ? `$${formatMoney(fc)}` : '—';
                   })()}
                 </div>
+                <CostBreakdown breakdown={breakdown} multiDogDiscount={multiDogDiscount} />
                 {s.perDog && s.perDog.map((pd, i) => (
                   <div key={i}>
                     {pd.dob && (
@@ -1181,17 +1209,7 @@ function AdminView({
                     <input type="number" value={billingFieldFor(s, 'holidayUpchargePct', String(holidayUpcharge * 100))} onChange={e => updateBillingField(s.id, 'holidayUpchargePct', e.target.value)} />
                   </Field>
                 </div>
-                {breakdown && (
-                  <div className="stay-meta" style={{ marginTop: 4, marginBottom: 4 }}>
-                    {breakdown.nights} night{breakdown.nights !== 1 ? 's' : ''} × ${formatMoney(breakdown.rate)}
-                    {breakdown.dogs > 1 && ` × ${breakdown.dogs} dogs (${multiDogDiscount * 100}% off each additional)`}
-                    {' '}= ${formatMoney(breakdown.subtotal)}
-                    {breakdown.holidayNights > 0 && (
-                      <><br />+ Holiday upcharge ({breakdown.holidayNights} night{breakdown.holidayNights !== 1 ? 's' : ''}): ${formatMoney(breakdown.holidayExtra)}</>
-                    )}
-                    <br />= ${formatMoney(breakdown.total)}
-                  </div>
-                )}
+                <CostBreakdown breakdown={breakdown} multiDogDiscount={multiDogDiscount} />
                 <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 8, flexWrap: 'wrap' }}>
                   <span style={{ fontSize: '0.85rem' }}>$</span>
                   <input
@@ -1980,7 +1998,7 @@ export default function App() {
 
   async function handleSubmit() {
     setSubmitting(true);
-    const cost = calcCost(form.checkIn, form.checkOut, form.dropTime, form.pickupTime, rate, form.dogs.length, multiDogDiscount, holidayUpcharge);
+    const breakdown = calcCostBreakdown(form.checkIn, form.checkOut, form.dropTime, form.pickupTime, rate, form.dogs.length, multiDogDiscount, holidayUpcharge);
     const payload = {
       owner: {
         name: form.ownerName,
@@ -2003,7 +2021,7 @@ export default function App() {
       dropTime: form.dropTime || null,
       pickupTime: form.pickupTime || null,
       notes: form.notes,
-      estimatedCost: cost ? parseFloat(cost) : null,
+      estimatedCost: breakdown ? parseFloat(breakdown.total.toFixed(2)) : null,
       signature: form.signature,
       clientTimezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
       // Exactly what was shown and agreed to at StepWaiver, captured at
@@ -2024,6 +2042,8 @@ export default function App() {
         drop_time: stay.drop_time,
         pickup_time: stay.pickup_time,
         estimated_cost: stay.estimated_cost,
+        cost_breakdown: breakdown,
+        multi_dog_discount: multiDogDiscount,
       };
       setCurrentStay(confirmation);
       setSubmitted(true);

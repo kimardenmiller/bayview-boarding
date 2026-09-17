@@ -13,6 +13,7 @@
 .cost-estimate span { font-size: 0.78rem; color: #6B7A8A; }
 .cost-estimate strong { font-size: 1.4rem; font-weight: 600; color: #2C3E50; }
 .cost-note { font-size: 0.73rem; color: #6B7A8A; }
+.cost-breakdown { font-size: 0.8rem; color: #2C3E50; margin: 4px 0; line-height: 1.5; }
 .stay-cost { font-size: 0.85rem; font-weight: 600; color: #7D9B76; margin-bottom: 4px; }
 .rate-setting { background: #F5F0E8; border-radius: 8px; padding: 14px 16px; margin-bottom: 18px; }
 .admin-entry-row { display: flex; gap: 10px; margin-bottom: 18px; }

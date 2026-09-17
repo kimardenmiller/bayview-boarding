@@ -391,16 +391,29 @@ describe('calcCost', () => {
     expect(calcCost('2026-03-11', '2026-03-10', '09:00', '09:00', 100)).toBeNull();
   });
 
-  test('charges a 1-day minimum for a short same-day stay', () => {
-    expect(calcCost('2026-03-10', '2026-03-10', '09:00', '15:00', 100)).toBe('100.00');
+  test('charges the exact fraction of a day for a short same-day stay', () => {
+    // 6 hrs = 0.25 day -> $25, no minimum charge
+    expect(calcCost('2026-03-10', '2026-03-10', '09:00', '15:00', 100)).toBe('25.00');
   });
 
-  test('rounds up partial days', () => {
-    expect(calcCost('2026-03-10', '2026-03-11', '09:00', '10:00', 100)).toBe('200.00'); // 25 hrs -> 2 days
+  test('bills a precise fraction of a day, never rounded up', () => {
+    expect(calcCost('2026-03-10', '2026-03-11', '09:00', '10:00', 100)).toBe('104.17'); // 25 hrs -> 25/24 days
+  });
+
+  test('a half day bills at exactly half the daily rate', () => {
+    expect(calcCost('2026-03-10', '2026-03-10', '09:00', '21:00', 100)).toBe('50.00'); // 12 hrs = 0.5 day
+  });
+
+  test('1.5 days bills at exactly 1.5x the daily rate', () => {
+    expect(calcCost('2026-03-10', '2026-03-11', '09:00', '21:00', 100)).toBe('150.00'); // 36 hrs = 1.5 days
+  });
+
+  test('an exact multiple of 24 hours still bills whole days, no stray fraction', () => {
+    expect(calcCost('2026-03-10', '2026-03-12', '09:00', '09:00', 100)).toBe('200.00'); // 48 hrs = 2 days
   });
 
   test('defaults to 1 dog when numberOfDogs is omitted', () => {
-    expect(calcCost('2026-03-10', '2026-03-10', '09:00', '15:00', 100)).toBe('100.00');
+    expect(calcCost('2026-03-10', '2026-03-10', '09:00', '15:00', 100)).toBe('25.00');
   });
 });
 
@@ -439,48 +452,70 @@ describe('calcCostBreakdown', () => {
     expect(b.total).toBe(247);
     expect(b.total.toFixed(2)).toBe(calcCost('2026-01-01', '2026-01-02', '09:00', '09:00', 100, 2));
   });
+
+  test('reports a fractional nights count for a partial-day stay', () => {
+    // 36 hrs = 1.5 days, no holiday
+    const b = calcCostBreakdown('2026-03-10', '2026-03-11', '09:00', '21:00', 100);
+    expect(b.nights).toBe(1.5);
+    expect(b.holidayNights).toBe(0);
+    expect(b.subtotal).toBe(150);
+    expect(b.total).toBe(150);
+  });
+
+  test('prorates the holiday portion of a fractional day', () => {
+    // check-in Jan 1 (holiday) 09:00 -> check-out Jan 1 15:00 = 6 hrs = 0.25 day
+    const b = calcCostBreakdown('2026-01-01', '2026-01-01', '09:00', '15:00', 100);
+    expect(b.nights).toBe(0.25);
+    expect(b.holidayNights).toBe(0.25);
+    expect(b.subtotal).toBe(25);
+    expect(b.holidayExtra).toBe(7.5);
+    expect(b.total).toBe(32.5);
+  });
 });
 
 describe('calcCost — multi-dog discount', () => {
-  test('charges the 2nd dog at 90% of the nightly rate (10% discount)', () => {
-    // 1 night @ $100: dog 1 = $100, dog 2 = $100 * 0.9 = $90 -> $190
-    expect(calcCost('2026-03-10', '2026-03-10', '09:00', '15:00', 100, 2)).toBe('190.00');
+  test('charges the 2nd dog at 90% of the daily rate (10% discount)', () => {
+    // 0.25 day @ $100: dog 1 = $25, dog 2 = $25 * 0.9 = $22.50 -> $47.50
+    expect(calcCost('2026-03-10', '2026-03-10', '09:00', '15:00', 100, 2)).toBe('47.50');
   });
 
   test('discount is uncapped - applies to every additional dog', () => {
-    // dog 1 = $100, dogs 2 & 3 = $90 each -> $280
-    expect(calcCost('2026-03-10', '2026-03-10', '09:00', '15:00', 100, 3)).toBe('280.00');
+    // 0.25 day: dog 1 = $25, dogs 2 & 3 = $22.50 each -> $70
+    expect(calcCost('2026-03-10', '2026-03-10', '09:00', '15:00', 100, 3)).toBe('70.00');
   });
 
   test('treats 0 or invalid dog counts as 1 dog', () => {
-    expect(calcCost('2026-03-10', '2026-03-10', '09:00', '15:00', 100, 0)).toBe('100.00');
-    expect(calcCost('2026-03-10', '2026-03-10', '09:00', '15:00', 100, null)).toBe('100.00');
+    expect(calcCost('2026-03-10', '2026-03-10', '09:00', '15:00', 100, 0)).toBe('25.00');
+    expect(calcCost('2026-03-10', '2026-03-10', '09:00', '15:00', 100, null)).toBe('25.00');
   });
 
-  test('applies across multiple nights', () => {
-    // 2 nights, 2 dogs @ $100/night -> ($100 + $90) * 2 = $380
-    expect(calcCost('2026-03-10', '2026-03-11', '09:00', '10:00', 100, 2)).toBe('380.00');
+  test('applies across a fractional number of days', () => {
+    // 25 hrs = 25/24 days, 2 dogs @ $100/day -> ($100 + $90) * 25/24 = $197.92
+    expect(calcCost('2026-03-10', '2026-03-11', '09:00', '10:00', 100, 2)).toBe('197.92');
   });
 });
 
 describe('calcCost — holiday upcharge', () => {
   test('adds 30% on New Year\'s Day', () => {
-    expect(calcCost('2026-01-01', '2026-01-01', '09:00', '15:00', 100)).toBe('130.00');
+    // 0.25 day @ $100 * 1.3 = $32.50
+    expect(calcCost('2026-01-01', '2026-01-01', '09:00', '15:00', 100)).toBe('32.50');
   });
 
   test('does not upcharge the day right after a holiday', () => {
-    expect(calcCost('2026-01-02', '2026-01-02', '09:00', '15:00', 100)).toBe('100.00');
+    expect(calcCost('2026-01-02', '2026-01-02', '09:00', '15:00', 100)).toBe('25.00');
   });
 
   test('combines the holiday upcharge with the multi-dog discount', () => {
-    // nightly rate = $100 * 1.3 = $130; dog 2 = $130 * 0.9 = $117 -> $247
-    expect(calcCost('2026-01-01', '2026-01-01', '09:00', '15:00', 100, 2)).toBe('247.00');
+    // 0.25 day; daily rate = $100 * 1.3 = $130; dog 2 = $130 * 0.9 = $117
+    // -> ($130 + $117) * 0.25 = $61.75
+    expect(calcCost('2026-01-01', '2026-01-01', '09:00', '15:00', 100, 2)).toBe('61.75');
   });
 
-  test('only upcharges the holiday night within a multi-night stay', () => {
-    // check-in Jan 1 (holiday, $130) -> check-out Jan 2 (ordinary night, $100)
-    // = 2 nights total, only the first is upcharged -> $230
-    expect(calcCost('2026-01-01', '2026-01-02', '09:00', '10:00', 100)).toBe('230.00');
+  test('only upcharges the holiday portion within a multi-day stay', () => {
+    // check-in Jan 1 (holiday) -> check-out Jan 2, 09:00 to 10:00 = 25 hrs.
+    // 1 full day on Jan 1 @ $130, plus 1/24 day on Jan 2 (not a holiday) @ $100
+    // -> 130 + (100 * 1/24) = $134.17
+    expect(calcCost('2026-01-01', '2026-01-02', '09:00', '10:00', 100)).toBe('134.17');
   });
 });
 
