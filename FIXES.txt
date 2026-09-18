@@ -1,6 +1,6 @@
 BAYVIEW BOARDING — FIX LIST
 ============================
-Last updated: September 18, 2026 (3) (feedback delete; shorter phone-field labels; both Ideas & Bugs items promoted to On List)
+Last updated: September 18, 2026 (4) (removed the 2 test/placeholder Ideas & Bugs items from this list - one rejected, one deleted)
 
 NEXT CHANGE LIST (v1.5)
 -----------------------
@@ -51,19 +51,6 @@ NEXT CHANGE LIST (v1.5)
    was submitted.
    This item itself never gets "done" - it's a recurring habit, not a
    one-time task.
-5. Suggested by Kim (submitted Sept 16, 2026): "1. This 2. That" -
-   verbatim content of the submission; no further detail was given.
-   Reads like a placeholder/test submission from trying out the Submit
-   Idea form itself rather than a real feature request or bug report -
-   flagged here rather than silently dropped, since Kim asked
-   (Sept 18, 2026 (3)) for every open item to be moved onto this list.
-   Delete it from Admin > Ideas & Bugs (new "Delete" button, Sept 18
-   (3)) if that's right, or reply with what it was actually meant to
-   say if there's real content behind it.
-6. Suggested by Kim (submitted Sept 16, 2026): "1. One 2. Two 3. Three" -
-   verbatim content of the submission; no further detail was given.
-   Same situation as item 5 above - reads like placeholder/test content,
-   flagged rather than dropped.
 
 DEFERRED (revisit only if it actually blocks something)
 ---------------------------------------------------------
@@ -110,6 +97,16 @@ TWILIO STATUS
 
 COMPLETED
 ---------
+- Sept 18, 2026 (4): Both of the flagged test/placeholder Ideas & Bugs
+  items from (3) below are now resolved and removed from this list -
+  Kim deleted the "1. This 2. That" submission outright (via the new
+  Delete button) and marked "1. One 2. Two 3. Three" as Rejected. Per
+  the standing rule (see item 4 above, and Sept 16 (8) below), a
+  rejected item comes back off this list rather than staying on it
+  forever - the feedback row itself still exists with status=rejected
+  as the actual record of the decision, same as a Done item stays in
+  the queue as its own record instead of also needing a permanent
+  FIXES.txt entry.
 - Sept 18, 2026 (3): Feedback on (2) below, same day:
 
   1. Investigated (not a bug): the footer was reading "...group-text Kim
