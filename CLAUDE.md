@@ -49,28 +49,23 @@ Kim Miller and Estee Fletter at 210 Bayview Drive, San Rafael, CA.
   wrong by pickup). A2P 10DLC is APPROVED (confirmed via the API Sept
   16, 2026) - real sends actually go through. Every dollar amount is a
   whole dollar with commas, rounded up at exactly .50 ("$1,796", not
-  "$1795.5" - formatDollars()). "Reply STOP to opt out." sits below the
-  "— Kim & Estee" signature line (with a blank line before it) in EVERY
-  outbound client text (Sept 19, 2026 - confirmation and pickup-reminder
-  used to have no STOP line or signature at all; now all four match).
-  The billing text (Sept 19, 2026) opens with "Thank you for visiting
-  Bayview Boarding with {dogName}. Here's your billing detail:" instead
-  of "{dogName} is/are ready for pickup" (the old framing read oddly for
-  a days-later resend), followed by the actual line-item math - not just
-  the final total - via a new {billingBreakdown} placeholder
+  "$1795.5" - formatDollars()). The billing text opens with "Thank you
+  for visiting Bayview Boarding with {dogName}. Here's your billing
+  detail:" instead of "{dogName} is/are ready for pickup" (the old
+  framing read oddly for a days-later resend), followed by the actual
+  line-item math - not just the final total - via {billingBreakdown}
   (formatCostBreakdownText in App.js, the plain-text twin of the
   on-screen CostBreakdown component). The drop-off reminder's packing
   list is one "• item" bullet per line, not a comma-separated sentence.
-  Kim and Estee also get a text copy of every client-facing message sent
-  (confirmation/reminder/billing/pickup), identifying who it went to
-  (Sept 18, 2026, notifyOwnersOfClientText) - best-effort and awaited,
-  never allowed to affect the client send's own success/failure.
-  IMPORTANT: the live `settings` table's 4 stored templates have never
-  actually been updated since Sept 14, 2026 (confirmed via a read-only
-  query Sept 19) - every wording fix above only reaches real texts once
-  Kim clicks "Reset to Default" then "Save" for each one in Admin > SMS
-  Message Templates (new button, Sept 19); see FIXES.txt NEXT CHANGE
-  LIST item 1
+  Every outbound message ends with a single shared "Text Message
+  Footer" ("Reply STOP to opt out...", admin-editable in Admin > SMS
+  Message Templates, just below "Placeholders") appended once,
+  server-side, by send-confirmation itself (Sept 18, 2026) - not stored
+  in each of the 4 templates any more, so it can't drift or duplicate
+  across them. Kim and Estee also get a text copy of every client-facing
+  message sent, identifying who it went to (notifyOwnersOfClientText) -
+  best-effort and awaited, never allowed to affect the client send's own
+  success/failure.
 - Admin panel, top to bottom (reordered Sept 17 (2)(4), math/grouping
   Sept 18): an "Unbilled Stays" review list — every never-billed stay at
   all, past, in-progress, or future, sorted earliest check-in first
@@ -101,9 +96,14 @@ Kim Miller and Estee Fletter at 210 Bayview Drive, San Rafael, CA.
   "📢 Testers" section (Sept 17 — see testers below) to maintain a
   tester list and broadcast a personally-greeted SMS to all of them,
   then day rate/discount/holiday/vet-list/packing-list/SMS-template
-  settings, both feedback/testers moved to the very bottom of the panel
-  (Sept 17 (4)). Each stay card also still offers a "View waiver as
-  signed" toggle when that stay has one (Sept 16 (5) — see
+  settings (the SMS Message Templates section now also holds the Text
+  Message Footer editor and a "Manager Phone Numbers" editor for
+  {primaryManagerPhone}/{secondaryManagerPhone} - renamed Sept 18, 2026
+  from {kimPhone}/{esteePhone} - directly below it, both admin-only:
+  see Data model's `settings` entry), both feedback/testers moved to the
+  very bottom of the panel (Sept 17 (4)). Each stay card also still
+  offers a "View waiver as signed" toggle when that stay has one (Sept
+  16 (5) — see
   waiver_snapshot below). Reached via the nav menu's "Admin" item (Sept
   16, 2026 — reversed the earlier "no visible entry point" decision on
   request) or the bookmarked ?admin URL; either way it's still fully
@@ -138,22 +138,39 @@ booking writes go through submit-booking (service role key) instead of a
 direct client insert — see supabase/functions/submit-booking/index.ts.
 
 `settings` (Sept 15 (4); packing_list/sms_confirmation/sms_reminder/
-sms_billing added Sept 16 (5)) is a singleton row (day rate, multi-dog
-discount, holiday upcharge, vet clinic list, packing list, 3 SMS
-templates) - the admin-configurable values calcCost/the vet dropdown/
+sms_billing added Sept 16 (5); sms_footer/primary_manager_phone/
+secondary_manager_phone added Sept 18, 2026) is a singleton row (day
+rate, multi-dog discount, holiday upcharge, vet clinic list, packing
+list, 4 SMS templates, the shared footer, 2 manager phone numbers) -
+the admin-configurable values calcCost/the vet dropdown/
 send-confirmation actually use, replacing hardcoded constants (the SMS
 templates and packing list used to be duplicated - once as a "reference
 copy" in src/settings.js, once for real inside send-confirmation/
 index.ts - and had already started to drift; now there's one source of
-truth). Reads are public/unauthenticated (every visitor needs current
-pricing and the vet list to use the booking form at all); writes need the
-admin password - both go through supabase/functions/settings/index.ts,
-same RLS-locked-with-zero-policies pattern as everything else.
-Kim/Estee's phone numbers deliberately stay OUT of this table even
-though they're conceptually "business info" - settings reads are public,
-so putting personal cell numbers there would leak them to every visitor.
-They remain KIM_PHONE/ESTEE_PHONE Supabase secrets, changed via
-`supabase secrets set` rather than through the admin UI.
+truth). supabase/functions/settings/index.ts splits its own column list
+in two: PUBLIC_COLUMNS (everything above except the 2 phone numbers) is
+what a plain, unauthenticated read returns - every visitor needs current
+pricing/vet-list/templates to use the booking form and complete their
+own SMS sends; ADMIN_COLUMNS (PUBLIC_COLUMNS + the phone numbers) is
+returned only when the request carries the correct admin password,
+whether that's a write (`updates` present) or a dedicated
+password-only read with no `updates` (new Sept 18, 2026 - this is what
+lets Admin populate the 2 manager-phone edit fields without a public
+read ever seeing them). Kim/Estee's phone numbers used to stay
+completely out of this table for exactly that "public read must never
+leak a personal cell number" reason (they lived only as the
+KIM_PHONE/ESTEE_PHONE Supabase secrets) - Sept 18, 2026 moved them into
+`settings` anyway, now that the column-selection split above enforces
+the same guarantee at the Edge Function level instead of by keeping the
+data out of the database entirely; this was needed to make them
+admin-editable via the UI at all (an Edge Function has no way to call
+`supabase secrets set` on its own). send-confirmation still needs its
+own direct DB read for these (it has no other way to get an
+admin-authenticated response), which is also where it gets sms_footer
+- see Key files. KIM_PHONE/ESTEE_PHONE secrets still exist and are
+still used by receive-sms/send-contact/testers/feedback (out of scope
+for the Sept 18 change - only send-confirmation's usage moved to the
+new DB columns).
 
 `stays.reminder_sent_at` (Sept 16, 2026) marks a stay's drop-off reminder
 text as already sent, so the daily cron job can't double-text someone on
@@ -178,7 +195,11 @@ admin can view it per-stay via a collapsed-by-default toggle.
 
 `feedback` (Sept 16 (8), form simplified (9)) is the "Submit Idea" queue -
 one row per tester submission (name required, contact optional, message,
-status open|considered|done). `category` (bug|idea|other) still exists as
+status open|on_list|done|rejected - `on_list`/`rejected` renamed/added
+Sept 18, 2026, replacing `considered`: "On List" once a submission is
+promoted into FIXES.txt's NEXT CHANGE LIST, "Rejected" if decided
+against; all 4 are still set manually, one click each, from Admin >
+Ideas & Bugs). `category` (bug|idea|other) still exists as
 a column and the Edge Function still accepts/validates it for backward
 compatibility, but the form no longer sends it - every row defaults to
 "idea" and admin no longer displays it; it's vestigial, not a real
@@ -239,16 +260,16 @@ call itself is dropped, not for a routine secret rotation.
 - src/App.js — main app
 - src/settings.js — all configurable values (rates, vets, messages, packing list)
 - src/waiver.js — full waiver text
-- src/App.test.js — 181 passing tests (TDD), Supabase mocked via src/__mocks__/supabase.js
+- src/App.test.js — 185 passing tests (TDD), Supabase mocked via src/__mocks__/supabase.js
 - supabase/functions/send-contact/index.ts — public Contact Us form handler: relays name/email-or-phone/message to Kim & Estee by SMS (reuses KIM_PHONE/ESTEE_PHONE). Deployed normally (no --no-verify-jwt) since it's called via the Supabase JS client like settings/lookup-client/submit-booking
 - supabase/functions/feedback/index.ts — "Submit Idea": public submit (no password, also texts Kim & Estee - Sept 19, 2026) + admin list/status-update (password) for the feedback queue
 - supabase/functions/testers/index.ts — tester broadcast list: entirely admin-password-gated list/add/remove/notify (no public branch at all); notify greets each active tester by their own first name
 - supabase/functions/send-pickup-reminders/index.ts — daily cron target, the pickup-side counterpart to send-reminders: finds stays checking out tomorrow, texts each via send-confirmation (type "pickup"), marks pickup_reminder_sent_at. Deployed with `--no-verify-jwt` - same care needed on redeploy as send-reminders
 - public/img/about/ — the 6 numbered photos on the About page, served from the public folder (not bundled) and referenced via process.env.PUBLIC_URL since the app is hosted at a subpath
 - supabase/functions/send-reminders/index.ts — daily cron target (pg_cron + pg_net, see the migration): finds stays checking in tomorrow, fetches the current sms_reminder template + packing_list from `settings`, texts each via send-confirmation, marks reminder_sent_at. Deployed with `--no-verify-jwt`; checks its own CRON_SECRET instead (see Data model for how that secret is set up without ever being committed) - be careful to keep that flag on every redeploy (a plain `supabase functions deploy send-reminders` silently re-enables JWT verification and would break the cron, same bug class as the receive-sms incident)
-- supabase/functions/settings/index.ts — public read / password-gated write of day rate, multi-dog discount, holiday upcharge, vet list, packing list, and the 4 SMS templates (confirmation/drop-off reminder/pickup reminder/billing)
+- supabase/functions/settings/index.ts — public read (PUBLIC_COLUMNS) / password-gated read or write (ADMIN_COLUMNS) of day rate, multi-dog discount, holiday upcharge, vet list, packing list, the 4 SMS templates (confirmation/drop-off reminder/pickup reminder/billing), the shared sms_footer, and (admin-only) the 2 manager phone numbers
 - supabase/functions/submit-booking/index.ts — handles booking submission: find-or-create owner (by phone) and each dog (by owner+name), inserts the stay (incl. waiver_snapshot) + stay_dogs snapshot links (service role key)
-- supabase/functions/send-confirmation/index.ts — Twilio SMS function (outbound); accepts an optional message_template (the admin-edited settings text, with {placeholders} filled by fillTemplate, including {dogVerb} - "is"/"are" - and {billingBreakdown} - the full cost math, Sept 19, 2026) + packing_list from the caller; falls back to its own hardcoded 4-message-type logic (confirmation/reminder/billing/pickup) if no template is given. Every dollar placeholder ({finalCost}/{estimatedCost}) is run through formatDollars() first (whole dollars, comma-separated). Also texts Kim/Estee a copy of every client send (notifyOwnersOfClientText, Sept 18, 2026). Called directly by the client at booking time, and by send-reminders/send-pickup-reminders/the admin panel for the other three - has its own Deno test suite (index.test.ts), added Sept 16 (5)
+- supabase/functions/send-confirmation/index.ts — Twilio SMS function (outbound); accepts an optional message_template (the admin-edited settings text, with {placeholders} filled by fillTemplate, including {dogVerb} - "is"/"are" - and {billingBreakdown} - the full cost math) + packing_list from the caller; falls back to its own hardcoded 4-message-type logic (confirmation/reminder/billing/pickup) if no template is given. Every dollar placeholder ({finalCost}/{estimatedCost}) is run through formatDollars() first (whole dollars, comma-separated). Has its own direct DB read (service role, fetchFooterAndPhones) for sms_footer and the 2 manager phone numbers (Sept 18, 2026) - fills {primaryManagerPhone}/{secondaryManagerPhone} and appends the filled footer once to every message, and uses the same numbers as the destination for the Kim/Estee copy of every client send (notifyOwnersOfClientText). Called directly by the client at booking time, and by send-reminders/send-pickup-reminders/the admin panel for the other three - has its own Deno test suite (index.test.ts), added Sept 16 (5)
 - supabase/functions/receive-sms/index.ts — inbound SMS webhook: auto-reply + relay to Kim/Estee. Deploy with `--no-verify-jwt` (see comment at top of file) or Twilio's webhook calls silently fail
 - supabase/functions/_shared/contact.ts — pure text builders + Twilio signature validator, shared by send-confirmation and receive-sms, unit-tested via `deno test`
 - supabase/functions/admin-data/index.ts — server-side admin password check + every dog (profile + owner + stay history) (service role key, never exposed to client). Also handles billStay (Sept 17, 2026): saves corrected check-in/out/drop/pickup/cost and marks billed_at, returning the refreshed dog list
@@ -283,12 +304,12 @@ call itself is dropped, not for a routine secret rotation.
   the cleanup actually took.
 
 ## Current priorities (v1.5)
-See FIXES.txt for the live list. As of Sept 19, 2026 the top item is
-action Kim needs to take, not code: the live `settings` table's 4 SMS
-templates have never been re-saved since Sept 14, so every wording fix
-since then (this session's included) has had no effect on real texts -
-Kim needs to click "Reset to Default" then "Save" for each one in
-Admin > SMS Message Templates. Beyond that, FIXES.txt's own backlog
+See FIXES.txt for the live list. As of Sept 18, 2026 the top item is
+action Kim needs to take, not code: Admin > SMS Message Templates >
+"Manager Phone Numbers" has 2 blank fields (Primary/Kim, Secondary/
+Estee) that need the real numbers filled in and saved - until then the
+shared Text Message Footer goes out on every real text with an empty
+gap where each number belongs. Beyond that, FIXES.txt's own backlog
 (confirming the debug Twilio API key is actually deleted, and setting
 up a staging environment next time a DB/RLS change is made against
 production).
@@ -301,16 +322,17 @@ production).
   packing list, SMS templates) live in Supabase's `settings` table instead
   (see Data model) - settings.js still holds the fallback defaults for
   those, used before the fetch resolves or if it fails, but is not the
-  source of truth for them. Exception: Kim/Estee's personal phone numbers
-  are business-relevant but stay as Supabase secrets, never in `settings`
-  (which is publicly readable) - see the Data model note on why.
+  source of truth for them. Kim/Estee's manager phone numbers now live
+  in `settings` too (Sept 18, 2026), but on the ADMIN_COLUMNS-only side
+  of that table's public/admin column split (see Data model) - never
+  returned by a public read, unlike everything else in this bullet.
 - Follow TDD — write tests before new features
 - Commit messages use format: "v1.x - description"
 - At the start of any work session here, check the "Submit Idea" queue
   (admin panel > 💡 Ideas & Bugs) for open tester feedback, same habit as
   checking FIXES.txt itself (Sept 16, 2026) - it's the mechanism Kim
   built specifically so feedback doesn't need SMS/email to reach him.
-  Act on anything worth doing, moving it to Considered/Done from the
-  admin list; promote genuinely actionable items into FIXES.txt's NEXT
-  CHANGE LIST credited "Suggested by [name]". Recurring, not a
-  one-time task.
+  Act on anything worth doing: promote it into FIXES.txt's NEXT CHANGE
+  LIST credited "Suggested by [name]" and mark that submission "On
+  List" in Admin, then "Done" once it ships (or "Rejected" if decided
+  against instead - Sept 18, 2026). Recurring, not a one-time task.

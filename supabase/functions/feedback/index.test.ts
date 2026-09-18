@@ -198,15 +198,25 @@ Deno.test('admin update status: requires the correct password and a valid status
   }
 });
 
-Deno.test('admin update status: moves a submission through open -> considered -> done', async () => {
+Deno.test('admin update status: moves a submission through open -> on_list -> done', async () => {
   const stub = stubSupabase([{ id: 'fb-1', message: 'x', category: 'idea', status: 'open', created_at: '2026-09-16T12:00:00Z' }]);
   try {
-    const res1 = await handleRequest(postRequest({ password: ADMIN_PASSWORD, id: 'fb-1', status: 'considered' }));
-    assertEquals((await res1.json()).feedback.status, 'considered');
-    assertEquals(stub.db.feedback[0].status, 'considered');
+    const res1 = await handleRequest(postRequest({ password: ADMIN_PASSWORD, id: 'fb-1', status: 'on_list' }));
+    assertEquals((await res1.json()).feedback.status, 'on_list');
+    assertEquals(stub.db.feedback[0].status, 'on_list');
 
     const res2 = await handleRequest(postRequest({ password: ADMIN_PASSWORD, id: 'fb-1', status: 'done' }));
     assertEquals((await res2.json()).feedback.status, 'done');
+  } finally {
+    stub.restore();
+  }
+});
+
+Deno.test('admin update status: also accepts rejected, for a submission decided against', async () => {
+  const stub = stubSupabase([{ id: 'fb-1', message: 'x', category: 'idea', status: 'open', created_at: '2026-09-16T12:00:00Z' }]);
+  try {
+    const res = await handleRequest(postRequest({ password: ADMIN_PASSWORD, id: 'fb-1', status: 'rejected' }));
+    assertEquals((await res.json()).feedback.status, 'rejected');
   } finally {
     stub.restore();
   }

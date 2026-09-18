@@ -53,7 +53,11 @@ async function sendSms(to: string, body: string): Promise<boolean> {
 }
 
 const CATEGORIES = ['bug', 'idea', 'other'];
-const STATUSES = ['open', 'considered', 'done'];
+// 'considered' renamed to 'on_list' (set once a submission is promoted
+// into FIXES.txt's NEXT CHANGE LIST) and 'rejected' added (decided not
+// to do it) - Sept 18, 2026, on request. Every transition stays a
+// manual admin action, same as before.
+const STATUSES = ['open', 'on_list', 'done', 'rejected'];
 
 export async function handleRequest(req: Request): Promise<Response> {
   if (req.method === 'OPTIONS') {

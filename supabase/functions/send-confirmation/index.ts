@@ -1,11 +1,12 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { appendContactNote, buildOwnerCopyNotice } from "../_shared/contact.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { buildOwnerCopyNotice } from "../_shared/contact.ts";
 
 const TWILIO_ACCOUNT_SID = Deno.env.get("TWILIO_ACCOUNT_SID")!;
 const TWILIO_AUTH_TOKEN = Deno.env.get("TWILIO_AUTH_TOKEN")!;
 const TWILIO_FROM = Deno.env.get("TWILIO_PHONE")!;
-const KIM_PHONE = Deno.env.get("KIM_PHONE")!;
-const ESTEE_PHONE = Deno.env.get("ESTEE_PHONE")!;
+const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
+const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
 // Fallback only - used if a caller doesn't pass packing_list (e.g. an old
 // client bundle before this was wired through, or a direct/manual call).
@@ -88,9 +89,10 @@ async function sendTwilioSms(to: string, body: string): Promise<{ ok: boolean; r
 // request (Sept 18, 2026): they should see exactly what every client text
 // said without being on the thread themselves. Never allowed to affect the
 // client send's own success/failure - a failed copy is only logged.
-async function notifyOwnersOfClientText(ownerName: string, ownerPhone: string, message: string): Promise<void> {
+async function notifyOwnersOfClientText(ownerName: string, ownerPhone: string, message: string, phones: string[]): Promise<void> {
   const notice = buildOwnerCopyNotice(ownerName || "a client", ownerPhone || "", message);
-  for (const phone of [KIM_PHONE, ESTEE_PHONE]) {
+  for (const phone of phones) {
+    if (!phone) continue; // not yet set in Admin - nothing to send to
     try {
       const { ok, result } = await sendTwilioSms(toE164(phone), notice);
       if (!ok) console.error("Owner copy notice failed:", JSON.stringify(result));
@@ -98,6 +100,31 @@ async function notifyOwnersOfClientText(ownerName: string, ownerPhone: string, m
       console.error("Owner copy notice failed:", (err as Error).message);
     }
   }
+}
+
+// The footer (sms_footer) and the actual phone numbers it fills
+// {primaryManagerPhone}/{secondaryManagerPhone} with both live in
+// `settings` now (Sept 18, 2026) - this function has its own DB access
+// for exactly this, service-role, same as every other Edge Function that
+// needs data a public/anon read can't be trusted with (the phone numbers
+// specifically; the footer template text itself is also public-readable,
+// same as the other 4 templates, but fetching it alongside the numbers
+// here means every caller gets the current footer automatically rather
+// than needing to fetch and pass it through themselves).
+async function fetchFooterAndPhones(): Promise<{ footer: string; primaryPhone: string; secondaryPhone: string }> {
+  const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+  const { data, error } = await supabase
+    .from("settings")
+    .select("sms_footer, primary_manager_phone, secondary_manager_phone")
+    .eq("id", true)
+    .limit(1);
+  if (error) throw error;
+  const row = data?.[0] as { sms_footer: string; primary_manager_phone: string; secondary_manager_phone: string } | undefined;
+  return {
+    footer: row?.sms_footer || "",
+    primaryPhone: row?.primary_manager_phone || "",
+    secondaryPhone: row?.secondary_manager_phone || "",
+  };
 }
 
 // Exported (rather than only passed inline to serve()) so it can be unit
@@ -128,24 +155,23 @@ export async function handleRequest(req: Request): Promise<Response> {
     // ones after a line break.
     const packingListStr = "• " + (Array.isArray(packing_list) ? packing_list : (packing_list ? packing_list.split(", ") : DEFAULT_PACKING_LIST.split(", "))).join("\n• ");
 
+    const { footer, primaryPhone, secondaryPhone } = await fetchFooterAndPhones();
+    const templateVars = {
+      firstName, dogName: dog_name || "", dogVerb: dogVerb(dog_name), dropDate, dropTime: dropTimeStr,
+      pickDate, pickTime: pickTimeStr, pickupDate: pickDate, pickupTime: pickTimeStr,
+      estimatedCost: formatDollars(estimated_cost),
+      finalCost: formatDollars(final_cost),
+      billingBreakdown: billing_breakdown || "",
+      packingList: packingListStr,
+      primaryManagerPhone: primaryPhone, secondaryManagerPhone: secondaryPhone,
+    };
+
     let message = "";
 
     if (message_template) {
-      // The admin-editable template (settings.sms_confirmation/reminder/
-      // billing) already bakes in the "replies aren't monitored" footer via
-      // {kimPhone}/{esteePhone}, so appendContactNote is NOT also called
-      // here - that would duplicate it.
-      message = fillTemplate(message_template, {
-        firstName, dogName: dog_name || "", dogVerb: dogVerb(dog_name), dropDate, dropTime: dropTimeStr,
-        pickDate, pickTime: pickTimeStr, pickupDate: pickDate, pickupTime: pickTimeStr,
-        estimatedCost: formatDollars(estimated_cost),
-        finalCost: formatDollars(final_cost),
-        billingBreakdown: billing_breakdown || "",
-        packingList: packingListStr, kimPhone: KIM_PHONE, esteePhone: ESTEE_PHONE,
-      });
+      message = fillTemplate(message_template, templateVars);
     } else if (type === "reminder") {
-      message = `Hi ${firstName}! Just a reminder that ${dog_name}'s stay at Bayview Boarding starts tomorrow at ${dropTimeStr}. Here's what to bring:\n${packingListStr}\nSee you then! — Kim & Estee\n\nReply STOP to opt out.`;
-      message = appendContactNote(message, KIM_PHONE, ESTEE_PHONE);
+      message = `Hi ${firstName}! Just a reminder that ${dog_name}'s stay at Bayview Boarding starts tomorrow at ${dropTimeStr}. Here's what to bring:\n${packingListStr}\nSee you then! — Kim & Estee`;
     } else if (type === "billing") {
       // "Thank you for visiting" (Sept 19, 2026, on request) - dropped
       // the "ready for pickup" framing entirely, since this text goes out
@@ -155,16 +181,21 @@ export async function handleRequest(req: Request): Promise<Response> {
       // same admin-reviewed dates/rate - see App.js's sendBill) comes
       // before the total, not just the total alone.
       const breakdownBlock = billing_breakdown ? `\n${billing_breakdown}\n` : "";
-      message = `Hi ${firstName}! Thank you for visiting Bayview Boarding with ${dog_name}. Here's your billing detail:${breakdownBlock}\nTotal: $${formatDollars(final_cost)}\n\nThanks for choosing Bayview Boarding! — Kim & Estee\n\nReply STOP to opt out.`;
-      message = appendContactNote(message, KIM_PHONE, ESTEE_PHONE);
+      message = `Hi ${firstName}! Thank you for visiting Bayview Boarding with ${dog_name}. Here's your billing detail:${breakdownBlock}\nTotal: $${formatDollars(final_cost)}\n\nThanks for choosing Bayview Boarding! — Kim & Estee`;
     } else if (type === "pickup") {
-      message = `It's been wonderful having ${dog_name}! We have you down for pick up at ${pickDate} ${pickTimeStr}. Please let us know in our shared group text thread if anything has changed. Otherwise, we'll see you tomorrow at ${pickTimeStr}. — Kim & Estee\n\nReply STOP to opt out.`;
-      message = appendContactNote(message, KIM_PHONE, ESTEE_PHONE);
+      message = `It's been wonderful having ${dog_name}! We have you down for pick up at ${pickDate} ${pickTimeStr}. Please let us know in our shared group text thread if anything has changed. Otherwise, we'll see you tomorrow at ${pickTimeStr}. — Kim & Estee`;
     } else {
       // Default: confirmation
-      message = `Hi ${firstName}! ${dog_name}'s stay at Bayview Boarding is confirmed. Drop-off: ${dropDate} at ${dropTimeStr}. Pick-up: ${pickDate} at ${pickTimeStr}. Estimated cost: $${formatDollars(estimated_cost)}. — Kim & Estee\n\nReply STOP to opt out.`;
-      message = appendContactNote(message, KIM_PHONE, ESTEE_PHONE);
+      message = `Hi ${firstName}! ${dog_name}'s stay at Bayview Boarding is confirmed. Drop-off: ${dropDate} at ${dropTimeStr}. Pick-up: ${pickDate} at ${pickTimeStr}. Estimated cost: $${formatDollars(estimated_cost)}. — Kim & Estee`;
     }
+
+    // The shared "Text Message Footer" (Sept 18, 2026) - one admin-edited
+    // block ("Reply STOP to opt out...") appended here, once, to every
+    // outbound message regardless of type or whether a custom
+    // message_template was used, rather than living inside each of the 4
+    // templates individually (where 4 independent copies inevitably drift
+    // and, worse, would now duplicate this same text if left in place).
+    if (footer) message = `${message}\n\n${fillTemplate(footer, templateVars)}`;
 
     const { ok, result } = await sendTwilioSms(toE164(owner_phone), message);
     console.log("Twilio response:", JSON.stringify(result));
@@ -178,7 +209,7 @@ export async function handleRequest(req: Request): Promise<Response> {
     // background send here could just never go out. A failed copy still
     // can't fail the client send itself (already succeeded above) -
     // notifyOwnersOfClientText only logs its own errors.
-    await notifyOwnersOfClientText(owner_name, owner_phone, message);
+    await notifyOwnersOfClientText(owner_name, owner_phone, message, [primaryPhone, secondaryPhone]);
 
     return json({ success: true, sid: (result as { sid?: string }).sid });
   } catch (err) {

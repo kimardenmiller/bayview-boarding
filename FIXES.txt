@@ -1,25 +1,25 @@
 BAYVIEW BOARDING — FIX LIST
 ============================
-Last updated: September 19, 2026 (billing text shows full math, drops "ready for pickup"; bullet packing list; STOP everywhere; feedback texts Kim & Estee)
+Last updated: September 18, 2026 (2) (shared Text Message Footer; admin-editable manager phones; feedback gets On List/Rejected)
 
 NEXT CHANGE LIST (v1.5)
 -----------------------
-1. ACTION NEEDED FROM KIM: the 4 SMS templates stored in the live
-   `settings` table have never been updated since the row was first
-   created Sept 14, 2026 - every wording/formatting fix made to these
-   templates since then (STOP-below-signature, whole-dollar amounts,
-   dogVerb, and now the Sept 19 billing/packing-list/STOP-everywhere
-   round) has had ZERO effect on real outbound texts, because
-   send-confirmation always prefers the admin-editable message_template
-   from the database over its own hardcoded fallback - and nobody has
-   ever actually saved a change to that row. Confirmed via a direct
-   read-only query Sept 19, 2026. Fix: open Admin > SMS Message
-   Templates, click "Reset to Default" (new button, Sept 19) then "Save"
-   for each of the 4 templates - Claude cannot do this step, since it
-   requires the real ADMIN_PASSWORD which Claude has never been given,
-   and going around that password via direct database access wasn't
-   judged appropriate for content this front-facing. Until this is done,
-   every real client text is still using the very first Sept 14 wording.
+1. ACTION NEEDED FROM KIM: open Admin > SMS Message Templates >
+   "Manager Phone Numbers" and fill in the real Primary (Kim) and
+   Secondary (Estee) phone numbers, then Save. Both fields are blank
+   right now (the migration that added them couldn't set real values -
+   Claude has never been given Kim/Estee's actual numbers and never
+   should be), so the shared Text Message Footer is currently going out
+   on every real text with an empty gap where each number belongs
+   ("...group-text Kim  & Estee .") until this is done. This replaces
+   the item that used to be here (the 4 SMS templates never having been
+   saved since Sept 14) - that one's now resolved: since it also blocked
+   the footer-deduplication fix from being safe to ship, Claude pushed
+   the corrected template text (and the new sms_footer default) directly
+   via migration this round rather than waiting on a UI save (see
+   COMPLETED below for the full reasoning) - normal template wording
+   edits going forward still go through Admin > Save, same as any other
+   setting.
 2. SECURITY: confirm the Twilio debug API key(s) Kim has shared in chat
    are actually deleted. Used again Sept 16, 2026 (a key named
    "debug_attempt_3_persit", possibly a freshly-created one - SID shared
@@ -44,9 +44,11 @@ NEXT CHANGE LIST (v1.5)
    flags something - this is the actual mechanism for surfacing tester
    feedback (deliberately not SMS/email, see Sept 16 (8) below). Act on
    anything worth doing the normal way: implement it, then move that
-   submission to Considered/Done from the admin list. If something's
-   worth tracking before it's actually built, promote it into this file's
-   own list, crediting "Suggested by <name>" from what was submitted.
+   submission to On List/Done (or Rejected if decided against) from the
+   admin list - see Sept 18 (2) below for these exact status names. If
+   something's worth tracking before it's actually built, promote it
+   into this file's own list, crediting "Suggested by <name>" from what
+   was submitted.
    This item itself never gets "done" - it's a recurring habit, not a
    one-time task.
 
@@ -95,6 +97,87 @@ TWILIO STATUS
 
 COMPLETED
 ---------
+- Sept 18, 2026 (2): Five pieces, on request:
+
+  1. A single "Text Message Footer" ("Reply STOP to opt out. Replies to
+  this number aren't monitored. For questions, please group-text Kim
+  {primaryManagerPhone} & Estee {secondaryManagerPhone}.") replaces the
+  copy of that same text that used to be baked into the end of all 4 SMS
+  templates individually. New `settings.sms_footer` column;
+  send-confirmation now fetches it (and the 2 phone numbers below)
+  itself via a direct DB read and appends it once, server-side, to
+  every outbound message - confirmation/reminder/billing/pickup, and
+  even a fully custom admin-written message_template - rather than each
+  template needing to remember to include it. Editable in Admin, placed
+  directly below the "Placeholders" line in SMS Message Templates, with
+  its own Save + "Reset to Default".
+
+  2. The 4 existing templates had that same footer text stripped out of
+  their own stored copies (both the settings.js fallback and, this time,
+  the live database row itself - see the IMPORTANT note below) so
+  nothing duplicates now that it's appended separately.
+
+  3. {kimPhone}/{esteePhone} renamed to {primaryManagerPhone}/
+  {secondaryManagerPhone} everywhere (fillTemplate vars, the footer
+  text, the Placeholders line). New "Manager Phone Numbers" section in
+  Admin, directly below the footer editor, makes these 2 numbers
+  admin-editable for the first time - previously they only existed as
+  the KIM_PHONE/ESTEE_PHONE Supabase secrets (still used elsewhere -
+  receive-sms/send-contact/testers/feedback - out of scope this round).
+  New `settings.primary_manager_phone`/`secondary_manager_phone`
+  columns, deliberately excluded from the public settings read
+  (PUBLIC_COLUMNS vs ADMIN_COLUMNS split in settings/index.ts) - the
+  exact reason these numbers were kept out of this table in the first
+  place still holds, so a new admin-authenticated read branch (password,
+  no `updates`) is what actually lets Admin populate those 2 fields,
+  fetched once at login alongside feedback/testers. send-confirmation's
+  "Kim & Estee get a copy of every client text" feature (Sept 18 (1))
+  also switched from the KIM_PHONE/ESTEE_PHONE secrets to these same 2
+  DB columns, so there's one source of truth for "where do Kim/Estee's
+  texts go" instead of two.
+
+  4. Feedback status gains "On List" (renamed from "Considered" - set
+  once a submission is promoted into this file's own NEXT CHANGE LIST)
+  and "Rejected" (decided not to do it), alongside the existing
+  Open/Done - all 4 still manually set from Admin > Ideas & Bugs, one
+  click each, nothing automatic. New feedback_status_check constraint;
+  the one existing 'considered' row was migrated to 'on_list'.
+
+  IMPORTANT, found while implementing (1)+(2): the live `settings`
+  table's 4 SMS templates had never actually been saved since Sept 14
+  (see the Sept 19 entry below, from earlier the same day) - leaving
+  them as-is while shipping the new auto-appended footer would have put
+  the "Reply STOP..." text in every real outbound message TWICE (once
+  from the still-there old copy, once from the new auto-append).
+  Claude judged this a correctness bug it was about to ship, not a
+  content-editing decision to defer to Kim, and pushed the corrected
+  template text (identical to what "Reset to Default" + Save would have
+  produced) directly via this round's migration - see the migration
+  file's own comment for the full reasoning. The 2 new phone-number
+  columns were NOT given real values the same way, since Claude has
+  never been told Kim/Estee's actual numbers and never should be - see
+  NEXT CHANGE LIST item 1.
+
+  Tests: settings/index.test.ts gained the PUBLIC_COLUMNS/ADMIN_COLUMNS
+  split (a `select=` -aware stub was needed - the old one always
+  returned every column regardless of what was actually selected, which
+  would have let a wrong-for-the-wrong-reason test pass); send-
+  confirmation's suite rewritten around a combined Twilio+settings stub
+  (fetchFooterAndPhones is now a dependency of every send); feedback's
+  STATUSES tests updated for on_list/rejected; new Admin Jest tests for
+  the footer editor, the phone editor, and the admin-authenticated
+  settings read at login. 185 React + 150 Deno = 335/335 passing.
+
+  Verified live: public settings read confirmed to exclude both phone
+  columns while including sms_footer; wrong-password admin read
+  confirmed to 401 with our own error body; send-confirmation invoked
+  directly with a custom message_template (200 OK, footer auto-appended
+  per the Deno suite); feedback invoked with a throwaway public
+  submission to reconfirm the notify path still works post-refactor
+  (200 OK, row deleted and confirmed gone immediately after). Deployed
+  JS bundle confirmed to contain "Text Message Footer", "Manager Phone
+  Numbers", "primaryManagerPhone"/"secondaryManagerPhone", "On List",
+  and "Rejected".
 - Sept 19, 2026: Five pieces of feedback, all on the SMS side:
 
   1. The billing SMS text itself now includes the full line-item math

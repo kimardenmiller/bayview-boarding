@@ -29,6 +29,9 @@ const DEFAULT_SETTINGS = {
   smsReminder: 'Hi {firstName}! reminder, bring {packingList}.',
   smsBilling: 'Hi {firstName}! total ${finalCost}.',
   smsPickupReminder: 'Bye {dogName}! pickup at {pickupDate} {pickupTime}.',
+  smsFooter: 'Reply STOP to opt out. Text {primaryManagerPhone}/{secondaryManagerPhone}.',
+  primaryManagerPhone: '4155550101',
+  secondaryManagerPhone: '4155550102',
 };
 
 function mockInvokeDefaults(overrides = {}) {
@@ -1969,9 +1972,21 @@ describe('Admin — logged in — Ideas & Bugs', () => {
     await screen.findByText('Map pin looks off on Safari');
     const card = screen.getByText('Map pin looks off on Safari').closest('.stay-card');
 
-    fireEvent.click(within(card).getByText('Considered'));
+    fireEvent.click(within(card).getByText('On List'));
     await waitFor(() => expect(supabase.functions.invoke).toHaveBeenCalledWith('feedback', {
-      body: { password: 'correct-password', id: 'fb-1', status: 'considered' },
+      body: { password: 'correct-password', id: 'fb-1', status: 'on_list' },
+    }));
+  });
+
+  test('"Rejected" is also a manually-settable status, alongside Open/On List/Done', async () => {
+    await loginAsAdminWithFeedback();
+    fireEvent.click(screen.getByText('💡 Ideas & Bugs'));
+    await screen.findByText('Map pin looks off on Safari');
+    const card = screen.getByText('Map pin looks off on Safari').closest('.stay-card');
+
+    fireEvent.click(within(card).getByText('Rejected'));
+    await waitFor(() => expect(supabase.functions.invoke).toHaveBeenCalledWith('feedback', {
+      body: { password: 'correct-password', id: 'fb-1', status: 'rejected' },
     }));
   });
 
@@ -2394,6 +2409,48 @@ describe('Admin — logged in', () => {
     // loading the default is purely local - nothing is sent until Save is clicked
     expect(supabase.functions.invoke).not.toHaveBeenCalledWith('settings', expect.objectContaining({
       body: expect.objectContaining({ updates: expect.objectContaining({ smsBilling: expect.anything() }) }),
+    }));
+  });
+
+  test('Text Message Footer shows the fetched value, is independently saveable, and can reset to default', async () => {
+    await loginAsAdmin();
+    const footerBox = within(document.querySelector('.text-footer-editor'));
+    expect(footerBox.getByDisplayValue(DEFAULT_SETTINGS.smsFooter)).toBeInTheDocument();
+
+    const box = footerBox.getByDisplayValue(DEFAULT_SETTINGS.smsFooter);
+    fireEvent.change(box, { target: { value: 'New footer {primaryManagerPhone}' } });
+    fireEvent.click(footerBox.getByText('Save Footer Text'));
+    await waitFor(() => expect(supabase.functions.invoke).toHaveBeenCalledWith('settings', {
+      body: { password: 'correct-password', updates: { smsFooter: 'New footer {primaryManagerPhone}' } },
+    }));
+
+    fireEvent.click(footerBox.getByText('Reset to Default'));
+    expect(box.value).toContain('Reply STOP to opt out');
+  });
+
+  test('login fetches the manager phone numbers via an admin-authenticated settings read, distinct from the public one on mount', async () => {
+    await loginAsAdmin();
+    // The public settings fetch on mount never sends a password; the
+    // admin-only phone read at login does, with no `updates` (distinct
+    // from a write, which always includes updates).
+    expect(supabase.functions.invoke).toHaveBeenCalledWith('settings', { body: {} });
+    expect(supabase.functions.invoke).toHaveBeenCalledWith('settings', { body: { password: 'correct-password' } });
+
+    const phonesBox = within(document.querySelector('.manager-phones-editor'));
+    expect(phonesBox.getByDisplayValue('4155550101')).toBeInTheDocument();
+    expect(phonesBox.getByDisplayValue('4155550102')).toBeInTheDocument();
+  });
+
+  test('Manager Phone Numbers are editable and saveable together', async () => {
+    await loginAsAdmin();
+    const phonesBox = within(document.querySelector('.manager-phones-editor'));
+    fireEvent.change(phonesBox.getByDisplayValue('4155550101'), { target: { value: '4155559999' } });
+    fireEvent.click(phonesBox.getByText('Save Phone Numbers'));
+    await waitFor(() => expect(supabase.functions.invoke).toHaveBeenCalledWith('settings', {
+      body: {
+        password: 'correct-password',
+        updates: { primaryManagerPhone: '4155559999', secondaryManagerPhone: '4155550102' },
+      },
     }));
   });
 });

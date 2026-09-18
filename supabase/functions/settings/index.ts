@@ -35,13 +35,25 @@ interface SettingsRow {
   sms_reminder: string;
   sms_billing: string;
   sms_pickup_reminder: string;
+  sms_footer: string;
+  primary_manager_phone?: string;
+  secondary_manager_phone?: string;
 }
 
-const SETTINGS_COLUMNS =
-  "day_rate, multi_dog_discount, holiday_upcharge, vets, packing_list, sms_confirmation, sms_reminder, sms_billing, sms_pickup_reminder";
+// Public columns only - every visitor's browser fetches these to build
+// the booking form/estimate and to complete their own submission's SMS
+// sends. sms_footer is included here (it's just template text with
+// {primaryManagerPhone}/{secondaryManagerPhone} placeholders in it, same
+// as the other 4 templates) - the ADMIN_ONLY columns below are the part
+// that must never reach a public read, since those are the actual phone
+// numbers those placeholders get filled with.
+const PUBLIC_COLUMNS =
+  "day_rate, multi_dog_discount, holiday_upcharge, vets, packing_list, sms_confirmation, sms_reminder, sms_billing, sms_pickup_reminder, sms_footer";
+const ADMIN_ONLY_COLUMNS = "primary_manager_phone, secondary_manager_phone";
+const ADMIN_COLUMNS = `${PUBLIC_COLUMNS}, ${ADMIN_ONLY_COLUMNS}`;
 
 function toClientShape(row: SettingsRow) {
-  return {
+  const shape: Record<string, unknown> = {
     dayRate: row.day_rate,
     multiDogDiscount: row.multi_dog_discount,
     holidayUpcharge: row.holiday_upcharge,
@@ -51,7 +63,15 @@ function toClientShape(row: SettingsRow) {
     smsReminder: row.sms_reminder,
     smsBilling: row.sms_billing,
     smsPickupReminder: row.sms_pickup_reminder,
+    smsFooter: row.sms_footer,
   };
+  // Only present at all when the row was fetched with ADMIN_COLUMNS -
+  // a public caller's response simply never has these keys, rather than
+  // having them present-but-blank (which could look like "no phone set"
+  // instead of "you're not allowed to see this").
+  if (row.primary_manager_phone !== undefined) shape.primaryManagerPhone = row.primary_manager_phone;
+  if (row.secondary_manager_phone !== undefined) shape.secondaryManagerPhone = row.secondary_manager_phone;
+  return shape;
 }
 
 interface UpdatesInput {
@@ -64,6 +84,9 @@ interface UpdatesInput {
   smsReminder?: string;
   smsBilling?: string;
   smsPickupReminder?: string;
+  smsFooter?: string;
+  primaryManagerPhone?: string;
+  secondaryManagerPhone?: string;
 }
 
 // Shared by vets/packingList - both are "non-empty list of non-blank,
@@ -134,6 +157,14 @@ function validateUpdates(updates: UpdatesInput): string[] {
   if (updates.smsPickupReminder !== undefined && !updates.smsPickupReminder?.trim()) {
     errors.push("smsPickupReminder must not be blank");
   }
+  if (updates.smsFooter !== undefined && !updates.smsFooter?.trim()) {
+    errors.push("smsFooter must not be blank");
+  }
+  // Deliberately no non-blank check on the manager phone numbers - both
+  // start blank right after the migration that added them, until admin
+  // fills them in for the first time, and clearing one temporarily
+  // (e.g. mid-edit) shouldn't be treated as an error the way a blank SMS
+  // template would be.
 
   return errors;
 }
@@ -172,22 +203,50 @@ export async function handleRequest(req: Request): Promise<Response> {
       if (updates.smsReminder !== undefined) patch.sms_reminder = updates.smsReminder.trim();
       if (updates.smsBilling !== undefined) patch.sms_billing = updates.smsBilling.trim();
       if (updates.smsPickupReminder !== undefined) patch.sms_pickup_reminder = updates.smsPickupReminder.trim();
+      if (updates.smsFooter !== undefined) patch.sms_footer = updates.smsFooter.trim();
+      if (updates.primaryManagerPhone !== undefined) patch.primary_manager_phone = updates.primaryManagerPhone.trim();
+      if (updates.secondaryManagerPhone !== undefined) patch.secondary_manager_phone = updates.secondaryManagerPhone.trim();
       patch.updated_at = new Date().toISOString();
 
+      // A write always comes from an authenticated admin - hand back the
+      // full admin shape (phone numbers included) so the UI that just
+      // saved a change can also re-sync from the same response, same as
+      // every other field here.
       const { data, error } = await supabase
         .from("settings")
         .update(patch)
         .eq("id", true)
-        .select(SETTINGS_COLUMNS);
+        .select(ADMIN_COLUMNS);
       if (error) throw error;
 
       return json(toClientShape(data[0] as SettingsRow));
     }
 
-    // A plain read - public, no password needed.
+    if (password) {
+      // Admin-authenticated read (Sept 18, 2026) - lets the admin UI
+      // populate the manager-phone fields for editing without ever
+      // putting those numbers in the public response. Distinct from the
+      // write path above: no `updates` here, just a password.
+      if (password !== ADMIN_PASSWORD) {
+        return json({ error: "Incorrect password" }, 401);
+      }
+      const { data, error } = await supabase
+        .from("settings")
+        .select(ADMIN_COLUMNS)
+        .eq("id", true)
+        .limit(1);
+      if (error) throw error;
+      if (!data || data.length === 0) {
+        return json({ error: "Settings not found" }, 500);
+      }
+      return json(toClientShape(data[0] as SettingsRow));
+    }
+
+    // A plain read - public, no password needed. Never selects
+    // primary_manager_phone/secondary_manager_phone - see PUBLIC_COLUMNS.
     const { data, error } = await supabase
       .from("settings")
-      .select(SETTINGS_COLUMNS)
+      .select(PUBLIC_COLUMNS)
       .eq("id", true)
       .limit(1);
     if (error) throw error;

@@ -23,6 +23,18 @@ const DEFAULT_SMS_TEMPLATES = {
   billing: SETTINGS.SMS_BILLING,
   pickupReminder: SETTINGS.SMS_PICKUP_REMINDER,
 };
+const DEFAULT_SMS_FOOTER = SETTINGS.SMS_FOOTER;
+
+// "On List" = promoted into FIXES.txt's NEXT CHANGE LIST; "Rejected" =
+// decided not to do it - both set manually by admin from this list, same
+// as "Done" already was (Sept 18, 2026, on request; "On List" replaces
+// the old "Considered").
+const FEEDBACK_STATUSES = [
+  { key: 'open', label: 'Open' },
+  { key: 'on_list', label: 'On List' },
+  { key: 'done', label: 'Done' },
+  { key: 'rejected', label: 'Rejected' },
+];
 
 // Suggested starting text for the admin "Testers" broadcast box (Sept 17,
 // 2026) - a static block admin can fully edit before each send, distinct
@@ -769,6 +781,7 @@ function AdminView({
   onClose, rate, setRate, multiDogDiscount, setMultiDogDiscount,
   holidayUpcharge, setHolidayUpcharge, vets, setVets,
   packingList, setPackingList, smsTemplates, setSmsTemplates,
+  smsFooter, setSmsFooter,
 }) {
   const [pw, setPw] = useState('');
   const [authed, setAuthed] = useState(false);
@@ -787,6 +800,15 @@ function AdminView({
   const [editPackingList, setEditPackingList] = useState(packingList);
   const [newPackingItemText, setNewPackingItemText] = useState('');
   const [editSms, setEditSms] = useState(smsTemplates);
+  const [editSmsFooter, setEditSmsFooter] = useState(smsFooter);
+  // Manager phone numbers (Sept 18, 2026) - unlike every other field
+  // here, these are never in the public settings fetch (see
+  // settings/index.ts's PUBLIC_COLUMNS vs ADMIN_COLUMNS split - a public
+  // read must never leak a personal cell number to every site visitor),
+  // so there's no App-level prop to seed from. Populated only once,
+  // right at login, by a dedicated admin-authenticated settings read.
+  const [editPrimaryManagerPhone, setEditPrimaryManagerPhone] = useState('');
+  const [editSecondaryManagerPhone, setEditSecondaryManagerPhone] = useState('');
   const [settingsError, setSettingsError] = useState('');
   const [savingSettings, setSavingSettings] = useState(false);
   // "Submit Idea" queue - fetched alongside the dog list at login, shown
@@ -849,6 +871,17 @@ function AdminView({
     supabase.functions.invoke('testers', { body: { password: pw, action: 'list' } }).then(({ data }) => {
       if (data && !data.error) setTesters(data.testers || []);
     }).catch(() => {});
+    // The manager phone numbers only ever come from this admin-
+    // authenticated read (password, no updates) - see settings/index.ts.
+    // A failure here shouldn't block getting into the admin panel, same
+    // as feedback/testers above; it just leaves both fields blank until
+    // admin reloads or retries.
+    supabase.functions.invoke('settings', { body: { password: pw } }).then(({ data }) => {
+      if (data && !data.error) {
+        setEditPrimaryManagerPhone(data.primaryManagerPhone || '');
+        setEditSecondaryManagerPhone(data.secondaryManagerPhone || '');
+      }
+    }).catch(() => {});
     // editRate/editMultiDogDiscount/editHolidayUpcharge/editVets were
     // seeded from these same-named props back when this component first
     // mounted - but App's own settings fetch (a separate network call)
@@ -863,6 +896,7 @@ function AdminView({
     setEditVets(vets);
     setEditPackingList(packingList);
     setEditSms(smsTemplates);
+    setEditSmsFooter(smsFooter);
   }
 
   // Shared save path for every settings field below - persists to
@@ -902,6 +936,19 @@ function AdminView({
       setSmsTemplates(next);
       setEditSms(next);
     }
+    if (data.smsFooter) {
+      setSmsFooter(data.smsFooter);
+      setEditSmsFooter(data.smsFooter);
+    }
+    // primaryManagerPhone/secondaryManagerPhone only come back on a
+    // write that actually touched them (a write is always the full
+    // admin shape - see settings/index.ts - but a blank saved value
+    // would be `''`, which the write API still returns, just never
+    // treated as "no manager numbers in this response" the way
+    // `data.smsFooter` truthy-checks above would wrongly do for an
+    // intentionally-cleared field).
+    if (updates.primaryManagerPhone !== undefined) setEditPrimaryManagerPhone(data.primaryManagerPhone ?? '');
+    if (updates.secondaryManagerPhone !== undefined) setEditSecondaryManagerPhone(data.secondaryManagerPhone ?? '');
     return true;
   }
 
@@ -1317,16 +1364,16 @@ function AdminView({
                 <div className="stay-meta" style={{ marginTop: 6 }}>
                   {[f.name, f.contact].filter(Boolean).join(' · ')}
                 </div>
-                <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 10 }}>
-                  {['open', 'considered', 'done'].map(s => (
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 10, flexWrap: 'wrap' }}>
+                  {FEEDBACK_STATUSES.map(({ key, label }) => (
                     <button
-                      key={s}
-                      className={s === f.status ? 'btn-primary' : 'btn-secondary'}
+                      key={key}
+                      className={key === f.status ? 'btn-primary' : 'btn-secondary'}
                       style={{ padding: '4px 10px', fontSize: '0.78rem' }}
-                      disabled={updatingFeedbackId === f.id || s === f.status}
-                      onClick={() => updateFeedbackStatus(f.id, s)}
+                      disabled={updatingFeedbackId === f.id || key === f.status}
+                      onClick={() => updateFeedbackStatus(f.id, key)}
                     >
-                      {s.charAt(0).toUpperCase() + s.slice(1)}
+                      {label}
                     </button>
                   ))}
                 </div>
@@ -1556,8 +1603,73 @@ function AdminView({
         <div className="rate-setting sms-editor">
           <label className="field-label">SMS Message Templates</label>
           <div style={{ fontSize: '0.72rem', color: '#6B7A8A', marginBottom: 10 }}>
-            Placeholders: {'{firstName} {dogName} {dogVerb} {dropDate} {dropTime} {pickDate} {pickTime} {estimatedCost} {finalCost} {billingBreakdown} {packingList} {kimPhone} {esteePhone}'}
+            Placeholders: {'{firstName} {dogName} {dogVerb} {dropDate} {dropTime} {pickDate} {pickTime} {estimatedCost} {finalCost} {billingBreakdown} {packingList} {primaryManagerPhone} {secondaryManagerPhone}'}
           </div>
+
+          <div className="text-footer-editor" style={{ marginBottom: 12 }}>
+            <div style={{ fontSize: '0.8rem', fontWeight: 500, color: '#2C3E50', marginBottom: 4 }}>Text Message Footer</div>
+            <div style={{ fontSize: '0.72rem', color: '#6B7A8A', marginBottom: 4 }}>
+              Appended once, automatically, to the end of every outbound text below - not stored in each one separately.
+            </div>
+            <textarea
+              value={editSmsFooter}
+              onChange={e => setEditSmsFooter(e.target.value)}
+              rows={2}
+              style={{ width: '100%', padding: '8px 10px', border: '1.5px solid #D5D9DE', borderRadius: 6, fontSize: '0.82rem', fontFamily: 'inherit' }}
+            />
+            <div style={{ display: 'flex', gap: 8, marginTop: 6, flexWrap: 'wrap' }}>
+              <button
+                className="btn-primary"
+                style={{ padding: '6px 14px' }}
+                disabled={savingSettings}
+                onClick={() => saveSettings({ smsFooter: editSmsFooter })}
+              >
+                Save Footer Text
+              </button>
+              <button
+                type="button"
+                className="btn-secondary"
+                style={{ padding: '6px 14px' }}
+                onClick={() => setEditSmsFooter(DEFAULT_SMS_FOOTER)}
+              >
+                Reset to Default
+              </button>
+            </div>
+          </div>
+
+          <div className="manager-phones-editor" style={{ marginBottom: 12 }}>
+            <div style={{ fontSize: '0.8rem', fontWeight: 500, color: '#2C3E50', marginBottom: 4 }}>Manager Phone Numbers</div>
+            <div style={{ fontSize: '0.72rem', color: '#6B7A8A', marginBottom: 4 }}>
+              Fill {'{primaryManagerPhone}'}/{'{secondaryManagerPhone}'} above and anywhere else used in a template - never shown to a public site visitor.
+            </div>
+            <div className="field-row">
+              <Field label="Primary Manager Phone (Kim)">
+                <input
+                  type="tel"
+                  value={editPrimaryManagerPhone}
+                  onChange={e => setEditPrimaryManagerPhone(e.target.value)}
+                  placeholder="(415) 555-0100"
+                />
+              </Field>
+              <Field label="Secondary Manager Phone (Estee)">
+                <input
+                  type="tel"
+                  value={editSecondaryManagerPhone}
+                  onChange={e => setEditSecondaryManagerPhone(e.target.value)}
+                  placeholder="(415) 555-0100"
+                />
+              </Field>
+            </div>
+            <button
+              className="btn-primary"
+              style={{ padding: '6px 14px', marginTop: 6 }}
+              disabled={savingSettings}
+              onClick={() => saveSettings({ primaryManagerPhone: editPrimaryManagerPhone, secondaryManagerPhone: editSecondaryManagerPhone })}
+            >
+              Save Phone Numbers
+            </button>
+          </div>
+
           {[
             { key: 'confirmation', label: 'Booking Confirmation' },
             { key: 'reminder', label: 'Drop-off Reminder' },
@@ -2016,6 +2128,7 @@ export default function App() {
   const [vets, setVets] = useState(DEFAULT_VETS);
   const [packingList, setPackingList] = useState(DEFAULT_PACKING_LIST);
   const [smsTemplates, setSmsTemplates] = useState(DEFAULT_SMS_TEMPLATES);
+  const [smsFooter, setSmsFooter] = useState(DEFAULT_SMS_FOOTER);
 
   // Admin-configurable settings (day rate, multi-dog discount, holiday
   // upcharge, vet list, packing list, SMS templates - Sept 16, 2026 added
@@ -2041,6 +2154,7 @@ export default function App() {
           pickupReminder: data.smsPickupReminder ?? DEFAULT_SMS_TEMPLATES.pickupReminder,
         });
       }
+      if (data.smsFooter) setSmsFooter(data.smsFooter);
     }).catch(() => {}); // network hiccup - keep the defaults, don't crash the page
   }, []);
 
@@ -2145,6 +2259,7 @@ export default function App() {
     vets, setVets,
     packingList, setPackingList,
     smsTemplates, setSmsTemplates,
+    smsFooter, setSmsFooter,
   };
 
   // Mutually-exclusive top-level views. Each nav function clears the

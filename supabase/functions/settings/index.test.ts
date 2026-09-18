@@ -17,7 +17,25 @@ const DEFAULT_ROW = {
   sms_reminder: 'Hi {firstName}! reminder, bring: {packingList}.',
   sms_billing: 'Hi {firstName}! total: ${finalCost}.',
   sms_pickup_reminder: 'Bye {dogName}! pickup at {pickupDate} {pickupTime}.',
+  sms_footer: 'Reply STOP to opt out. Text Kim {primaryManagerPhone} & Estee {secondaryManagerPhone}.',
+  primary_manager_phone: '4155550101',
+  secondary_manager_phone: '4155550102',
 };
+
+// Filters the stubbed row down to whatever `select=col1,col2` the real
+// call asked for - real Postgrest only ever returns selected columns, so
+// the stub has to behave the same way for the PUBLIC_COLUMNS vs
+// ADMIN_COLUMNS split (see settings/index.ts) to actually be testable:
+// a test asserting the manager-phone columns are absent from a public
+// read would otherwise pass for the wrong reason (a stub that always
+// returns everything, regardless of what was selected).
+function selectColumns(row: Record<string, unknown>, selectParam: string | null): Record<string, unknown> {
+  if (!selectParam) return { ...row };
+  const cols = selectParam.split(',').map((c) => c.trim());
+  const out: Record<string, unknown> = {};
+  for (const c of cols) if (c in row) out[c] = row[c];
+  return out;
+}
 
 function stubSupabase(initial: typeof DEFAULT_ROW = DEFAULT_ROW) {
   const db = { settings: { ...initial } };
@@ -33,11 +51,11 @@ function stubSupabase(initial: typeof DEFAULT_ROW = DEFAULT_ROW) {
 
     if (table === 'settings') {
       if (method === 'GET') {
-        return new Response(JSON.stringify([db.settings]), { status: 200 });
+        return new Response(JSON.stringify([selectColumns(db.settings, url.searchParams.get('select'))]), { status: 200 });
       }
       if (method === 'PATCH') {
         Object.assign(db.settings, body);
-        return new Response(JSON.stringify([db.settings]), { status: 200 });
+        return new Response(JSON.stringify([selectColumns(db.settings, url.searchParams.get('select'))]), { status: 200 });
       }
     }
     throw new Error(`stubSupabase: unhandled request ${method} ${url.pathname}`);
@@ -64,7 +82,7 @@ Deno.test('rejects non-POST requests', async () => {
   }
 });
 
-Deno.test('a plain read requires no password (public)', async () => {
+Deno.test('a plain read requires no password (public) and never includes the manager phone numbers', async () => {
   const stub = stubSupabase();
   try {
     const res = await handleRequest(postRequest({}));
@@ -78,8 +96,36 @@ Deno.test('a plain read requires no password (public)', async () => {
       smsReminder: DEFAULT_ROW.sms_reminder,
       smsBilling: DEFAULT_ROW.sms_billing,
       smsPickupReminder: DEFAULT_ROW.sms_pickup_reminder,
+      smsFooter: DEFAULT_ROW.sms_footer,
     });
+    assertEquals('primaryManagerPhone' in data, false);
+    assertEquals('secondaryManagerPhone' in data, false);
     assertEquals(stub.calls[0].method, 'GET');
+  } finally {
+    stub.restore();
+  }
+});
+
+Deno.test('an admin-authenticated read (password, no updates) includes the manager phone numbers', async () => {
+  const stub = stubSupabase();
+  try {
+    const res = await handleRequest(postRequest({ password: ADMIN_PASSWORD }));
+    assertEquals(res.status, 200);
+    const data = await res.json();
+    assertEquals(data.primaryManagerPhone, '4155550101');
+    assertEquals(data.secondaryManagerPhone, '4155550102');
+    assertEquals(data.smsFooter, DEFAULT_ROW.sms_footer);
+  } finally {
+    stub.restore();
+  }
+});
+
+Deno.test('an admin-authenticated read rejects the wrong password, without touching the database', async () => {
+  const stub = stubSupabase();
+  try {
+    const res = await handleRequest(postRequest({ password: 'nope' }));
+    assertEquals(res.status, 401);
+    assertEquals(stub.calls.length, 0);
   } finally {
     stub.restore();
   }
@@ -308,7 +354,46 @@ Deno.test('rejects a blank SMS template, without touching the database', async (
     assertEquals(billing.status, 400);
     const pickup = await handleRequest(postRequest({ password: ADMIN_PASSWORD, updates: { smsPickupReminder: '   ' } }));
     assertEquals(pickup.status, 400);
+    const footer = await handleRequest(postRequest({ password: ADMIN_PASSWORD, updates: { smsFooter: '   ' } }));
+    assertEquals(footer.status, 400);
     assertEquals(stub.calls.length, 0);
+  } finally {
+    stub.restore();
+  }
+});
+
+Deno.test('updates the shared SMS footer, trimming it', async () => {
+  const stub = stubSupabase();
+  try {
+    const res = await handleRequest(postRequest({
+      password: ADMIN_PASSWORD,
+      updates: { smsFooter: '  New footer {primaryManagerPhone}  ' },
+    }));
+    assertEquals(res.status, 200);
+    const data = await res.json();
+    assertEquals(data.smsFooter, 'New footer {primaryManagerPhone}');
+  } finally {
+    stub.restore();
+  }
+});
+
+Deno.test('updates the manager phone numbers, trimming them, and allows clearing one to blank', async () => {
+  const stub = stubSupabase();
+  try {
+    const res = await handleRequest(postRequest({
+      password: ADMIN_PASSWORD,
+      updates: { primaryManagerPhone: '  4155559999  ', secondaryManagerPhone: '4155558888' },
+    }));
+    assertEquals(res.status, 200);
+    const data = await res.json();
+    assertEquals(data.primaryManagerPhone, '4155559999');
+    assertEquals(data.secondaryManagerPhone, '4155558888');
+
+    const cleared = await handleRequest(postRequest({
+      password: ADMIN_PASSWORD, updates: { secondaryManagerPhone: '' },
+    }));
+    assertEquals(cleared.status, 200);
+    assertEquals((await cleared.json()).secondaryManagerPhone, '');
   } finally {
     stub.restore();
   }

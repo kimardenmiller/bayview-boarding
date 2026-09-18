@@ -3,18 +3,6 @@
 // they can be unit-tested directly with `deno test`, without spinning up an
 // HTTP server.
 
-/** The note appended to every outbound message, telling clients replies to
- * this number aren't monitored and how to actually reach us. */
-export function buildContactNote(kimPhone: string, esteePhone: string): string {
-  return `Replies to this number aren't monitored. For questions, please group-text Kim ${kimPhone} & Estee ${esteePhone}.`;
-}
-
-/** Appends the contact note to an outbound message body, on its own line
- * (Sept 16, 2026 - was a single space, read as one run-on sentence). */
-export function appendContactNote(message: string, kimPhone: string, esteePhone: string): string {
-  return `${message}\n${buildContactNote(kimPhone, esteePhone)}`;
-}
-
 /** The auto-reply TwiML sends back to anyone who texts the business number
  * directly. */
 export function buildAutoReply(kimPhone: string, esteePhone: string): string {

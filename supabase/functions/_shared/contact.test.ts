@@ -1,7 +1,5 @@
 import { assertEquals } from 'https://deno.land/std@0.168.0/testing/asserts.ts';
 import {
-  buildContactNote,
-  appendContactNote,
   buildAutoReply,
   buildRelayWarning,
   buildOwnerCopyNotice,
@@ -11,20 +9,6 @@ import {
 
 const KIM = '(650) 302-0731';
 const ESTEE = '(510) 432-9791';
-
-Deno.test('buildContactNote includes both phone numbers and the "not monitored" warning', () => {
-  const note = buildContactNote(KIM, ESTEE);
-  assertEquals(note.includes(KIM), true);
-  assertEquals(note.includes(ESTEE), true);
-  assertEquals(note.includes("aren't monitored"), true);
-});
-
-Deno.test('appendContactNote appends the note after the original message, on its own line', () => {
-  const result = appendContactNote('Hi Jane! Your stay is confirmed.', KIM, ESTEE);
-  assertEquals(result.startsWith('Hi Jane! Your stay is confirmed.\n'), true);
-  assertEquals(result.includes(KIM), true);
-  assertEquals(result.includes(ESTEE), true);
-});
 
 Deno.test('buildAutoReply includes both numbers and an apology', () => {
   const reply = buildAutoReply(KIM, ESTEE);
