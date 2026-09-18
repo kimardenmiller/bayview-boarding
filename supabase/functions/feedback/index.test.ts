@@ -50,6 +50,11 @@ function stubSupabase(initial: Record<string, unknown>[] = [], smsOk = true) {
         if (row) Object.assign(row, body);
         return new Response(JSON.stringify(row ? [row] : []), { status: 200 });
       }
+      if (method === 'DELETE') {
+        const id = url.searchParams.get('id')?.replace('eq.', '');
+        db.feedback = db.feedback.filter((f) => f.id !== id);
+        return new Response(JSON.stringify([]), { status: 200 });
+      }
     }
     throw new Error(`stubSupabase: unhandled request ${method} ${url.pathname}${url.search}`);
   }) as typeof fetch;
@@ -227,6 +232,25 @@ Deno.test('admin update status: 404 for an id that does not exist', async () => 
   try {
     const res = await handleRequest(postRequest({ password: ADMIN_PASSWORD, id: 'nope', status: 'done' }));
     assertEquals(res.status, 404);
+  } finally {
+    stub.restore();
+  }
+});
+
+Deno.test('admin delete: removes a submission permanently, requires the correct password', async () => {
+  const stub = stubSupabase([
+    { id: 'fb-1', message: 'Spam', category: 'idea', status: 'open', created_at: '2026-09-16T12:00:00Z' },
+    { id: 'fb-2', message: 'Keep me', category: 'idea', status: 'open', created_at: '2026-09-16T12:00:00Z' },
+  ]);
+  try {
+    const wrongPw = await handleRequest(postRequest({ password: 'nope', id: 'fb-1', action: 'delete' }));
+    assertEquals(wrongPw.status, 401);
+    assertEquals(stub.db.feedback.length, 2); // untouched
+
+    const res = await handleRequest(postRequest({ password: ADMIN_PASSWORD, id: 'fb-1', action: 'delete' }));
+    assertEquals(res.status, 200);
+    assertEquals((await res.json()).success, true);
+    assertEquals(stub.db.feedback.map((f) => f.id), ['fb-2']);
   } finally {
     stub.restore();
   }

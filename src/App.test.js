@@ -292,7 +292,11 @@ async function loginAsAdminWithFeedback(feedback = SAMPLE_FEEDBACK) {
   mockInvokeDefaults({
     'admin-data': async () => ({ data: { dogs: SAMPLE_DOGS, totalStays: SAMPLE_TOTAL_STAYS }, error: null }),
     'feedback': async (opts) => {
-      const { id, status } = opts?.body || {};
+      const { id, status, action } = opts?.body || {};
+      if (id && action === 'delete') {
+        current = current.filter(f => f.id !== id);
+        return { data: { success: true }, error: null };
+      }
       if (id) {
         current = current.map(f => (f.id === id ? { ...f, status } : f));
         return { data: { feedback: current.find(f => f.id === id) }, error: null };
@@ -1988,6 +1992,21 @@ describe('Admin — logged in — Ideas & Bugs', () => {
     await waitFor(() => expect(supabase.functions.invoke).toHaveBeenCalledWith('feedback', {
       body: { password: 'correct-password', id: 'fb-1', status: 'rejected' },
     }));
+  });
+
+  test('"Delete" permanently removes a submission from the list', async () => {
+    await loginAsAdminWithFeedback();
+    fireEvent.click(screen.getByText('💡 Ideas & Bugs'));
+    await screen.findByText('Map pin looks off on Safari');
+    const card = screen.getByText('Map pin looks off on Safari').closest('.stay-card');
+
+    fireEvent.click(within(card).getByText('Delete'));
+    await waitFor(() => expect(supabase.functions.invoke).toHaveBeenCalledWith('feedback', {
+      body: { password: 'correct-password', id: 'fb-1', action: 'delete' },
+    }));
+    await waitFor(() => expect(screen.queryByText('Map pin looks off on Safari')).not.toBeInTheDocument());
+    // the other 2 submissions are untouched
+    expect(screen.getByText('Add a dark mode')).toBeInTheDocument();
   });
 
   test('← Admin returns to the main admin panel', async () => {

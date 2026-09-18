@@ -92,7 +92,10 @@ Kim Miller and Estee Fletter at 210 Bayview Drive, San Rafael, CA.
   just patches fields and re-stamps billed_at either way). A "Site
   Settings" header (Sept 18, 2026) then separates those two day-to-day
   lookup sections from everything below: a "💡 Ideas & Bugs" section
-  (Sept 16 (8) — see feedback below) with an open-count badge and a
+  (Sept 16 (8) — see feedback below) with an open-count badge, each
+  submission's status buttons now also including a permanent "Delete"
+  (Sept 18, 2026, no confirmation step - same pattern as testers'
+  "remove" below) alongside them, and a
   "📢 Testers" section (Sept 17 — see testers below) to maintain a
   tester list and broadcast a personally-greeted SMS to all of them,
   then day rate/discount/holiday/vet-list/packing-list/SMS-template
@@ -204,9 +207,12 @@ a column and the Edge Function still accepts/validates it for backward
 compatibility, but the form no longer sends it - every row defaults to
 "idea" and admin no longer displays it; it's vestigial, not a real
 feature. Same RLS-locked-with-zero-policies pattern as everything else;
-public submit and password-gated list/status-update both go through
-supabase/functions/feedback/index.ts (one function, same "request shape
-decides the branch" style as settings). A public submit now also texts
+public submit and password-gated list/status-update/delete (permanent,
+no confirmation step - Sept 18, 2026, action: 'delete' alongside id in
+the request body, distinguishing it from a status update) all go
+through supabase/functions/feedback/index.ts (one function, same
+"request shape decides the branch" style as settings). A public submit
+now also texts
 both Kim and Estee immediately (Sept 19, 2026, reversing the earlier
 "deliberately not wired to any notification" decision - same Twilio
 relay pattern send-contact uses, awaited so it can't be dropped by the
@@ -260,9 +266,9 @@ call itself is dropped, not for a routine secret rotation.
 - src/App.js — main app
 - src/settings.js — all configurable values (rates, vets, messages, packing list)
 - src/waiver.js — full waiver text
-- src/App.test.js — 185 passing tests (TDD), Supabase mocked via src/__mocks__/supabase.js
+- src/App.test.js — 186 passing tests (TDD), Supabase mocked via src/__mocks__/supabase.js
 - supabase/functions/send-contact/index.ts — public Contact Us form handler: relays name/email-or-phone/message to Kim & Estee by SMS (reuses KIM_PHONE/ESTEE_PHONE). Deployed normally (no --no-verify-jwt) since it's called via the Supabase JS client like settings/lookup-client/submit-booking
-- supabase/functions/feedback/index.ts — "Submit Idea": public submit (no password, also texts Kim & Estee - Sept 19, 2026) + admin list/status-update (password) for the feedback queue
+- supabase/functions/feedback/index.ts — "Submit Idea": public submit (no password, also texts Kim & Estee) + admin list/status-update/delete (password) for the feedback queue
 - supabase/functions/testers/index.ts — tester broadcast list: entirely admin-password-gated list/add/remove/notify (no public branch at all); notify greets each active tester by their own first name
 - supabase/functions/send-pickup-reminders/index.ts — daily cron target, the pickup-side counterpart to send-reminders: finds stays checking out tomorrow, texts each via send-confirmation (type "pickup"), marks pickup_reminder_sent_at. Deployed with `--no-verify-jwt` - same care needed on redeploy as send-reminders
 - public/img/about/ — the 6 numbered photos on the About page, served from the public folder (not bundled) and referenced via process.env.PUBLIC_URL since the app is hosted at a subpath

@@ -1,6 +1,6 @@
 BAYVIEW BOARDING — FIX LIST
 ============================
-Last updated: September 18, 2026 (2) (shared Text Message Footer; admin-editable manager phones; feedback gets On List/Rejected)
+Last updated: September 18, 2026 (3) (feedback delete; shorter phone-field labels; both Ideas & Bugs items promoted to On List)
 
 NEXT CHANGE LIST (v1.5)
 -----------------------
@@ -51,6 +51,19 @@ NEXT CHANGE LIST (v1.5)
    was submitted.
    This item itself never gets "done" - it's a recurring habit, not a
    one-time task.
+5. Suggested by Kim (submitted Sept 16, 2026): "1. This 2. That" -
+   verbatim content of the submission; no further detail was given.
+   Reads like a placeholder/test submission from trying out the Submit
+   Idea form itself rather than a real feature request or bug report -
+   flagged here rather than silently dropped, since Kim asked
+   (Sept 18, 2026 (3)) for every open item to be moved onto this list.
+   Delete it from Admin > Ideas & Bugs (new "Delete" button, Sept 18
+   (3)) if that's right, or reply with what it was actually meant to
+   say if there's real content behind it.
+6. Suggested by Kim (submitted Sept 16, 2026): "1. One 2. Two 3. Three" -
+   verbatim content of the submission; no further detail was given.
+   Same situation as item 5 above - reads like placeholder/test content,
+   flagged rather than dropped.
 
 DEFERRED (revisit only if it actually blocks something)
 ---------------------------------------------------------
@@ -97,6 +110,46 @@ TWILIO STATUS
 
 COMPLETED
 ---------
+- Sept 18, 2026 (3): Feedback on (2) below, same day:
+
+  1. Investigated (not a bug): the footer was reading "...group-text Kim
+   & Estee ." in a real test text. Confirmed via a read-only query that
+  both primary_manager_phone/secondary_manager_phone are still blank in
+  the live database - the footer IS dynamically pulling
+  {primaryManagerPhone}/{secondaryManagerPhone} correctly, there's just
+  nothing in them yet. Still open - see NEXT CHANGE LIST item 1.
+
+  2. "Primary Manager Phone (Kim)" / "Secondary Manager Phone (Estee)"
+  field labels shortened to just "Primary Manager Phone" / "Secondary
+  Manager Phone" in Admin.
+
+  3. New "Delete" button on every Ideas & Bugs submission, alongside the
+  status buttons - permanent, no confirmation step (same pattern as
+  testers' own "remove" elsewhere in this admin panel). New `delete`
+  action on the feedback Edge Function (password + id + action:
+  'delete', distinct from a status update).
+
+  4. Both open Ideas & Bugs submissions moved onto this file's own NEXT
+  CHANGE LIST (items 5 and 6) and marked "On List" in the database -
+  both read as placeholder/test content ("1. This 2. That" and "1. One
+  2. Two 3. Three") rather than real feature requests or bug reports,
+  which is flagged directly in those 2 new list items rather than
+  silently invented into something they weren't. Marking done via
+  direct database write (Claude still doesn't have the admin password)
+  since Kim explicitly asked for this exact action on these exact 2
+  items - a materially different situation from last round's SMS
+  template judgment call, not a standing practice going forward.
+
+  Tests: feedback's Deno suite gained delete-specific tests (permanent
+  removal, wrong-password rejection, other rows untouched) and its stub
+  gained a DELETE handler; new Admin Jest test confirms Delete removes
+  just the clicked submission and leaves the others in place.
+  186 React + 151 Deno = 337/337 passing.
+
+  Verified live: wrong-password delete attempt confirmed to 401 without
+  touching either row; deployed JS bundle confirmed to show the
+  shortened field labels ("Primary Manager Phone (Kim)" confirmed
+  absent).
 - Sept 18, 2026 (2): Five pieces, on request:
 
   1. A single "Text Message Footer" ("Reply STOP to opt out. Replies to

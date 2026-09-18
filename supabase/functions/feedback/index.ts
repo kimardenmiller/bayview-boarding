@@ -3,11 +3,12 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
 // "Submit Idea" feature - see the migration for the full rationale
 // (persisted + triage-able instead of a one-off text message). One
-// function serving 3 shapes of request, same "request shape decides the
+// function serving 4 shapes of request, same "request shape decides the
 // branch" pattern as settings/index.ts:
 //   - no password -> public submit (any visitor, no login)
 //   - password, no id -> admin: list every submission + the open count
-//   - password + id -> admin: update one submission's status
+//   - password + id + action 'delete' -> admin: delete one submission
+//   - password + id (no action) -> admin: update one submission's status
 const ADMIN_PASSWORD = Deno.env.get('ADMIN_PASSWORD')!;
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
@@ -69,8 +70,8 @@ export async function handleRequest(req: Request): Promise<Response> {
 
   try {
     const body = await req.json().catch(() => ({}));
-    const { password, id, status, name, contact, category, message } = body as {
-      password?: string; id?: string; status?: string;
+    const { password, id, status, action, name, contact, category, message } = body as {
+      password?: string; id?: string; status?: string; action?: string;
       name?: string; contact?: string; category?: string; message?: string;
     };
 
@@ -118,6 +119,17 @@ export async function handleRequest(req: Request): Promise<Response> {
     // Everything below requires the admin password.
     if (password !== ADMIN_PASSWORD) {
       return json({ error: 'Incorrect password' }, 401);
+    }
+
+    if (id && action === 'delete') {
+      // Admin: permanently remove one submission (Sept 18, 2026, on
+      // request) - e.g. spam, a duplicate, or something already handled
+      // outside the queue. Unlike a status change, this can't be undone,
+      // but matches the same no-confirmation-step pattern testers'
+      // "remove" already uses elsewhere in this admin panel.
+      const { error } = await supabase.from('feedback').delete().eq('id', id);
+      if (error) throw error;
+      return json({ success: true });
     }
 
     if (id) {

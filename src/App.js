@@ -984,6 +984,18 @@ function AdminView({
     setFeedback(list => list.map(f => (f.id === id ? data.feedback : f)));
   }
 
+  // Permanent, no confirmation step (Sept 18, 2026) - same pattern as
+  // testers' own "remove" elsewhere in this admin panel.
+  async function deleteFeedback(id) {
+    setUpdatingFeedbackId(id);
+    const { data, error: fnError } = await supabase.functions.invoke('feedback', {
+      body: { password: pw, id, action: 'delete' },
+    });
+    setUpdatingFeedbackId(null);
+    if (fnError || data?.error) return;
+    setFeedback(list => list.filter(f => f.id !== id));
+  }
+
   async function addTester() {
     setTestersError('');
     if (!newTesterName.trim() || !newTesterPhone.trim()) {
@@ -1376,6 +1388,14 @@ function AdminView({
                       {label}
                     </button>
                   ))}
+                  <button
+                    className="btn-secondary"
+                    style={{ padding: '4px 10px', fontSize: '0.78rem', color: '#C0392B', borderColor: '#C0392B' }}
+                    disabled={updatingFeedbackId === f.id}
+                    onClick={() => deleteFeedback(f.id)}
+                  >
+                    Delete
+                  </button>
                 </div>
               </div>
             ))}
@@ -1643,7 +1663,7 @@ function AdminView({
               Fill {'{primaryManagerPhone}'}/{'{secondaryManagerPhone}'} above and anywhere else used in a template - never shown to a public site visitor.
             </div>
             <div className="field-row">
-              <Field label="Primary Manager Phone (Kim)">
+              <Field label="Primary Manager Phone">
                 <input
                   type="tel"
                   value={editPrimaryManagerPhone}
@@ -1651,7 +1671,7 @@ function AdminView({
                   placeholder="(415) 555-0100"
                 />
               </Field>
-              <Field label="Secondary Manager Phone (Estee)">
+              <Field label="Secondary Manager Phone">
                 <input
                   type="tel"
                   value={editSecondaryManagerPhone}
