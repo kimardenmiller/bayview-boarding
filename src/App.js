@@ -37,12 +37,21 @@ const FEEDBACK_STATUSES = [
 ];
 
 // Suggested starting text for the admin "Testers" broadcast box (Sept 17,
-// 2026) - a static block admin can fully edit before each send, distinct
-// from "Hi {name}, " which the server prepends per-recipient using each
-// tester's own name, not something typed here at all.
+// 2026), admin-editable and persisted since Sept 19, 2026 (see settings'
+// default_broadcast_message column/migration and saveBroadcastDefault
+// below) - this constant is now only the FALLBACK, used before the
+// admin-authenticated settings fetch resolves at login, same role
+// DEFAULT_SMS_TEMPLATES/DEFAULT_SMS_FOOTER already play above. Points at
+// the staging sandbox (not production) since Sept 19, 2026, once that
+// environment existed for testers to freely book/add dogs/etc. in
+// without touching real client data - kept in sync with the migration's
+// own default wording. Distinct from "Hi {name}, " which the server
+// prepends per-recipient using each tester's own name, not something
+// typed here at all.
 const DEFAULT_BROADCAST_MESSAGE =
   "We've made a few changes to the Bayview Boarding site below. Please have a look and tell us what you think!\n" +
-  'https://kimardenmiller.github.io/bayview-boarding\n' +
+  'https://kimardenmiller.github.io/bayview-boarding/staging\n' +
+  'This is our testing sandbox - feel free to make bookings, add dogs, and try anything. None of it touches real client data.\n' +
   'Then just tap the (☰) menu and choose "Submit Idea" to share your feedback with us.';
 
 function vetDropdownOptions(vets) {
@@ -809,6 +818,15 @@ function AdminView({
   // right at login, by a dedicated admin-authenticated settings read.
   const [editPrimaryManagerPhone, setEditPrimaryManagerPhone] = useState('');
   const [editSecondaryManagerPhone, setEditSecondaryManagerPhone] = useState('');
+  // The tester broadcast's saved default text (Sept 19, 2026) - same
+  // admin-only pattern as the manager phone numbers just above: only ever
+  // populated by the admin-authenticated settings read at login, never
+  // the public fetch. broadcastMessage (below) is seeded from this once
+  // login's fetch resolves, and resets to THIS (not the hardcoded
+  // DEFAULT_BROADCAST_MESSAGE constant) after every send, so a saved
+  // customization actually sticks instead of reverting.
+  const [editDefaultBroadcastMessage, setEditDefaultBroadcastMessage] = useState(DEFAULT_BROADCAST_MESSAGE);
+  const [broadcastSaveStatus, setBroadcastSaveStatus] = useState('idle'); // idle | saving | saved
   const [settingsError, setSettingsError] = useState('');
   const [savingSettings, setSavingSettings] = useState(false);
   // "Submit Idea" queue - fetched alongside the dog list at login, shown
@@ -880,6 +898,9 @@ function AdminView({
       if (data && !data.error) {
         setEditPrimaryManagerPhone(data.primaryManagerPhone || '');
         setEditSecondaryManagerPhone(data.secondaryManagerPhone || '');
+        const savedDefault = data.defaultBroadcastMessage || DEFAULT_BROADCAST_MESSAGE;
+        setEditDefaultBroadcastMessage(savedDefault);
+        setBroadcastMessage(savedDefault);
       }
     }).catch(() => {});
     // editRate/editMultiDogDiscount/editHolidayUpcharge/editVets were
@@ -949,6 +970,9 @@ function AdminView({
     // intentionally-cleared field).
     if (updates.primaryManagerPhone !== undefined) setEditPrimaryManagerPhone(data.primaryManagerPhone ?? '');
     if (updates.secondaryManagerPhone !== undefined) setEditSecondaryManagerPhone(data.secondaryManagerPhone ?? '');
+    if (updates.defaultBroadcastMessage !== undefined) {
+      setEditDefaultBroadcastMessage(data.defaultBroadcastMessage ?? DEFAULT_BROADCAST_MESSAGE);
+    }
     return true;
   }
 
@@ -1035,9 +1059,22 @@ function AdminView({
     }
     setBroadcastResult(data);
     setBroadcastStatus('sent');
-    // Reset to the suggested default rather than leaving it blank - it's
-    // meant to be a reusable starting point, ready for next time.
-    setBroadcastMessage(DEFAULT_BROADCAST_MESSAGE);
+    // Reset to the saved default rather than leaving it blank - it's
+    // meant to be a reusable starting point, ready for next time. Uses
+    // whatever's actually saved (editDefaultBroadcastMessage), not the
+    // hardcoded DEFAULT_BROADCAST_MESSAGE constant, so a customized
+    // default actually sticks across sends (Sept 19, 2026).
+    setBroadcastMessage(editDefaultBroadcastMessage);
+  }
+
+  // Persists whatever's currently in the compose box as the new default
+  // (Sept 19, 2026, on request) - distinct from sendBroadcast, which
+  // sends but never saves. Reuses the shared saveSettings path/error
+  // state, same as every other settings field.
+  async function saveBroadcastDefault() {
+    setBroadcastSaveStatus('saving');
+    const ok = await saveSettings({ defaultBroadcastMessage: broadcastMessage });
+    setBroadcastSaveStatus(ok ? 'saved' : 'idle');
   }
 
   // Lazily falls back to the stay's actual stored value until admin
@@ -1423,7 +1460,7 @@ function AdminView({
             </div>
             <textarea
               value={broadcastMessage}
-              onChange={e => setBroadcastMessage(e.target.value)}
+              onChange={e => { setBroadcastMessage(e.target.value); setBroadcastSaveStatus('idle'); }}
               rows={5}
               style={{ width: '100%', padding: '8px 10px', border: '1.5px solid #D5D9DE', borderRadius: 6, fontSize: '0.85rem', fontFamily: 'inherit' }}
             />
@@ -1442,6 +1479,20 @@ function AdminView({
                 </span>
               )}
               {broadcastStatus === 'error' && <span className="field-error">Failed to send. Please try again.</span>}
+            </div>
+            <div style={{ marginTop: 8, display: 'flex', gap: 8, alignItems: 'center' }}>
+              <button
+                className="btn-secondary"
+                style={{ padding: '6px 14px' }}
+                disabled={!broadcastMessage.trim() || savingSettings}
+                onClick={saveBroadcastDefault}
+              >
+                {broadcastSaveStatus === 'saving' ? 'Saving...' : 'Save as Default'}
+              </button>
+              {broadcastSaveStatus === 'saved' && (
+                <span style={{ color: '#7D9B76', fontSize: '0.78rem' }}>✓ Saved as default</span>
+              )}
+              {settingsError && <span className="field-error">{settingsError}</span>}
             </div>
           </div>
 

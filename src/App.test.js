@@ -38,6 +38,7 @@ const DEFAULT_SETTINGS = {
   smsFooter: 'Reply STOP to opt out. Text {primaryManagerPhone}/{secondaryManagerPhone}.',
   primaryManagerPhone: '4155550101',
   secondaryManagerPhone: '4155550102',
+  defaultBroadcastMessage: 'We just shipped something new - come try it on staging!',
 };
 
 function mockInvokeDefaults(overrides = {}) {
@@ -2050,13 +2051,16 @@ describe('Admin — logged in — Testers', () => {
     await waitFor(() => expect(screen.queryByText('Jane Tester — 4155550100')).not.toBeInTheDocument());
   });
 
-  test('pre-fills a suggested message (Send starts enabled), counts only active testers, and disables if cleared', async () => {
+  test('pre-fills the saved default message (Send starts enabled), counts only active testers, and disables if cleared', async () => {
     await loginAsAdminWithTesters();
     fireEvent.click(screen.getByText('📢 Testers'));
     await screen.findByText('Testers', { selector: 'h2' });
     // 1 of the 2 fixtures is active
     const sendBtn = screen.getByText('Send to 1 tester');
-    const box = screen.getByDisplayValue(/We've made a few changes to the Bayview Boarding site/);
+    // The saved default (settings' defaultBroadcastMessage, fetched at
+    // login - Sept 19, 2026), not the hardcoded DEFAULT_BROADCAST_MESSAGE
+    // fallback, which is only used before that fetch resolves.
+    const box = screen.getByDisplayValue(DEFAULT_SETTINGS.defaultBroadcastMessage);
     expect(sendBtn).not.toBeDisabled(); // a suggested message is already there
     fireEvent.change(box, { target: { value: '' } });
     expect(sendBtn).toBeDisabled();
@@ -2064,11 +2068,11 @@ describe('Admin — logged in — Testers', () => {
     expect(sendBtn).not.toBeDisabled();
   });
 
-  test('sends the broadcast and shows how many were reached', async () => {
+  test('sends the broadcast, shows how many were reached, and resets to the saved default afterward', async () => {
     await loginAsAdminWithTesters();
     fireEvent.click(screen.getByText('📢 Testers'));
     await screen.findByText('Testers', { selector: 'h2' });
-    const box = screen.getByDisplayValue(/We've made a few changes to the Bayview Boarding site/);
+    const box = screen.getByDisplayValue(DEFAULT_SETTINGS.defaultBroadcastMessage);
     fireEvent.change(box, { target: { value: 'Check out the new map!' } });
     fireEvent.click(screen.getByText('Send to 1 tester'));
 
@@ -2076,6 +2080,27 @@ describe('Admin — logged in — Testers', () => {
       body: { password: 'correct-password', action: 'notify', message: 'Check out the new map!' },
     }));
     expect(await screen.findByText(/Sent to 1/)).toBeInTheDocument();
+    // Resets to the saved default, not a blank box and not the hardcoded
+    // fallback constant (Sept 19, 2026).
+    expect(screen.getByDisplayValue(DEFAULT_SETTINGS.defaultBroadcastMessage)).toBeInTheDocument();
+  });
+
+  test('"Save as Default" persists the compose box text so it survives a fresh login, distinct from just sending', async () => {
+    await loginAsAdminWithTesters();
+    fireEvent.click(screen.getByText('📢 Testers'));
+    await screen.findByText('Testers', { selector: 'h2' });
+    const box = screen.getByDisplayValue(DEFAULT_SETTINGS.defaultBroadcastMessage);
+    fireEvent.change(box, { target: { value: 'New sandbox is live, come poke around!' } });
+    fireEvent.click(screen.getByText('Save as Default'));
+
+    await waitFor(() => expect(supabase.functions.invoke).toHaveBeenCalledWith('settings', {
+      body: { password: 'correct-password', updates: { defaultBroadcastMessage: 'New sandbox is live, come poke around!' } },
+    }));
+    expect(await screen.findByText('✓ Saved as default')).toBeInTheDocument();
+    // Never sent to testers - Save as Default only persists, it doesn't notify.
+    expect(supabase.functions.invoke).not.toHaveBeenCalledWith('testers', expect.objectContaining({
+      body: expect.objectContaining({ action: 'notify' }),
+    }));
   });
 
   test('← Admin returns to the main admin panel', async () => {

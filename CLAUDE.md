@@ -235,9 +235,12 @@ password-gated (same shape as admin-data), since a phone number is
 contact info nobody but Kim should read or add to. "notify" texts each
 active tester their own personal "Hi {their first name}, " followed by
 the composed message verbatim (buildTesterMessage) - the admin compose
-box starts pre-filled with a suggested default (DEFAULT_BROADCAST_MESSAGE
-in App.js) that already includes the site link and "Submit Idea"
-directions, fully editable before each send and reset back to that
+box starts pre-filled with a saved default (settings.default_broadcast_
+message, admin-only column, editable via a "Save as Default" button next
+to Send - added Sept 19, 2026; DEFAULT_BROADCAST_MESSAGE in App.js is
+now only the fallback used before that admin-authenticated fetch
+resolves) that includes the staging site link and "Submit Idea"
+directions, fully editable before each send and reset back to the saved
 default afterward, rather than a fixed server-side footer (that was the
 Sept 17 design, replaced same-day once "Hi {name}," was added - a
 server-appended footer would have meant the greeting landed at the very
@@ -267,18 +270,54 @@ call itself is dropped, not for a routine secret rotation.
 - Admin password: set as the `ADMIN_PASSWORD` Supabase secret (`supabase secrets set ADMIN_PASSWORD=...`) — never in source, checked server-side by the admin-data function
 - Twilio phone: see src/settings.js PHONE (business's own public contact number)
 
+## Staging environment (Sept 19, 2026)
+Same repo, no second codebase: a `staging` git branch (currently
+identical to main - meant as the home for future DB-schema/RLS-risky
+work, verified live via a staging deploy before merging to main) and a
+second Supabase project ("Boarding Staging", ref uqmjudozfqlmiepnqodx,
+same org/region as production) deployed to
+kimardenmiller.github.io/bayview-boarding/staging/ - a `staging/`
+subfolder of the same gh-pages branch production deploys to the root of.
+`npm run build:staging` overrides `PUBLIC_URL` plus
+`REACT_APP_SUPABASE_URL`/`REACT_APP_SUPABASE_KEY` (read by src/
+supabase.js, falling back to production's own public values when unset)
+so the build talks to the staging project instead; `npm run
+deploy:staging` builds then runs `gh-pages -d build --dest staging`.
+Both this and the plain `deploy` script now pass `--add` - gh-pages
+otherwise removes any file in the WHOLE target branch not part of the
+current publish, which would make each deploy wipe the other's, now
+that they share one branch (occasional manual cleanup of old content-
+hashed JS/CSS files may eventually be worth doing, since `--add` means
+they're never automatically removed).
+
+Staging's schema was bootstrapped directly from every migration from
+the Sept 14 dog-profiles reorg onward (skipping the stays_legacy
+rename+backfill and both cron.schedule() calls, which only make sense
+against real historical data / a real deployed cron target) rather than
+replayed from the very first migration - the two earliest migrations in
+supabase/migrations/ both assume a `stays` table that predates this
+project's migration-file history (created via the Dashboard UI before
+that workflow was adopted), so a from-scratch replay was never actually
+possible. Staging has no cron jobs scheduled (send-reminders/send-
+pickup-reminders are deployed and manually callable, just not on a
+daily schedule - testers exercise the booking flow directly) and no
+Twilio credentials set yet (see FIXES.txt item 1b) - the booking flow
+still works fully either way, only the confirmation SMS silently fails
+to send without them.
+
 ## Key files
 - src/App.js — main app
 - src/settings.js — all configurable values (rates, vets, messages, packing list)
 - src/waiver.js — full waiver text
-- src/App.test.js — 186 passing tests (TDD), Supabase mocked via src/__mocks__/supabase.js
+- src/App.test.js — 187 passing tests (TDD), Supabase mocked via src/__mocks__/supabase.js
+- src/supabase.js — creates the Supabase client from REACT_APP_SUPABASE_URL/_KEY (falling back to production's own public values) - see Staging environment above for how the staging build overrides these
 - supabase/functions/send-contact/index.ts — public Contact Us form handler: relays name/email-or-phone/message to Kim & Estee by SMS (reuses KIM_PHONE/ESTEE_PHONE). Deployed normally (no --no-verify-jwt) since it's called via the Supabase JS client like settings/lookup-client/submit-booking
 - supabase/functions/feedback/index.ts — "Submit Idea": public submit (no password, also texts Kim & Estee) + admin list/status-update/delete (password) for the feedback queue
 - supabase/functions/testers/index.ts — tester broadcast list: entirely admin-password-gated list/add/remove/notify (no public branch at all); notify greets each active tester by their own first name
 - supabase/functions/send-pickup-reminders/index.ts — daily cron target, the pickup-side counterpart to send-reminders: finds stays checking out tomorrow, texts each via send-confirmation (type "pickup"), marks pickup_reminder_sent_at. Deployed with `--no-verify-jwt` - same care needed on redeploy as send-reminders
 - public/img/about/ — the 6 numbered photos on the About page, served from the public folder (not bundled) and referenced via process.env.PUBLIC_URL since the app is hosted at a subpath
 - supabase/functions/send-reminders/index.ts — daily cron target (pg_cron + pg_net, see the migration): finds stays checking in tomorrow, fetches the current sms_reminder template + packing_list from `settings`, texts each via send-confirmation, marks reminder_sent_at. Deployed with `--no-verify-jwt`; checks its own CRON_SECRET instead (see Data model for how that secret is set up without ever being committed) - be careful to keep that flag on every redeploy (a plain `supabase functions deploy send-reminders` silently re-enables JWT verification and would break the cron, same bug class as the receive-sms incident)
-- supabase/functions/settings/index.ts — public read (PUBLIC_COLUMNS) / password-gated read or write (ADMIN_COLUMNS) of day rate, multi-dog discount, holiday upcharge, vet list, packing list, the 4 SMS templates (confirmation/drop-off reminder/pickup reminder/billing), the shared sms_footer, and (admin-only) the 2 manager phone numbers
+- supabase/functions/settings/index.ts — public read (PUBLIC_COLUMNS) / password-gated read or write (ADMIN_COLUMNS) of day rate, multi-dog discount, holiday upcharge, vet list, packing list, the 4 SMS templates (confirmation/drop-off reminder/pickup reminder/billing), the shared sms_footer, and (admin-only) the 2 manager phone numbers plus the tester broadcast's default_broadcast_message
 - supabase/functions/submit-booking/index.ts — handles booking submission: find-or-create owner (by phone) and each dog (by owner+name), inserts the stay (incl. waiver_snapshot) + stay_dogs snapshot links (service role key)
 - supabase/functions/send-confirmation/index.ts — Twilio SMS function (outbound); accepts an optional message_template (the admin-edited settings text, with {placeholders} filled by fillTemplate, including {dogVerb} - "is"/"are" - and {billingBreakdown} - the full cost math) + packing_list from the caller; falls back to its own hardcoded 4-message-type logic (confirmation/reminder/billing/pickup) if no template is given. Every dollar placeholder ({finalCost}/{estimatedCost}) is run through formatDollars() first (whole dollars, comma-separated). Has its own direct DB read (service role, fetchFooterAndPhones) for sms_footer and the 2 manager phone numbers (Sept 18, 2026) - fills {primaryManagerPhone}/{secondaryManagerPhone} and appends the filled footer once to every message, and uses the same numbers as the destination for the Kim/Estee copy of every client send (notifyOwnersOfClientText). Called directly by the client at booking time, and by send-reminders/send-pickup-reminders/the admin panel for the other three - has its own Deno test suite (index.test.ts), added Sept 16 (5)
 - supabase/functions/receive-sms/index.ts — inbound SMS webhook: auto-reply + relay to Kim/Estee. Deploy with `--no-verify-jwt` (see comment at top of file) or Twilio's webhook calls silently fail

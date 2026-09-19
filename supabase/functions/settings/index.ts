@@ -38,6 +38,7 @@ interface SettingsRow {
   sms_footer: string;
   primary_manager_phone?: string;
   secondary_manager_phone?: string;
+  default_broadcast_message?: string;
 }
 
 // Public columns only - every visitor's browser fetches these to build
@@ -49,7 +50,7 @@ interface SettingsRow {
 // numbers those placeholders get filled with.
 const PUBLIC_COLUMNS =
   "day_rate, multi_dog_discount, holiday_upcharge, vets, packing_list, sms_confirmation, sms_reminder, sms_billing, sms_pickup_reminder, sms_footer";
-const ADMIN_ONLY_COLUMNS = "primary_manager_phone, secondary_manager_phone";
+const ADMIN_ONLY_COLUMNS = "primary_manager_phone, secondary_manager_phone, default_broadcast_message";
 const ADMIN_COLUMNS = `${PUBLIC_COLUMNS}, ${ADMIN_ONLY_COLUMNS}`;
 
 function toClientShape(row: SettingsRow) {
@@ -71,6 +72,7 @@ function toClientShape(row: SettingsRow) {
   // instead of "you're not allowed to see this").
   if (row.primary_manager_phone !== undefined) shape.primaryManagerPhone = row.primary_manager_phone;
   if (row.secondary_manager_phone !== undefined) shape.secondaryManagerPhone = row.secondary_manager_phone;
+  if (row.default_broadcast_message !== undefined) shape.defaultBroadcastMessage = row.default_broadcast_message;
   return shape;
 }
 
@@ -87,6 +89,7 @@ interface UpdatesInput {
   smsFooter?: string;
   primaryManagerPhone?: string;
   secondaryManagerPhone?: string;
+  defaultBroadcastMessage?: string;
 }
 
 // Shared by vets/packingList - both are "non-empty list of non-blank,
@@ -160,6 +163,9 @@ function validateUpdates(updates: UpdatesInput): string[] {
   if (updates.smsFooter !== undefined && !updates.smsFooter?.trim()) {
     errors.push("smsFooter must not be blank");
   }
+  if (updates.defaultBroadcastMessage !== undefined && !updates.defaultBroadcastMessage?.trim()) {
+    errors.push("defaultBroadcastMessage must not be blank");
+  }
   // Deliberately no non-blank check on the manager phone numbers - both
   // start blank right after the migration that added them, until admin
   // fills them in for the first time, and clearing one temporarily
@@ -206,6 +212,7 @@ export async function handleRequest(req: Request): Promise<Response> {
       if (updates.smsFooter !== undefined) patch.sms_footer = updates.smsFooter.trim();
       if (updates.primaryManagerPhone !== undefined) patch.primary_manager_phone = updates.primaryManagerPhone.trim();
       if (updates.secondaryManagerPhone !== undefined) patch.secondary_manager_phone = updates.secondaryManagerPhone.trim();
+      if (updates.defaultBroadcastMessage !== undefined) patch.default_broadcast_message = updates.defaultBroadcastMessage.trim();
       patch.updated_at = new Date().toISOString();
 
       // A write always comes from an authenticated admin - hand back the

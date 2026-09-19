@@ -1,25 +1,30 @@
 BAYVIEW BOARDING — FIX LIST
 ============================
-Last updated: September 19, 2026 (About Us merged into the landing page as a scrollable section - Suggested by JK)
+Last updated: September 19, 2026 (2) (staging environment stood up; tester broadcast default message is now admin-editable and points at it)
 
 NEXT CHANGE LIST (v1.5)
 -----------------------
-1. ACTION NEEDED FROM KIM: open Admin > SMS Message Templates >
-   "Manager Phone Numbers" and fill in the real Primary (Kim) and
-   Secondary (Estee) phone numbers, then Save. Both fields are blank
-   right now (the migration that added them couldn't set real values -
-   Claude has never been given Kim/Estee's actual numbers and never
-   should be), so the shared Text Message Footer is currently going out
-   on every real text with an empty gap where each number belongs
-   ("...group-text Kim  & Estee .") until this is done. This replaces
-   the item that used to be here (the 4 SMS templates never having been
-   saved since Sept 14) - that one's now resolved: since it also blocked
-   the footer-deduplication fix from being safe to ship, Claude pushed
-   the corrected template text (and the new sms_footer default) directly
-   via migration this round rather than waiting on a UI save (see
-   COMPLETED below for the full reasoning) - normal template wording
-   edits going forward still go through Admin > Save, same as any other
-   setting.
+1. ACTION NEEDED FROM KIM:
+   a. The Secondary Manager Phone (Estee) saved in Admin > SMS Message
+      Templates > "Manager Phone Numbers" looks malformed - it's missing
+      its opening parenthesis (reads like "510) 432-9791" instead of
+      "(510) 432-9791"), confirmed via a read-only query Sept 19, 2026.
+      Claude flagged this rather than silently correcting it, since it's
+      real contact info Claude was never given and shouldn't guess at
+      even for an apparently-obvious punctuation fix - please open
+      Admin and confirm/correct both manager phone numbers.
+   b. Staging environment (see Sept 19, 2026 COMPLETED entry below) has
+      no Twilio credentials set yet, so no real/test SMS goes out from
+      there until you add some - ideally Twilio Console's own "Test
+      Credentials" (Account > API keys & tokens > Test credentials),
+      which use magic numbers and never really send or cost anything,
+      exactly matching this project's original staging plan. The
+      booking flow itself works fully without them (only the
+      confirmation text silently fails to send); set via
+      `supabase secrets set TWILIO_ACCOUNT_SID=... TWILIO_AUTH_TOKEN=...
+      TWILIO_PHONE=... --project-ref uqmjudozfqlmiepnqodx`. The staging
+      ADMIN_PASSWORD Claude generated was shared with Kim directly in
+      chat (not written anywhere in this repo).
 2. SECURITY: confirm the Twilio debug API key(s) Kim has shared in chat
    are actually deleted. Used again Sept 16, 2026 (a key named
    "debug_attempt_3_persit", possibly a freshly-created one - SID shared
@@ -29,17 +34,7 @@ NEXT CHANGE LIST (v1.5)
    confirmed, Kim said he'd delete it (Twilio Console > Account > API
    keys & tokens) - leaving this open only until that's confirmed done,
    since it isn't something Claude can verify or do on his behalf.
-3. Set up a staging environment now that real client PII/bookings are
-   flowing through production (discussed Sept 16, 2026). Recommended
-   shape: same repo, a `staging` branch deployed to a second GitHub
-   Pages target, pointed at a second Supabase project (so test bookings/
-   migrations/RLS changes can't touch real client data), with Twilio's
-   test credentials (magic test numbers, never actually send) instead of
-   a second real phone number - no need for a fully separate codebase to
-   maintain. Not urgent by itself; do this the next time a DB schema or
-   RLS change is about to be made against production, rather than
-   testing it live the way this session's changes have been.
-4. STANDING: check the "Submit Idea" queue (admin panel > 💡 Ideas & Bugs)
+3. STANDING: check the "Submit Idea" queue (admin panel > 💡 Ideas & Bugs)
    at the start of any work session in this project, not just when Kim
    flags something - this is the actual mechanism for surfacing tester
    feedback (deliberately not SMS/email, see Sept 16 (8) below). Act on
@@ -97,6 +92,90 @@ TWILIO STATUS
 
 COMPLETED
 ---------
+- Sept 19, 2026 (2): Staging environment (was NEXT CHANGE LIST item 3) -
+  same repo, one Supabase project's worth of extra infrastructure, no
+  second codebase to maintain:
+
+  1. New Supabase project "Boarding Staging" (ref uqmjudozfqlmiepnqodx,
+     org "Bayview Boarding", same us-west-2 region as production). Since
+     supabase/migrations/*.sql can't actually be replayed from scratch
+     (the two earliest migrations both assume a pre-existing `stays`
+     table that predates this project's migration-file history entirely
+     - it was created via the Dashboard UI before that workflow was
+     adopted), schema was bootstrapped directly from every migration
+     from the Sept 14 dog-profiles reorg onward, skipping the parts that
+     only make sense against real historical data (the stays_legacy
+     rename+backfill, and both cron.schedule() calls - see point 3).
+     Result: the 7 tables production actually uses today (owners, dogs,
+     stays, stay_dogs, settings, feedback, testers), same RLS-locked-
+     with-zero-policies pattern as production, deliberately no
+     stays_legacy (production-only historical baggage).
+  2. All 11 Edge Functions deployed, same --no-verify-jwt flags as
+     production (send-reminders, send-pickup-reminders, receive-sms).
+     Secrets set: a fresh, staging-only ADMIN_PASSWORD (shared with Kim
+     directly, never written to this repo), a fresh CRON_SECRET, and
+     placeholder 555-01XX KIM_PHONE/ESTEE_PHONE (real numbers, like
+     production's, are never something Claude has or should have).
+     TWILIO_* deliberately left unset - see NEXT CHANGE LIST item 1b.
+  3. No cron jobs scheduled on staging (send-reminders/send-pickup-
+     reminders are deployed and manually callable, just not on a daily
+     schedule) - testers exercise the booking flow directly rather than
+     waiting on a cron, and it sidesteps needing a second cron_secret
+     vault entry for an environment that doesn't need one yet.
+  4. src/supabase.js now reads REACT_APP_SUPABASE_URL/_KEY at build time
+     (falling back to production's own public values, unchanged from
+     before), and package.json gained build:staging/deploy:staging
+     scripts (PUBLIC_URL + those two env vars override the normal
+     build, then `gh-pages -d build --dest staging`). Both `deploy` and
+     `deploy:staging` now pass --add - gh-pages otherwise removes any
+     file in the WHOLE target branch not part of the current publish,
+     which would make each deploy wipe the other's files, since they
+     now share one gh-pages branch (staging in a `staging/` subfolder,
+     production at the root). Tradeoff: old content-hashed JS/CSS
+     bundle files now accumulate on every deploy instead of being
+     cleaned up - harmless (index.html always points at the latest
+     one) but worth a manual gh-pages branch cleanup eventually if it
+     grows large.
+  5. A `staging` git branch was created (currently identical to main) -
+     intended home for future DB-schema/RLS-risky work: make the change
+     there, verify it live via a staging deploy, then merge to main,
+     rather than testing directly against production the way this
+     session's earlier changes were.
+  6. Verified live: kimardenmiller.github.io/bayview-boarding/staging/
+     loads, its JS bundle references only the staging Supabase project
+     (confirmed zero references to production's project ref in that
+     bundle, and vice versa for production's own bundle), and the
+     staging `settings` Edge Function responds with the real seeded
+     settings row.
+
+- Sept 19, 2026 (2): Tester broadcast default message, on request (was
+  NEXT CHANGE LIST items 2 & 3 in the original request) - two related
+  changes:
+
+  1. The suggested starting text for the admin Testers broadcast box
+     (previously DEFAULT_BROADCAST_MESSAGE, a hardcoded App.js constant
+     that silently reset after every send) is now admin-editable and
+     persisted, same pattern as the SMS templates/footer/manager phones:
+     a new admin-only settings.default_broadcast_message column, a new
+     "Save as Default" button next to Send (distinct from Send - one
+     persists, the other notifies), and the compose box now resets to
+     the SAVED value after a send instead of the hardcoded constant.
+  2. That default text (both the new migration's default and the
+     App.js fallback constant used before the admin-authenticated
+     settings fetch resolves) now points testers at the staging URL
+     instead of production, with explicit "this is a sandbox - feel
+     free to make bookings, add dogs, and try anything, none of it
+     touches real client data" framing, so testers stop creating real
+     test bookings in production now that a safe sandbox exists for
+     exactly that.
+
+  Tests: settings' Deno suite gained coverage for the new admin-only
+  column (present on an admin read, absent on a public read, rejects
+  blank, updates and trims); App's Jest suite gained a dedicated
+  "Save as Default" test and updated the existing pre-fill/send tests to
+  assert against the fetched saved default rather than the hardcoded
+  constant. 187 React + 152 Deno = 339/339 passing.
+
 - Sept 19, 2026: About Us merged into the landing page as a scrollable
   section instead of a separate page (Suggested by JK via Submit Idea:
   "Having to click a button to read more about you..."). The nav menu

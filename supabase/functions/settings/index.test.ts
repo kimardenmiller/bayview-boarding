@@ -20,6 +20,7 @@ const DEFAULT_ROW = {
   sms_footer: 'Reply STOP to opt out. Text Kim {primaryManagerPhone} & Estee {secondaryManagerPhone}.',
   primary_manager_phone: '4155550101',
   secondary_manager_phone: '4155550102',
+  default_broadcast_message: 'Please have a look at our staging site and tell us what you think!',
 };
 
 // Filters the stubbed row down to whatever `select=col1,col2` the real
@@ -100,6 +101,7 @@ Deno.test('a plain read requires no password (public) and never includes the man
     });
     assertEquals('primaryManagerPhone' in data, false);
     assertEquals('secondaryManagerPhone' in data, false);
+    assertEquals('defaultBroadcastMessage' in data, false);
     assertEquals(stub.calls[0].method, 'GET');
   } finally {
     stub.restore();
@@ -115,6 +117,7 @@ Deno.test('an admin-authenticated read (password, no updates) includes the manag
     assertEquals(data.primaryManagerPhone, '4155550101');
     assertEquals(data.secondaryManagerPhone, '4155550102');
     assertEquals(data.smsFooter, DEFAULT_ROW.sms_footer);
+    assertEquals(data.defaultBroadcastMessage, DEFAULT_ROW.default_broadcast_message);
   } finally {
     stub.restore();
   }
@@ -356,6 +359,8 @@ Deno.test('rejects a blank SMS template, without touching the database', async (
     assertEquals(pickup.status, 400);
     const footer = await handleRequest(postRequest({ password: ADMIN_PASSWORD, updates: { smsFooter: '   ' } }));
     assertEquals(footer.status, 400);
+    const broadcast = await handleRequest(postRequest({ password: ADMIN_PASSWORD, updates: { defaultBroadcastMessage: '   ' } }));
+    assertEquals(broadcast.status, 400);
     assertEquals(stub.calls.length, 0);
   } finally {
     stub.restore();
@@ -372,6 +377,21 @@ Deno.test('updates the shared SMS footer, trimming it', async () => {
     assertEquals(res.status, 200);
     const data = await res.json();
     assertEquals(data.smsFooter, 'New footer {primaryManagerPhone}');
+  } finally {
+    stub.restore();
+  }
+});
+
+Deno.test('updates the default broadcast message, trimming it', async () => {
+  const stub = stubSupabase();
+  try {
+    const res = await handleRequest(postRequest({
+      password: ADMIN_PASSWORD,
+      updates: { defaultBroadcastMessage: '  New default broadcast text  ' },
+    }));
+    assertEquals(res.status, 200);
+    const data = await res.json();
+    assertEquals(data.defaultBroadcastMessage, 'New default broadcast text');
   } finally {
     stub.restore();
   }
