@@ -2394,9 +2394,9 @@ describe('Admin — logged in', () => {
   test('shows the packing list actually fetched from settings, not the hardcoded fallback', async () => {
     await loginAsAdmin();
     const packingEditor = within(document.querySelector('.packing-editor'));
-    expect(packingEditor.getByText('Food')).toBeInTheDocument();
-    expect(packingEditor.getByText('Leash & doggy bags')).toBeInTheDocument();
-    expect(packingEditor.queryByText('Bed & favorite blanket')).not.toBeInTheDocument();
+    expect(packingEditor.getByDisplayValue('Food')).toBeInTheDocument();
+    expect(packingEditor.getByDisplayValue('Leash & doggy bags')).toBeInTheDocument();
+    expect(packingEditor.queryByDisplayValue('Bed & favorite blanket')).not.toBeInTheDocument();
   });
 
   test('adds a packing-list item, then saves it', async () => {
@@ -2404,7 +2404,7 @@ describe('Admin — logged in', () => {
     const packingEditor = within(document.querySelector('.packing-editor'));
     await userEvent.type(packingEditor.getByPlaceholderText('Item to bring'), 'Medication');
     fireEvent.click(packingEditor.getByText('Add'));
-    expect(packingEditor.getByText('Medication')).toBeInTheDocument();
+    expect(packingEditor.getByDisplayValue('Medication')).toBeInTheDocument();
 
     fireEvent.click(packingEditor.getByText('Save Packing List'));
     await waitFor(() => expect(supabase.functions.invoke).toHaveBeenCalledWith('settings', {
@@ -2416,7 +2416,33 @@ describe('Admin — logged in', () => {
     await loginAsAdmin();
     const packingEditor = within(document.querySelector('.packing-editor'));
     fireEvent.click(packingEditor.getAllByText('Remove')[0]);
-    expect(packingEditor.queryByText('Food')).not.toBeInTheDocument();
+    expect(packingEditor.queryByDisplayValue('Food')).not.toBeInTheDocument();
+  });
+
+  test('edits a packing-list item\'s text in place, then saves it', async () => {
+    await loginAsAdmin();
+    const packingEditor = within(document.querySelector('.packing-editor'));
+    fireEvent.change(packingEditor.getByDisplayValue('Food'), { target: { value: 'Dog food (2 days\' worth)' } });
+    fireEvent.click(packingEditor.getByText('Save Packing List'));
+    await waitFor(() => expect(supabase.functions.invoke).toHaveBeenCalledWith('settings', {
+      body: { password: 'correct-password', updates: { packingList: ["Dog food (2 days' worth)", 'Leash & doggy bags'] } },
+    }));
+  });
+
+  test('reorders packing-list items with Up/Down, disabled at each end, then saves the new order', async () => {
+    await loginAsAdmin();
+    const packingEditor = within(document.querySelector('.packing-editor'));
+    // 2 fixture items: Food (index 0), Leash & doggy bags (index 1).
+    expect(packingEditor.getByLabelText('Move item 1 up')).toBeDisabled();
+    expect(packingEditor.getByLabelText('Move item 2 down')).toBeDisabled();
+
+    fireEvent.click(packingEditor.getByLabelText('Move item 2 up'));
+    expect(packingEditor.getByDisplayValue('Leash & doggy bags')).toBeInTheDocument();
+
+    fireEvent.click(packingEditor.getByText('Save Packing List'));
+    await waitFor(() => expect(supabase.functions.invoke).toHaveBeenCalledWith('settings', {
+      body: { password: 'correct-password', updates: { packingList: ['Leash & doggy bags', 'Food'] } },
+    }));
   });
 
   test('shows the SMS templates actually fetched from settings, editable and independently saveable', async () => {

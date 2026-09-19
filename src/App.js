@@ -998,6 +998,24 @@ function AdminView({
     setEditPackingList(l => l.filter((_, i) => i !== index));
   }
 
+  // In-place text edit, plus Up/Down reordering (Sept 19, 2026, on
+  // request) - previously the only way to change an item's wording or
+  // position was Remove + re-Add at the end, losing its original spot
+  // in the list.
+  function editPackingItem(index, value) {
+    setEditPackingList(l => l.map((item, i) => (i === index ? value : item)));
+  }
+
+  function movePackingItem(index, direction) {
+    setEditPackingList(l => {
+      const target = index + direction;
+      if (target < 0 || target >= l.length) return l;
+      const next = [...l];
+      [next[index], next[target]] = [next[target], next[index]];
+      return next;
+    });
+  }
+
   async function updateFeedbackStatus(id, status) {
     setUpdatingFeedbackId(id);
     const { data, error: fnError } = await supabase.functions.invoke('feedback', {
@@ -1464,7 +1482,7 @@ function AdminView({
               rows={5}
               style={{ width: '100%', padding: '8px 10px', border: '1.5px solid #D5D9DE', borderRadius: 6, fontSize: '0.85rem', fontFamily: 'inherit' }}
             />
-            <div style={{ marginTop: 8, display: 'flex', gap: 8, alignItems: 'center' }}>
+            <div style={{ marginTop: 8, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
               <button
                 className="btn-primary"
                 style={{ padding: '6px 14px' }}
@@ -1473,14 +1491,6 @@ function AdminView({
               >
                 {broadcastStatus === 'sending' ? 'Sending...' : `Send to ${testers.filter(t => t.active).length} tester${testers.filter(t => t.active).length !== 1 ? 's' : ''}`}
               </button>
-              {broadcastStatus === 'sent' && broadcastResult && (
-                <span style={{ color: '#7D9B76', fontSize: '0.78rem' }}>
-                  ✓ Sent to {broadcastResult.sent}{broadcastResult.failed > 0 ? `, ${broadcastResult.failed} failed` : ''}
-                </span>
-              )}
-              {broadcastStatus === 'error' && <span className="field-error">Failed to send. Please try again.</span>}
-            </div>
-            <div style={{ marginTop: 8, display: 'flex', gap: 8, alignItems: 'center' }}>
               <button
                 className="btn-secondary"
                 style={{ padding: '6px 14px' }}
@@ -1489,6 +1499,12 @@ function AdminView({
               >
                 {broadcastSaveStatus === 'saving' ? 'Saving...' : 'Save as Default'}
               </button>
+              {broadcastStatus === 'sent' && broadcastResult && (
+                <span style={{ color: '#7D9B76', fontSize: '0.78rem' }}>
+                  ✓ Sent to {broadcastResult.sent}{broadcastResult.failed > 0 ? `, ${broadcastResult.failed} failed` : ''}
+                </span>
+              )}
+              {broadcastStatus === 'error' && <span className="field-error">Failed to send. Please try again.</span>}
               {broadcastSaveStatus === 'saved' && (
                 <span style={{ color: '#7D9B76', fontSize: '0.78rem' }}>✓ Saved as default</span>
               )}
@@ -1650,8 +1666,31 @@ function AdminView({
           <label className="field-label">Packing List (shown in reminder texts)</label>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 8 }}>
             {editPackingList.map((item, i) => (
-              <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: '0.85rem' }}>
-                <span style={{ flex: 1 }}>{item}</span>
+              <div key={i} style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: '0.85rem' }}>
+                <input
+                  aria-label={`Packing list item ${i + 1}`}
+                  value={item}
+                  onChange={e => editPackingItem(i, e.target.value)}
+                  style={{ flex: 1, padding: '4px 8px', border: '1.5px solid #D5D9DE', borderRadius: 6, fontSize: '0.85rem', fontFamily: 'inherit' }}
+                />
+                <button
+                  className="btn-secondary"
+                  aria-label={`Move item ${i + 1} up`}
+                  style={{ padding: '4px 8px', fontSize: '0.78rem' }}
+                  disabled={i === 0}
+                  onClick={() => movePackingItem(i, -1)}
+                >
+                  ↑
+                </button>
+                <button
+                  className="btn-secondary"
+                  aria-label={`Move item ${i + 1} down`}
+                  style={{ padding: '4px 8px', fontSize: '0.78rem' }}
+                  disabled={i === editPackingList.length - 1}
+                  onClick={() => movePackingItem(i, 1)}
+                >
+                  ↓
+                </button>
                 <button className="btn-secondary" style={{ padding: '4px 10px', fontSize: '0.78rem' }} onClick={() => removePackingItem(i)}>Remove</button>
               </div>
             ))}
@@ -1714,7 +1753,7 @@ function AdminView({
               Fill {'{primaryManagerPhone}'}/{'{secondaryManagerPhone}'} above and anywhere else used in a template - never shown to a public site visitor.
             </div>
             <div className="field-row">
-              <Field label="Primary Manager Phone">
+              <Field label="Manager 1 Phone">
                 <input
                   type="tel"
                   value={editPrimaryManagerPhone}
@@ -1722,7 +1761,7 @@ function AdminView({
                   placeholder="(415) 555-0100"
                 />
               </Field>
-              <Field label="Secondary Manager Phone">
+              <Field label="Manager 2 Phone">
                 <input
                   type="tel"
                   value={editSecondaryManagerPhone}

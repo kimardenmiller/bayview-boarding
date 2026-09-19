@@ -1,6 +1,6 @@
 BAYVIEW BOARDING — FIX LIST
 ============================
-Last updated: September 19, 2026 (2) (staging environment stood up; tester broadcast default message is now admin-editable and points at it)
+Last updated: September 19, 2026 (3) (Manager Phone labels shortened; packing list items are now editable/reorderable; Twilio debug key confirmed deleted)
 
 NEXT CHANGE LIST (v1.5)
 -----------------------
@@ -25,16 +25,7 @@ NEXT CHANGE LIST (v1.5)
       TWILIO_PHONE=... --project-ref uqmjudozfqlmiepnqodx`. The staging
       ADMIN_PASSWORD Claude generated was shared with Kim directly in
       chat (not written anywhere in this repo).
-2. SECURITY: confirm the Twilio debug API key(s) Kim has shared in chat
-   are actually deleted. Used again Sept 16, 2026 (a key named
-   "debug_attempt_3_persit", possibly a freshly-created one - SID shared
-   didn't match the one on file from Sept 15) to confirm A2P finally
-   APPROVED via the API - see TWILIO STATUS. That was the whole reason
-   this key was being kept live; now that the actual goal (approval) is
-   confirmed, Kim said he'd delete it (Twilio Console > Account > API
-   keys & tokens) - leaving this open only until that's confirmed done,
-   since it isn't something Claude can verify or do on his behalf.
-3. STANDING: check the "Submit Idea" queue (admin panel > 💡 Ideas & Bugs)
+2. STANDING: check the "Submit Idea" queue (admin panel > 💡 Ideas & Bugs)
    at the start of any work session in this project, not just when Kim
    flags something - this is the actual mechanism for surfacing tester
    feedback (deliberately not SMS/email, see Sept 16 (8) below). Act on
@@ -92,6 +83,24 @@ TWILIO STATUS
 
 COMPLETED
 ---------
+- Sept 19, 2026 (3): Small admin-panel round, on request:
+  1. "Primary Manager Phone"/"Secondary Manager Phone" field labels
+     shortened to "Manager 1 Phone"/"Manager 2 Phone" (display labels
+     only - the underlying settings columns/{primaryManagerPhone}/
+     {secondaryManagerPhone} placeholders are unchanged).
+  2. Packing List items are now editable in place (a text input instead
+     of static text) and reorderable via Up/Down buttons (disabled at
+     each end of the list) - previously the only way to change an
+     item's wording or position was Remove + re-Add at the end.
+  3. Testers panel: "Save as Default" moved onto the same line as
+     "Send to N testers" instead of its own row below.
+  Tests: 2 new packing-list tests (in-place edit, reorder+save); updated
+  2 existing packing-list tests to query by display value now that items
+  are inputs, not static text. 189/189 Jest passing.
+- Sept 19, 2026 (3): Kim confirmed the Twilio debug API key is actually
+  deleted (was NEXT CHANGE LIST item 2) - it was only ever kept live to
+  confirm A2P approval via the API (see TWILIO STATUS), which has been
+  done since Sept 16.
 - Sept 19, 2026 (2): Staging environment (was NEXT CHANGE LIST item 3) -
   same repo, one Supabase project's worth of extra infrastructure, no
   second codebase to maintain:

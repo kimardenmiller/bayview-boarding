@@ -99,8 +99,11 @@ Kim Miller and Estee Fletter at 210 Bayview Drive, San Rafael, CA.
   "📢 Testers" section (Sept 17 — see testers below) to maintain a
   tester list and broadcast a personally-greeted SMS to all of them,
   then day rate/discount/holiday/vet-list/packing-list/SMS-template
-  settings (the SMS Message Templates section now also holds the Text
-  Message Footer editor and a "Manager Phone Numbers" editor for
+  settings (the packing list's items are editable in place and
+  reorderable via Up/Down buttons, not just add/remove - Sept 19, 2026;
+  the SMS Message Templates section now also holds the Text
+  Message Footer editor and a "Manager 1/2 Phone" editor - relabeled
+  Sept 19, 2026 from "Primary/Secondary Manager Phone" - for
   {primaryManagerPhone}/{secondaryManagerPhone} - renamed Sept 18, 2026
   from {kimPhone}/{esteePhone} - directly below it, both admin-only:
   see Data model's `settings` entry), both feedback/testers moved to the
@@ -309,7 +312,7 @@ to send without them.
 - src/App.js — main app
 - src/settings.js — all configurable values (rates, vets, messages, packing list)
 - src/waiver.js — full waiver text
-- src/App.test.js — 187 passing tests (TDD), Supabase mocked via src/__mocks__/supabase.js
+- src/App.test.js — 189 passing tests (TDD), Supabase mocked via src/__mocks__/supabase.js
 - src/supabase.js — creates the Supabase client from REACT_APP_SUPABASE_URL/_KEY (falling back to production's own public values) - see Staging environment above for how the staging build overrides these
 - supabase/functions/send-contact/index.ts — public Contact Us form handler: relays name/email-or-phone/message to Kim & Estee by SMS (reuses KIM_PHONE/ESTEE_PHONE). Deployed normally (no --no-verify-jwt) since it's called via the Supabase JS client like settings/lookup-client/submit-booking
 - supabase/functions/feedback/index.ts — "Submit Idea": public submit (no password, also texts Kim & Estee) + admin list/status-update/delete (password) for the feedback queue
@@ -354,15 +357,12 @@ to send without them.
   the cleanup actually took.
 
 ## Current priorities (v1.5)
-See FIXES.txt for the live list. As of Sept 18, 2026 the top item is
-action Kim needs to take, not code: Admin > SMS Message Templates >
-"Manager Phone Numbers" has 2 blank fields (Primary/Kim, Secondary/
-Estee) that need the real numbers filled in and saved - until then the
-shared Text Message Footer goes out on every real text with an empty
-gap where each number belongs. Beyond that, FIXES.txt's own backlog
-(confirming the debug Twilio API key is actually deleted, and setting
-up a staging environment next time a DB/RLS change is made against
-production).
+See FIXES.txt for the live list. As of Sept 19, 2026 (3) the open items
+are both action Kim needs to take, not code: the Manager 2 Phone (Estee)
+value looks malformed (missing its opening parenthesis) and needs
+confirming/correcting in Admin, and the staging environment (see
+Staging environment above) has no Twilio credentials set yet, so no
+real/test SMS goes out from there until some are added.
 
 ## Rules
 - Always run tests before committing (npm test -- --watchAll=false)
