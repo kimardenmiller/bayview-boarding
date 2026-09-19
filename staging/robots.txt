@@ -1,3 +1,13 @@
 # https://www.robotstxt.org/robotstxt.html
+#
+# Note (Sept 19, 2026): per the robots.txt spec, crawlers only ever
+# check this file at the true domain root (kimardenmiller.github.io/
+# robots.txt), never at a subpath - since this site is hosted at
+# kimardenmiller.github.io/bayview-boarding/ (not a custom domain), this
+# copy is not actually discovered/honored by crawlers. Kept here anyway
+# since it's still the conventional place to look, and for the Sitemap
+# reference below (submittable directly to Search Console regardless).
 User-agent: *
 Disallow:
+
+Sitemap: https://kimardenmiller.github.io/bayview-boarding/sitemap.xml
