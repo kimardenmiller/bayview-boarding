@@ -1,14 +1,14 @@
 {
   "files": {
     "main.css": "/bayview-boarding/static/css/main.e26d0ba0.css",
-    "main.js": "/bayview-boarding/static/js/main.61f430e2.js",
+    "main.js": "/bayview-boarding/static/js/main.86929654.js",
     "static/media/hero-dog.jpg": "/bayview-boarding/static/media/hero-dog.ab3873eaabe0371f06ef.jpg",
     "index.html": "/bayview-boarding/index.html",
     "main.e26d0ba0.css.map": "/bayview-boarding/static/css/main.e26d0ba0.css.map",
-    "main.61f430e2.js.map": "/bayview-boarding/static/js/main.61f430e2.js.map"
+    "main.86929654.js.map": "/bayview-boarding/static/js/main.86929654.js.map"
   },
   "entrypoints": [
     "static/css/main.e26d0ba0.css",
-    "static/js/main.61f430e2.js"
+    "static/js/main.86929654.js"
   ]
 }
