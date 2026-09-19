@@ -1,11 +1,11 @@
 BAYVIEW BOARDING — FIX LIST
 ============================
-Last updated: September 19, 2026 (3) (Manager Phone labels shortened; packing list items are now editable/reorderable; Twilio debug key confirmed deleted)
+Last updated: September 19, 2026 (4) (SEO basics pass + Google Analytics wired up, production only)
 
 NEXT CHANGE LIST (v1.5)
 -----------------------
 1. ACTION NEEDED FROM KIM:
-   a. The Secondary Manager Phone (Estee) saved in Admin > SMS Message
+   a. The Manager 2 Phone (Estee) saved in Admin > SMS Message
       Templates > "Manager Phone Numbers" looks malformed - it's missing
       its opening parenthesis (reads like "510) 432-9791" instead of
       "(510) 432-9791"), confirmed via a read-only query Sept 19, 2026.
@@ -83,6 +83,45 @@ TWILIO STATUS
 
 COMPLETED
 ---------
+- Sept 19, 2026 (4): SEO basics + Google Analytics, on request:
+  1. Google Analytics 4 wired up via gtag.js (Measurement ID
+     G-160YK5FB7D, Kim's own "Bayview Boarding" GA account/property,
+     separate from his unrelated "Manifest" account) - production only.
+     Staging never fires it (src/index.js checks process.env.PUBLIC_URL
+     for "/staging" at runtime, the one signal available since public/
+     index.html is a single template shared by both builds), so tester
+     traffic/Claude's own verification loads can't pollute real
+     analytics. Staging gets `<meta name="robots" content="noindex,
+     nofollow">` instead, injected the same way, so it stays out of
+     search results entirely.
+  2. Standard on-page SEO: a real meta description, a more descriptive
+     title ("Bayview Boarding | Dog Boarding in San Rafael, CA"),
+     Open Graph + Twitter card tags (using one of the About page's own
+     photos as the share image), a self-referencing canonical URL, and
+     public/sitemap.xml (necessarily just the one URL - this is a
+     client-side SPA with no server-side routing, so there are no other
+     distinct crawlable paths to list). public/manifest.json's name/
+     theme_color were also fixed - still unedited Create-React-App
+     boilerplate ("React App"/"Create React App Sample", black theme)
+     since the project's creation, visible if anyone ever "Add to Home
+     Screen"'d the site.
+  3. Known limitation, flagged rather than silently left: public/
+     robots.txt has always lived at a path GitHub Pages crawlers never
+     actually check - per spec, robots.txt is only honored at the true
+     domain root (kimardenmiller.github.io/robots.txt), and this site
+     is hosted at a subpath of that shared domain
+     (.../bayview-boarding/), not a custom domain. Fixing this for real
+     would mean a second, separate "user site" repository
+     (kimardenmiller.github.io itself) - out of scope here, and not
+     worth it given the file's only rule is "allow everything" anyway
+     (the default even with no file at all). Left in place for
+     convention/its Sitemap: reference, which can still be submitted to
+     Search Console directly regardless.
+  This is a client-side-only React SPA with no server-side rendering -
+  true SEO here is inherently limited (a crawler that doesn't execute
+  JS sees only an empty shell); this round covers the standard
+  best-practice pass, not a change to that underlying constraint.
+
 - Sept 19, 2026 (3): Small admin-panel round, on request:
   1. "Primary Manager Phone"/"Secondary Manager Phone" field labels
      shortened to "Manager 1 Phone"/"Manager 2 Phone" (display labels

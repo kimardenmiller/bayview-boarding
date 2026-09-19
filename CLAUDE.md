@@ -308,12 +308,40 @@ Twilio credentials set yet (see FIXES.txt item 1b) - the booking flow
 still works fully either way, only the confirmation SMS silently fails
 to send without them.
 
+## SEO & Analytics (Sept 19, 2026)
+Google Analytics 4 (gtag.js, Measurement ID G-160YK5FB7D - Kim's own
+"Bayview Boarding" GA account, separate from his unrelated "Manifest"
+one) is wired up in src/index.js, gated on `process.env.PUBLIC_URL`
+containing "/staging" - fires only on production, so tester/staging
+traffic never pollutes real analytics; staging gets a runtime-injected
+`<meta name="robots" content="noindex, nofollow">` instead (same file,
+same gating check), keeping it out of search results entirely. This
+lives in JS rather than a static `<script>` in public/index.html
+because that file is a single template shared by both the production
+and staging builds, with no way to leave a tag out on its own.
+
+Standard on-page SEO otherwise: a real meta description, Open Graph/
+Twitter card tags, a self-referencing canonical URL (all in public/
+index.html, using %PUBLIC_URL% so each build points at itself), and
+public/sitemap.xml - necessarily just the one URL, since this is a
+client-side SPA with no server-side routing and so no other distinct
+crawlable paths exist. public/robots.txt lives at a path GitHub Pages
+crawlers never actually check (robots.txt is only honored at the true
+domain root, kimardenmiller.github.io/robots.txt, and this site is at a
+subpath of that shared domain, not a custom domain) - kept anyway for
+convention and its Sitemap: reference, submittable to Search Console
+directly regardless. This is a client-side-only SPA with no
+server-side rendering, so a crawler that doesn't execute JS still sees
+only an empty shell - true SEO here is inherently limited by that, not
+something this pass changes.
+
 ## Key files
 - src/App.js — main app
 - src/settings.js — all configurable values (rates, vets, messages, packing list)
 - src/waiver.js — full waiver text
 - src/App.test.js — 189 passing tests (TDD), Supabase mocked via src/__mocks__/supabase.js
 - src/supabase.js — creates the Supabase client from REACT_APP_SUPABASE_URL/_KEY (falling back to production's own public values) - see Staging environment above for how the staging build overrides these
+- src/index.js — app entry point; also where Google Analytics loads (production only) and staging's noindex meta tag gets injected - see SEO & Analytics above
 - supabase/functions/send-contact/index.ts — public Contact Us form handler: relays name/email-or-phone/message to Kim & Estee by SMS (reuses KIM_PHONE/ESTEE_PHONE). Deployed normally (no --no-verify-jwt) since it's called via the Supabase JS client like settings/lookup-client/submit-booking
 - supabase/functions/feedback/index.ts — "Submit Idea": public submit (no password, also texts Kim & Estee) + admin list/status-update/delete (password) for the feedback queue
 - supabase/functions/testers/index.ts — tester broadcast list: entirely admin-password-gated list/add/remove/notify (no public branch at all); notify greets each active tester by their own first name
