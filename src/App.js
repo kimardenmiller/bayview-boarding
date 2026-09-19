@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { WAIVER_SECTIONS } from './waiver';
 import { supabase } from './supabase';
 import { SETTINGS } from './settings';
@@ -1741,20 +1741,35 @@ function AdminView({
   );
 }
 
-function Landing({ onStart, onLearnMore }) {
+// The About content used to live on its own separate page, one tap away
+// via "Learn more" - a real tester ("JK") flagged that extra tap as
+// unnecessary friction (Submit Idea, Sept 19, 2026): "I should be able
+// to scroll down and see everything you currently have on the About Us
+// page." Landing now renders its own hero, then AboutContent directly
+// below it in normal page flow - "Learn more" (and the nav menu's
+// "About Us", from anywhere else in the app - see App's scrollToAbout)
+// scrolls to it instead of navigating to a separate screen.
+function Landing({ onStart, onLearnMore, aboutSectionRef }) {
   return (
-    <div className="landing">
-      <img className="landing-img" src={heroDog} alt="A happy dog boarding with Bayview Boarding on a Marin hillside trail" />
-      <div className="landing-overlay">
-        <div className="landing-top">
-          <h1 className="landing-title landing-title--link" onClick={onLearnMore}>Bayview Boarding</h1>
-        </div>
-        <div className="landing-bottom">
-          <button className="landing-cta" onClick={onStart}>Book My Stay</button>
-          <button className="landing-learn-more" onClick={onLearnMore}>New? Learn more →</button>
+    <>
+      <div className="landing">
+        <img className="landing-img" src={heroDog} alt="A happy dog boarding with Bayview Boarding on a Marin hillside trail" />
+        <div className="landing-overlay">
+          <div className="landing-top">
+            <h1 className="landing-title landing-title--link" onClick={onLearnMore}>Bayview Boarding</h1>
+          </div>
+          <div className="landing-bottom">
+            <button className="landing-cta" onClick={onStart}>Book My Stay</button>
+            <button className="landing-learn-more" onClick={onLearnMore}>New? Learn more →</button>
+          </div>
         </div>
       </div>
-    </div>
+      <div className="about" ref={aboutSectionRef}>
+        <div className="about-content">
+          <AboutContent onStart={onStart} />
+        </div>
+      </div>
+    </>
   );
 }
 
@@ -1804,22 +1819,16 @@ const ABOUT_MAP_COORDS = '37.980802,-122.484319';
 const ABOUT_MAP_EMBED_URL = `https://maps.google.com/maps?q=${ABOUT_MAP_COORDS}&z=16&output=embed`;
 const ABOUT_MAP_LINK_URL = 'https://maps.app.goo.gl/xWg4sCFVpevDCKd16';
 
-// "Learn more about us" (content adapted from the Bayview Boarding Rover
-// profile) - a real, underlined link on the landing page itself (not the
-// decorative title text, which has no link affordance and nobody would
-// think to tap) so first-time visitors can see who they're trusting with
-// their dog BEFORE they commit to starting the booking flow, rather than
-// after.
-function AboutUs({ onBack, onStart }) {
+// Content adapted from the Bayview Boarding Rover profile - embedded
+// directly on the Landing page (see Landing above) rather than behind
+// its own "Learn more" tap, so first-time visitors can see who they're
+// trusting with their dog just by scrolling, before they commit to
+// starting the booking flow.
+function AboutContent({ onStart }) {
   return (
-    <div className="about">
-      <div className="about-hero">
-        <img className="about-hero-img" src={heroDog} alt="A dog on a hike with Bayview Boarding" />
-        <button className="about-back" onClick={onBack}>← Back</button>
-      </div>
-      <div className="about-content">
-        <h1 className="about-title about-title--center">Dog Paradise <br />Above <br />Loch Lomond</h1>
-        <p>
+    <>
+      <h1 className="about-title about-title--center">Dog Paradise <br />Above <br />Loch Lomond</h1>
+      <p>
           We specialize in providing a consistent family experience for your
           dog to come back to time and again. Our home sits on the China Camp
           State Park trailhead, a favorite location for dogs to take every
@@ -1917,17 +1926,15 @@ function AboutUs({ onBack, onStart }) {
           ))}
         </div>
 
-        <button className="landing-cta" onClick={onStart}>Book My Stay</button>
-      </div>
-    </div>
+      <button className="landing-cta" onClick={onStart}>Book My Stay</button>
+    </>
   );
 }
 
 // Hamburger nav - one instance, rendered by App itself on every screen
-// (landing, about, contact, and the booking flow), rather than duplicated
-// per page. Fixed-position, dark translucent pill (same treatment as
-// AboutUs's "← Back" button) so it reads over both the hero photo and
-// plain white pages without needing per-page theming.
+// (landing+about, contact, and the booking flow), rather than duplicated
+// per page. Fixed-position, dark translucent pill so it reads over both
+// the hero photo and plain white pages without needing per-page theming.
 // Admin is back in this menu (Sept 2026), a deliberate reversal of the
 // earlier "no visible Admin entry point" decision (v1.5.13) per explicit
 // request - it's still fully password-gated server-side (see AdminView),
@@ -2132,7 +2139,6 @@ function SubmitIdea({ onBack }) {
 
 export default function App() {
   const [showLanding, setShowLanding] = useState(true);
-  const [showAbout, setShowAbout] = useState(false);
   const [showContact, setShowContact] = useState(false);
   const [showSubmitIdea, setShowSubmitIdea] = useState(false);
   const [step, setStep] = useState(0);
@@ -2285,30 +2291,49 @@ export default function App() {
   // Mutually-exclusive top-level views. Each nav function clears the
   // others explicitly rather than relying on ordering, so there's no way
   // to land on two views at once regardless of which one was previously
-  // showing.
-  function goToLanding() { setShowLanding(true); setShowAbout(false); setShowContact(false); setShowSubmitIdea(false); }
-  function goToAbout() { setShowAbout(true); setShowLanding(false); setShowContact(false); setShowSubmitIdea(false); }
-  function goToContact() { setShowContact(true); setShowLanding(false); setShowAbout(false); setShowSubmitIdea(false); }
-  function goToSubmitIdea() { setShowSubmitIdea(true); setShowLanding(false); setShowAbout(false); setShowContact(false); }
-  function goToBooking() { setShowLanding(false); setShowAbout(false); setShowContact(false); setShowSubmitIdea(false); }
+  // showing. About is no longer its own view (see Landing/AboutContent
+  // above) - scrollToAbout below is what "About Us" and "Learn more"
+  // both call instead of a goToAbout nav function.
+  function goToLanding() { setShowLanding(true); setShowContact(false); setShowSubmitIdea(false); }
+  function goToContact() { setShowContact(true); setShowLanding(false); setShowSubmitIdea(false); }
+  function goToSubmitIdea() { setShowSubmitIdea(true); setShowLanding(false); setShowContact(false); }
+  function goToBooking() { setShowLanding(false); setShowContact(false); setShowSubmitIdea(false); }
+
+  // Scrolls to the embedded About section on the Landing page - if
+  // Landing isn't currently showing, navigates there first and scrolls
+  // once it's mounted (see the effect below, keyed off pendingScrollToAbout).
+  const aboutSectionRef = useRef(null);
+  const [pendingScrollToAbout, setPendingScrollToAbout] = useState(false);
+  function scrollToAbout() {
+    if (showLanding && aboutSectionRef.current) {
+      aboutSectionRef.current.scrollIntoView({ behavior: 'smooth' });
+    } else {
+      goToLanding();
+      setPendingScrollToAbout(true);
+    }
+  }
+  useEffect(() => {
+    if (showLanding && pendingScrollToAbout && aboutSectionRef.current) {
+      aboutSectionRef.current.scrollIntoView({ behavior: 'smooth' });
+      setPendingScrollToAbout(false);
+    }
+  }, [showLanding, pendingScrollToAbout]);
 
   const navMenu = (
-    <NavMenu onAbout={goToAbout} onContact={goToContact} onSubmitIdea={goToSubmitIdea} onBookStay={goToBooking} onAdmin={() => setShowAdmin(true)} />
+    <NavMenu onAbout={scrollToAbout} onContact={goToContact} onSubmitIdea={goToSubmitIdea} onBookStay={goToBooking} onAdmin={() => setShowAdmin(true)} />
   );
 
   let pageContent;
-  if (showAbout) {
-    pageContent = <AboutUs onBack={goToLanding} onStart={goToBooking} />;
-  } else if (showContact) {
+  if (showContact) {
     pageContent = <ContactUs onBack={goToLanding} />;
   } else if (showSubmitIdea) {
     pageContent = <SubmitIdea onBack={goToLanding} />;
   } else if (showLanding) {
-    pageContent = <Landing onStart={goToBooking} onLearnMore={goToAbout} />;
+    pageContent = <Landing onStart={goToBooking} onLearnMore={scrollToAbout} aboutSectionRef={aboutSectionRef} />;
   } else {
     pageContent = (
       <>
-        <Header onTitleClick={goToAbout} />
+        <Header onTitleClick={scrollToAbout} />
         <main className="main">
           {!submitted ? (
             <>

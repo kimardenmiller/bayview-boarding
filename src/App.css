@@ -37,9 +37,6 @@
 .landing-learn-more:hover { opacity: 0.85; }
 
 .about { min-height: 100vh; min-height: 100dvh; background: #fff; }
-.about-hero { position: relative; height: 34vh; min-height: 200px; overflow: hidden; }
-.about-hero-img { width: 100%; height: 100%; object-fit: cover; object-position: center 55%; display: block; }
-.about-back { position: absolute; top: 16px; left: 16px; background: rgba(28,40,51,.55); color: #fff; border: none; padding: 8px 14px; border-radius: 20px; font-size: 0.85rem; cursor: pointer; }
 .about-content { max-width: 560px; margin: 0 auto; padding: 28px 20px 48px; }
 .about-title { font-family: 'Playfair Display', serif; font-size: 1.7rem; font-weight: 600; color: #2C3E50; margin-bottom: 16px; }
 .about-title--center { text-align: center; }

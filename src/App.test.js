@@ -5,6 +5,12 @@ import { supabase } from './supabase';
 
 jest.mock('./supabase');
 
+// jsdom doesn't implement scrollIntoView at all (Sept 19, 2026 - needed
+// once "Learn more"/nav menu "About Us" started calling it directly, see
+// scrollToAbout in App.js) - a no-op stub is enough for tests, which only
+// care that it was called, never about actual scroll position.
+Element.prototype.scrollIntoView = jest.fn();
+
 // The booking flow now calls three different Edge Functions through the
 // same supabase.functions.invoke() - lookup-client (StepOwner's manual
 // button + StepDog's on-mount check), submit-booking (final submit), and
@@ -144,7 +150,7 @@ function daysFromToday(offset) {
 // without also filling and leaving it.
 async function goToOwnerStep() {
   render(<App />);
-  fireEvent.click(screen.getByText('Book My Stay'));
+  fireEvent.click(screen.getAllByText('Book My Stay')[0]);
   await screen.findByText('Owner Information');
 }
 
@@ -158,7 +164,7 @@ async function goToOwnerStep() {
 // numberOfDogs.
 async function fillStep1(phone = '4155550100', name = 'Kim Miller', email = 'kim@test.com', numberOfDogs = 1) {
   render(<App />);
-  fireEvent.click(screen.getByText('Book My Stay'));
+  fireEvent.click(screen.getAllByText('Book My Stay')[0]);
   await userEvent.type(screen.getByPlaceholderText('(415) 555-0100'), phone);
   await userEvent.type(screen.getByPlaceholderText('Jane Smith'), name);
   await userEvent.type(screen.getByPlaceholderText('jane@email.com'), email);
@@ -731,27 +737,28 @@ describe('Live settings (day rate, discount %, holiday %, vet list)', () => {
   });
 });
 
-describe('Landing — Learn more about us', () => {
-  test('a real link, separate from the title, takes a first-timer to the About page', async () => {
+describe('Landing — About Us, embedded on the home page', () => {
+  // A real tester ("JK") flagged the separate About page as unnecessary
+  // friction (Submit Idea, Sept 19, 2026) - it's now embedded directly
+  // below the hero in normal page flow, so every test here can just
+  // render and read the content straight off the landing page, no
+  // navigation/await needed first.
+  test('the About content is right there on first render, no click needed', () => {
     render(<App />);
     expect(screen.getByText('Bayview Boarding')).toBeInTheDocument();
-    fireEvent.click(screen.getByText(/Learn more/));
-    expect(await screen.findByText('Dog Paradise Above Loch Lomond')).toBeInTheDocument();
+    expect(screen.getByText('Dog Paradise Above Loch Lomond')).toBeInTheDocument();
   });
 
-  test('Back from the About page returns to the landing page', async () => {
+  test('"Learn more" scrolls to the About section instead of navigating to a separate page', () => {
     render(<App />);
     fireEvent.click(screen.getByText(/Learn more/));
-    await screen.findByText('Dog Paradise Above Loch Lomond');
-    fireEvent.click(screen.getByText('← Back'));
-    expect(await screen.findByText('Book My Stay')).toBeInTheDocument();
-    expect(screen.queryByText('Dog Paradise Above Loch Lomond')).not.toBeInTheDocument();
+    expect(Element.prototype.scrollIntoView).toHaveBeenCalled();
+    // still the same page - the hero's own CTA is still right there
+    expect(screen.getByText('New? Learn more →')).toBeInTheDocument();
   });
 
-  test('About page shows home characteristics and the typical-day/safety sections', async () => {
+  test('About section shows home characteristics and the typical-day/safety sections', () => {
     render(<App />);
-    fireEvent.click(screen.getByText(/Learn more/));
-    await screen.findByText('Dog Paradise Above Loch Lomond');
     expect(screen.getByText('Has a fenced yard')).toBeInTheDocument();
     expect(screen.getByText('Potty breaks every 0-2 hours')).toBeInTheDocument();
     expect(screen.getByText('Safety, trust & environment')).toBeInTheDocument();
@@ -759,10 +766,8 @@ describe('Landing — Learn more about us', () => {
     expect(screen.getByText(/1,500-acre China Camp State Park/)).toBeInTheDocument();
   });
 
-  test('About page shows an approximate-location map, not the exact address', async () => {
+  test('About section shows an approximate-location map, not the exact address', () => {
     render(<App />);
-    fireEvent.click(screen.getByText(/Learn more/));
-    await screen.findByText('Dog Paradise Above Loch Lomond');
     expect(screen.getByText(/not our exact address/)).toBeInTheDocument();
     const map = screen.getByTitle(/Approximate location/);
     expect(map.tagName).toBe('IFRAME');
@@ -772,10 +777,8 @@ describe('Landing — Learn more about us', () => {
     expect(screen.queryByText(/210 Bayview Drive/)).not.toBeInTheDocument();
   });
 
-  test('clicking anywhere on the map opens Google Maps in a new tab, at the pinned spot', async () => {
+  test('clicking anywhere on the map opens Google Maps in a new tab, at the pinned spot', () => {
     render(<App />);
-    fireEvent.click(screen.getByText(/Learn more/));
-    await screen.findByText('Dog Paradise Above Loch Lomond');
     const overlay = document.querySelector('.about-map-overlay');
     expect(overlay.tagName).toBe('A');
     expect(overlay).toHaveAttribute('target', '_blank');
@@ -783,10 +786,8 @@ describe('Landing — Learn more about us', () => {
     expect(overlay.getAttribute('href')).toBe('https://maps.app.goo.gl/xWg4sCFVpevDCKd16');
   });
 
-  test('About page shows a Schedule section, written in "we" not "I"', async () => {
+  test('About section shows a Schedule section, written in "we" not "I"', () => {
     render(<App />);
-    fireEvent.click(screen.getByText(/Learn more/));
-    await screen.findByText('Dog Paradise Above Loch Lomond');
     expect(screen.getByText('Schedule')).toBeInTheDocument();
     expect(screen.getByText(/We are home throughout the week, early risers/)).toBeInTheDocument();
     // the old single-host, first-person phrasing should be gone entirely
@@ -794,10 +795,9 @@ describe('Landing — Learn more about us', () => {
     expect(screen.queryByText(/We only take males that have been neutered/)).not.toBeInTheDocument();
   });
 
-  test('the title is centered and a photo gallery renders in numbered order', async () => {
+  test('the title is centered and a photo gallery renders in numbered order', () => {
     render(<App />);
-    fireEvent.click(screen.getByText(/Learn more/));
-    const title = await screen.findByText('Dog Paradise Above Loch Lomond');
+    const title = screen.getByText('Dog Paradise Above Loch Lomond');
     expect(title).toHaveClass('about-title--center');
     const photos = document.querySelectorAll('.about-gallery-img');
     expect(photos.length).toBe(6);
@@ -805,10 +805,8 @@ describe('Landing — Learn more about us', () => {
     expect(photos[5].src).toContain('6-china-camp-bay-line');
   });
 
-  test('About page shows the Rover rating as a link to the Rover reviews, with dated review quotes', async () => {
+  test('About section shows the Rover rating as a link to the Rover reviews, with dated review quotes', () => {
     render(<App />);
-    fireEvent.click(screen.getByText(/Learn more/));
-    await screen.findByText('Dog Paradise Above Loch Lomond');
     const ratingLink = screen.getByText('21 ratings on Rover');
     expect(ratingLink.tagName).toBe('A');
     expect(ratingLink).toHaveAttribute(
@@ -826,24 +824,26 @@ describe('Landing — Learn more about us', () => {
     starRows.forEach(row => expect(row.textContent).toBe('★★★★★'));
   });
 
-  test('Book My Stay on the About page starts the booking flow directly', async () => {
+  test('the "Book My Stay" button at the bottom of the About section starts the booking flow directly (JK\'s suggestion)', async () => {
     render(<App />);
-    fireEvent.click(screen.getByText(/Learn more/));
-    await screen.findByText('Dog Paradise Above Loch Lomond');
-    fireEvent.click(screen.getAllByText('Book My Stay')[0]);
+    // [0] is the hero's own CTA - this is the 2nd one, at the end of the
+    // embedded About content itself.
+    fireEvent.click(screen.getAllByText('Book My Stay')[1]);
     expect(await screen.findByText('Owner Information')).toBeInTheDocument();
   });
 
-  test('clicking the "Bayview Boarding" landing title also goes to the About page', async () => {
+  test('clicking the "Bayview Boarding" landing title scrolls to the About section', () => {
     render(<App />);
     fireEvent.click(screen.getByText('Bayview Boarding'));
-    expect(await screen.findByText('Dog Paradise Above Loch Lomond')).toBeInTheDocument();
+    expect(Element.prototype.scrollIntoView).toHaveBeenCalled();
   });
 
-  test('clicking the "Bayview Boarding" header wordmark mid-booking goes to the About page', async () => {
+  test('clicking the "Bayview Boarding" header wordmark mid-booking returns to the landing page and scrolls to the About section', async () => {
     await fillStep1();
     fireEvent.click(screen.getByText('Bayview Boarding'));
+    // back on the landing page - the About content is there to scroll to
     expect(await screen.findByText('Dog Paradise Above Loch Lomond')).toBeInTheDocument();
+    expect(Element.prototype.scrollIntoView).toHaveBeenCalled();
   });
 });
 
@@ -878,11 +878,12 @@ describe('Nav menu (hamburger)', () => {
     expect(screen.getByText('Bayview Boarding')).toBeInTheDocument();
   });
 
-  test('"About Us" opens the About page', async () => {
+  test('"About Us" scrolls to the embedded About section on the landing page', async () => {
     render(<App />);
     openMenu();
     fireEvent.click(screen.getByText('About Us'));
-    expect(await screen.findByText('Dog Paradise Above Loch Lomond')).toBeInTheDocument();
+    expect(Element.prototype.scrollIntoView).toHaveBeenCalled();
+    expect(screen.getByText('Dog Paradise Above Loch Lomond')).toBeInTheDocument();
   });
 
   test('"Contact Us" opens the contact form', async () => {
@@ -906,10 +907,9 @@ describe('Nav menu (hamburger)', () => {
     expect(await screen.findByText('Admin Access')).toBeInTheDocument();
   });
 
-  test('is available from the About page and the Contact page too, not just the landing page', async () => {
+  test('is available on the landing page (About included, now embedded there) and the Contact page too', async () => {
     render(<App />);
-    fireEvent.click(screen.getByText(/Learn more/));
-    await screen.findByText('Dog Paradise Above Loch Lomond');
+    expect(screen.getByText('Dog Paradise Above Loch Lomond')).toBeInTheDocument();
     expect(screen.getByLabelText('Open menu')).toBeInTheDocument();
     openMenu();
     fireEvent.click(screen.getByText('Contact Us'));
@@ -971,7 +971,7 @@ describe('Contact Us', () => {
     goToContact();
     await screen.findByText('Contact Us', { selector: 'h1' });
     fireEvent.click(screen.getByText('← Back'));
-    expect(await screen.findByText('Book My Stay')).toBeInTheDocument();
+    expect(await screen.findAllByText('Book My Stay')).toHaveLength(2);
   });
 });
 
@@ -1033,7 +1033,7 @@ describe('Submit Idea', () => {
     goToSubmitIdea();
     await screen.findByText('Submit Idea', { selector: 'h1' });
     fireEvent.click(screen.getByText('← Back'));
-    expect(await screen.findByText('Book My Stay')).toBeInTheDocument();
+    expect(await screen.findAllByText('Book My Stay')).toHaveLength(2);
   });
 });
 
@@ -1534,7 +1534,7 @@ describe('Step 3 — Stay Dates', () => {
 
   test('estimated cost factors in the multi-dog discount set on the owner page', async () => {
     render(<App />);
-    fireEvent.click(screen.getByText('Book My Stay'));
+    fireEvent.click(screen.getAllByText('Book My Stay')[0]);
     await userEvent.type(screen.getByPlaceholderText('(415) 555-0100'), '4155550100');
     await userEvent.type(screen.getByPlaceholderText('Jane Smith'), 'Kim Miller');
     await userEvent.type(screen.getByPlaceholderText('jane@email.com'), 'kim@test.com');
@@ -1682,7 +1682,7 @@ describe('Step 5 — Signature', () => {
 
   test('a 2-dog booking submits both dogs\' data, each from its own page', async () => {
     render(<App />);
-    fireEvent.click(screen.getByText('Book My Stay'));
+    fireEvent.click(screen.getAllByText('Book My Stay')[0]);
     await userEvent.type(screen.getByPlaceholderText('(415) 555-0100'), '4155550100');
     await userEvent.type(screen.getByPlaceholderText('Jane Smith'), 'Kim Miller');
     await userEvent.type(screen.getByPlaceholderText('jane@email.com'), 'kim@test.com');
@@ -1759,7 +1759,7 @@ describe('Admin login', () => {
   test('Admin is not shown directly - only inside the collapsed nav menu (or the ?admin URL)', async () => {
     render(<App />);
     expect(screen.queryByText('Admin')).not.toBeInTheDocument();
-    fireEvent.click(screen.getByText('Book My Stay'));
+    fireEvent.click(screen.getAllByText('Book My Stay')[0]);
     expect(await screen.findByText('Owner Information')).toBeInTheDocument();
     expect(screen.queryByText('Admin')).not.toBeInTheDocument();
   });

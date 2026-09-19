@@ -1,6 +1,6 @@
 BAYVIEW BOARDING — FIX LIST
 ============================
-Last updated: September 18, 2026 (4) (removed the 2 test/placeholder Ideas & Bugs items from this list - one rejected, one deleted)
+Last updated: September 19, 2026 (About Us merged into the landing page as a scrollable section - Suggested by JK)
 
 NEXT CHANGE LIST (v1.5)
 -----------------------
@@ -97,6 +97,18 @@ TWILIO STATUS
 
 COMPLETED
 ---------
+- Sept 19, 2026: About Us merged into the landing page as a scrollable
+  section instead of a separate page (Suggested by JK via Submit Idea:
+  "Having to click a button to read more about you..."). The nav menu
+  keeps a real "About Us" entry and the landing hero keeps "Learn more →"
+  - both now scroll smoothly down to the embedded section (a new
+  aboutSectionRef + scrollToAbout in App.js) instead of navigating away;
+  from mid-booking, the header wordmark returns to the landing page and
+  then scrolls. AboutUs's old "← Back" button is gone entirely (nothing
+  to back out of anymore). Tests: fixed 6 now-ambiguous "Book My Stay"
+  lookups (the hero CTA and the About section's own trailing CTA are now
+  both always in the DOM) and added a global scrollIntoView stub (jsdom
+  doesn't implement it). 186/186 Jest passing.
 - Sept 18, 2026 (4): Both of the flagged test/placeholder Ideas & Bugs
   items from (3) below are now resolved and removed from this list -
   Kim deleted the "1. This 2. That" submission outright (via the new

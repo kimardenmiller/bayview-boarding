@@ -111,11 +111,16 @@ Kim Miller and Estee Fletter at 210 Bayview Drive, San Rafael, CA.
   16, 2026 — reversed the earlier "no visible entry point" decision on
   request) or the bookmarked ?admin URL; either way it's still fully
   password-gated server-side
-- "Learn more about us" page (content from the Bayview Boarding Rover
+- An "About Us" section (content from the Bayview Boarding Rover
   profile — bio, home characteristics, photos, all 5-star reviews with
-  dates linking out to Rover, an approximate-location map). Reached via
-  a real link on the landing page, clicking the "Bayview Boarding" title/
-  header, or the nav menu (Sept 16, 2026)
+  dates linking out to Rover, an approximate-location map) lives directly
+  on the landing page below the hero, not a separate page (merged Sept
+  19, 2026 - Suggested by JK via Submit Idea: having to click through to
+  read about them first, before ever seeing the booking button, was
+  extra friction). The landing hero's "Learn more →" and the nav menu's
+  "About Us" both scroll smoothly down to it (aboutSectionRef in App.js);
+  from mid-booking, clicking the "Bayview Boarding" header wordmark
+  returns to the landing page and then scrolls down to it the same way.
 - Hamburger nav menu (every screen): Book a Stay, About Us, Contact Us,
   Submit Idea, Admin (Sept 16, 2026; Book a Stay moved to the top Sept 16 (9))
 - "Contact Us" page — relays a name/email-or-phone/message submission to
