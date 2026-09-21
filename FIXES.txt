@@ -1,6 +1,6 @@
 BAYVIEW BOARDING — FIX LIST
 ============================
-Last updated: September 21, 2026 (3) (outbound Twilio sends prefer a restricted API key over the raw Auth Token, on Twilio's own recommendation)
+Last updated: September 21, 2026 (4) (the "non-binding request" notice moved from the landing page to the booking page itself, above Owner Information)
 
 NEXT CHANGE LIST (v1.5)
 -----------------------
@@ -92,6 +92,15 @@ TWILIO STATUS
 
 COMPLETED
 ---------
+- Sept 21, 2026 (4): The "requests are reviewed within 24 hours" notice
+  moved from the landing page CTA to the actual booking page, right
+  above "Owner Information" (on request) - a boxed callout (new
+  `.request-notice` style) with fuller copy: "You are booking a
+  non-binding booking request that will be reviewed and confirmed. We
+  usually respond within a few hours, always within 24 hours. In the
+  event we need to turn down your request we'll explain why." 199/199
+  Jest passing. Verified live on both production and staging.
+
 - Sept 21, 2026 (3): Outbound Twilio calls prefer a restricted API key
   over the raw Auth Token, on request (Twilio's own security guidance:
   the Auth Token grants full, unscoped account access and can't be

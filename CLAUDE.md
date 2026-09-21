@@ -42,10 +42,12 @@ Kim Miller and Estee Fletter at 210 Bayview Drive, San Rafael, CA.
   pick-up must be after its drop-off (no such constraint across days)
 - A submission is a REQUEST now, not an instant booking (Sept 21, 2026,
   on request - see Data model's approval_status). The "Book My Stay"
-  button/CTA wording is unchanged; a line under it on the landing page
-  ("Requests are reviewed within 24 hours") and the rewritten
-  confirmation screen ("Request received...") set that expectation
-  instead. Every new stay starts approval_status 'pending'; admin
+  button/CTA wording is unchanged; a boxed notice at the top of the
+  actual booking page, above "Owner Information" ("You are booking a
+  non-binding booking request..." - moved here from the landing page
+  the same day, on request) and the rewritten confirmation screen
+  ("Request received...") set that expectation instead. Every new stay
+  starts approval_status 'pending'; admin
   approves or denies it from the new admin Requests section (see Admin
   panel below), which is what actually sends the real booking
   confirmation text (or a decline) - the client's immediate text at
@@ -379,7 +381,7 @@ something this pass changes.
 - src/App.js — main app
 - src/settings.js — all configurable values (rates, vets, messages, packing list)
 - src/waiver.js — full waiver text
-- src/App.test.js — 198 passing tests (TDD), Supabase mocked via src/__mocks__/supabase.js
+- src/App.test.js — 199 passing tests (TDD), Supabase mocked via src/__mocks__/supabase.js
 - src/supabase.js — creates the Supabase client from REACT_APP_SUPABASE_URL/_KEY (falling back to production's own public values) - see Staging environment above for how the staging build overrides these
 - src/index.js — app entry point; also where Google Analytics loads (production only) and staging's noindex meta tag gets injected - see SEO & Analytics above
 - supabase/functions/send-contact/index.ts — public Contact Us form handler: relays name/email-or-phone/message to Kim & Estee by SMS (reuses KIM_PHONE/ESTEE_PHONE). Deployed normally (no --no-verify-jwt) since it's called via the Supabase JS client like settings/lookup-client/submit-booking

@@ -752,10 +752,9 @@ describe('Landing — About Us, embedded on the home page', () => {
     expect(screen.getByText('Dog Paradise Above Loch Lomond')).toBeInTheDocument();
   });
 
-  test('the CTA still reads "Book My Stay", with a note that requests are reviewed within 24 hours (Sept 21, 2026)', () => {
+  test('the CTA still reads "Book My Stay" (Sept 21, 2026 - the "requests reviewed within 24 hours" note moved to the booking page itself)', () => {
     render(<App />);
     expect(screen.getAllByText('Book My Stay')[0]).toBeInTheDocument();
-    expect(screen.getByText('Requests are reviewed within 24 hours')).toBeInTheDocument();
   });
 
   test('"Learn more" scrolls to the About section instead of navigating to a separate page', () => {
@@ -1048,6 +1047,12 @@ describe('Submit Idea', () => {
 
 // ── Step 1: Owner Info (now also vet + Number of Dogs) ──────────────────────
 describe('Step 1 — Owner Info', () => {
+  test('shows the "non-binding request" notice above Owner Information (Sept 21, 2026 - moved here from the landing page)', async () => {
+    await goToOwnerStep();
+    expect(screen.getByText(/non-binding booking request/)).toBeInTheDocument();
+    expect(screen.getByText(/always within 24 hours/)).toBeInTheDocument();
+  });
+
   test('Continue is disabled (greyed out) on an empty form, and does nothing if clicked anyway', async () => {
     await goToOwnerStep();
     const button = screen.getByText('Continue');

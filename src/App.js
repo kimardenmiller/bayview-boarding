@@ -410,6 +410,14 @@ function StepOwner({ data, onChange, onNext, vetOptions, multiDogDiscount }) {
 
   return (
     <div className="step">
+      {/* Moved here from the landing page (Sept 21, 2026, on request) -
+          the actual booking page, right above the first field, is where
+          this matters most. */}
+      <p className="request-notice">
+        You are booking a non-binding booking request that will be reviewed and confirmed.
+        We usually respond within a few hours, always within 24 hours. In the event we need
+        to turn down your request we'll explain why.
+      </p>
       <h2 className="step-title">Owner Information</h2>
       <p className="step-intro">
         First time boarding with us? Fill out your info below, then click
@@ -2043,11 +2051,6 @@ function Landing({ onStart, onLearnMore, aboutSectionRef }) {
           </div>
           <div className="landing-bottom">
             <button className="landing-cta" onClick={onStart}>Book My Stay</button>
-            {/* Sept 21, 2026, on request: booking now starts a request,
-                reviewed within 24 hours, not an instant booking - the CTA
-                itself stays "Book My Stay" on purpose, so this sets that
-                expectation up front instead. */}
-            <p className="landing-request-note">Requests are reviewed within 24 hours</p>
             <button className="landing-learn-more" onClick={onLearnMore}>New? Learn more →</button>
           </div>
         </div>
