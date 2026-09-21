@@ -1,26 +1,10 @@
 BAYVIEW BOARDING — FIX LIST
 ============================
-Last updated: September 21, 2026 (6) (Kim set production's TWILIO_API_KEY_SID/SECRET - production now authenticates outbound Twilio calls with the restricted API key)
+Last updated: September 21, 2026 (7) (closed the staging-Twilio item - staying without live SMS on staging, on request)
 
 NEXT CHANGE LIST (v1.5)
 -----------------------
-1. ACTION NEEDED FROM KIM: Staging environment (see Sept 19, 2026
-   COMPLETED entry below) has no Twilio credentials set yet, so no
-   real/test SMS goes out from there until you add some - ideally
-   Twilio Console's own "Test Credentials" (Account > API keys & tokens
-   > Test credentials), which use magic numbers and never really send
-   or cost anything, exactly matching this project's original staging
-   plan (this is the right choice for staging even now that production
-   uses a restricted API key instead - see Sept 21, 2026 (3) COMPLETED
-   below - Test Credentials have no API-key equivalent, and they're the
-   only mechanism that guarantees a send can never actually go out).
-   The booking flow itself works fully without them (only the
-   confirmation text silently fails to send); set via
-   `supabase secrets set TWILIO_ACCOUNT_SID=... TWILIO_AUTH_TOKEN=...
-   TWILIO_PHONE=... --project-ref uqmjudozfqlmiepnqodx`. The staging
-   ADMIN_PASSWORD Claude generated was shared with Kim directly in
-   chat (not written anywhere in this repo).
-2. STANDING: check the "Submit Idea" queue (admin panel > 💡 Ideas & Bugs)
+1. STANDING: check the "Submit Idea" queue (admin panel > 💡 Ideas & Bugs)
    at the start of any work session in this project, not just when Kim
    flags something - this is the actual mechanism for surfacing tester
    feedback (deliberately not SMS/email, see Sept 16 (8) below). Act on
@@ -78,6 +62,23 @@ TWILIO STATUS
 
 COMPLETED
 ---------
+- Sept 21, 2026 (7): Closed the staging-Twilio item, on request - staying
+  without live SMS on staging rather than pursuing either option
+  investigated:
+  1. Twilio Test Credentials (the original plan) turned out to be
+     unavailable: Twilio retired the ability to CREATE new test
+     credentials in the current console (existing ones from before that
+     migration still work, but there's no way to generate a fresh pair
+     any more).
+  2. A Twilio Subaccount (a real, still-supported alternative - its own
+     isolated Account SID/Auth Token, separate from production) was
+     considered instead, but requires its own phone number (~$1/month,
+     since a number can't be shared across accounts/subaccounts) -
+     decided not worth it.
+  Net effect: staging's booking flow, admin panel, and everything else
+  keeps working exactly as today - only the confirmation/notification
+  texts silently don't send from there. No code or infrastructure
+  changed by this entry; it's a decision record only.
 - Sept 21, 2026 (6): Kim created a restricted Twilio API key and set
   TWILIO_API_KEY_SID/TWILIO_API_KEY_SECRET on production (confirmed via
   `supabase secrets list` - both present, same timestamp). Production

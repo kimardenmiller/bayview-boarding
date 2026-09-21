@@ -317,7 +317,7 @@ call itself is dropped, not for a routine secret rotation.
 - GitHub Pages hosting (kimardenmiller.github.io/bayview-boarding)
 - Admin password: set as the `ADMIN_PASSWORD` Supabase secret (`supabase secrets set ADMIN_PASSWORD=...`) — never in source, checked server-side by the admin-data function
 - Twilio phone: see src/settings.js PHONE (business's own public contact number)
-- Twilio auth (Sept 21, 2026): every function that sends an outbound SMS (send-confirmation, send-contact, testers, feedback, receive-sms's own reply) authenticates with `TWILIO_API_KEY_SID`/`TWILIO_API_KEY_SECRET` if set, falling back to `TWILIO_ACCOUNT_SID`/`TWILIO_AUTH_TOKEN` otherwise — a restricted, independently-revocable API key is Twilio's own recommendation over the Auth Token (full, unscoped account access), but staging deliberately still runs on the fallback: genuine Twilio "Test Credentials" (Account SID + Auth Token) have no API-key equivalent, and they're the only mechanism that guarantees a send can never actually go out. `TWILIO_ACCOUNT_SID` is always required either way (every request URL needs the real Account SID regardless of which credential authenticates it), and `TWILIO_AUTH_TOKEN` stays in use by receive-sms specifically for Twilio's webhook signature check, which only works with the real Auth Token — never an API key, on any environment.
+- Twilio auth (Sept 21, 2026): every function that sends an outbound SMS (send-confirmation, send-contact, testers, feedback, receive-sms's own reply) authenticates with `TWILIO_API_KEY_SID`/`TWILIO_API_KEY_SECRET` if set, falling back to `TWILIO_ACCOUNT_SID`/`TWILIO_AUTH_TOKEN` otherwise — a restricted, independently-revocable API key is Twilio's own recommendation over the Auth Token (full, unscoped account access). Production has the API key set; the fallback exists for a genuine Twilio "Test Credentials" pair, which has no API-key equivalent - staging ended up with neither (see Staging environment below for why), so it currently has no Twilio credentials at all and its outbound sends just fail. `TWILIO_ACCOUNT_SID` is always required on whichever environment does have credentials (every request URL needs the real Account SID regardless of which credential authenticates it), and `TWILIO_AUTH_TOKEN` stays in use by receive-sms specifically for Twilio's webhook signature check, which only works with the real Auth Token — never an API key.
 
 ## Staging environment (Sept 19, 2026)
 Same repo, no second codebase: a `staging` git branch (currently
@@ -350,9 +350,14 @@ that workflow was adopted), so a from-scratch replay was never actually
 possible. Staging has no cron jobs scheduled (send-reminders/send-
 pickup-reminders are deployed and manually callable, just not on a
 daily schedule - testers exercise the booking flow directly) and no
-Twilio credentials set yet (see FIXES.txt item 1b) - the booking flow
-still works fully either way, only the confirmation SMS silently fails
-to send without them.
+Twilio credentials at all, by decision (Sept 21, 2026) rather than an
+open item - Twilio retired creating new Test Credentials (existing ones
+from before that console migration still work, but there's no way to
+generate a fresh pair), and a Subaccount (the real alternative - its
+own isolated Account SID/Auth Token) would need its own paid phone
+number, since a number can't be shared across accounts. Not worth it:
+the booking flow and everything else on staging works fully either way,
+only the confirmation/notification texts silently don't send.
 
 ## SEO & Analytics (Sept 19, 2026)
 Google Analytics 4 (gtag.js, Measurement ID G-160YK5FB7D - Kim's own
@@ -431,12 +436,13 @@ something this pass changes.
   the cleanup actually took.
 
 ## Current priorities (v1.5)
-See FIXES.txt for the live list. As of Sept 19, 2026 (3) the open items
-are both action Kim needs to take, not code: the Manager 2 Phone (Estee)
-value looks malformed (missing its opening parenthesis) and needs
-confirming/correcting in Admin, and the staging environment (see
-Staging environment above) has no Twilio credentials set yet, so no
-real/test SMS goes out from there until some are added.
+See FIXES.txt for the live list. As of Sept 21, 2026 (7) there's nothing
+outstanding beyond that file's own standing habit (check the Submit
+Idea queue). Staging deliberately has no Twilio credentials and stays
+that way - see Staging environment above for why (Twilio retired
+creating new Test Credentials, and a Subaccount would need its own paid
+phone number) - the booking flow and everything else there still works
+fully; only outbound texts silently don't send from staging.
 
 ## Rules
 - Always run tests before committing (npm test -- --watchAll=false)
