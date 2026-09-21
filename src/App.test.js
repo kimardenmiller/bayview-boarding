@@ -36,6 +36,8 @@ const DEFAULT_SETTINGS = {
   smsBilling: 'Hi {firstName}! total ${finalCost}.',
   smsPickupReminder: 'Bye {dogName}! pickup at {pickupDate} {pickupTime}.',
   smsFooter: 'Reply STOP to opt out. Text {primaryManagerPhone}/{secondaryManagerPhone}.',
+  smsRequestReceived: 'Hi {firstName}! Request received for {dogName}.',
+  smsDenied: 'Hi {firstName}! Sorry, we can\'t take {dogName}.{denialReason}',
   primaryManagerPhone: '4155550101',
   secondaryManagerPhone: '4155550102',
   defaultBroadcastMessage: 'We just shipped something new - come try it on staging!',
@@ -247,12 +249,12 @@ const SAMPLE_DOGS = [
         id: 'stay-1', check_in: '2026-09-01', check_out: '2026-09-03', drop_time: '09:00:00', pickup_time: '17:00:00',
         estimated_cost: 210, submitted_at: '2026-08-30T10:00:00Z', notes: 'Loves belly rubs', number_of_dogs: 1,
         dob: '2020-01-01', aggression_history: 'no', aggression_detail: '', health_concerns: 'no', health_detail: '',
-        waiver_snapshot: [{ title: 'Risks & Releases', body: 'Test waiver body text.' }], billed_at: '2026-09-04T00:00:00Z',
+        waiver_snapshot: [{ title: 'Risks & Releases', body: 'Test waiver body text.' }], approval_status: 'approved', billed_at: '2026-09-04T00:00:00Z',
       },
       {
         id: 'stay-3', check_in: '2026-06-01', check_out: '2026-06-02', drop_time: '09:00:00', pickup_time: '17:00:00',
         estimated_cost: 105, submitted_at: '2026-05-30T10:00:00Z', notes: '', number_of_dogs: 1,
-        dob: null, aggression_history: 'no', aggression_detail: '', health_concerns: 'no', health_detail: '', billed_at: '2026-06-03T00:00:00Z',
+        dob: null, aggression_history: 'no', aggression_detail: '', health_concerns: 'no', health_detail: '', approval_status: 'approved', billed_at: '2026-06-03T00:00:00Z',
       },
     ],
   },
@@ -266,7 +268,7 @@ const SAMPLE_DOGS = [
         id: 'stay-2', check_in: '2026-09-05', check_out: '2026-09-06', drop_time: '10:00:00', pickup_time: '12:00:00',
         estimated_cost: null, submitted_at: '2026-08-31T10:00:00Z', notes: '', number_of_dogs: 1,
         dob: null, aggression_history: 'yes', aggression_detail: 'Barks at mail carrier',
-        health_concerns: 'yes', health_detail: 'Mild hip dysplasia', billed_at: '2026-09-07T00:00:00Z',
+        health_concerns: 'yes', health_detail: 'Mild hip dysplasia', approval_status: 'approved', billed_at: '2026-09-07T00:00:00Z',
       },
     ],
   },
@@ -748,6 +750,12 @@ describe('Landing — About Us, embedded on the home page', () => {
     render(<App />);
     expect(screen.getByText('Bayview Boarding')).toBeInTheDocument();
     expect(screen.getByText('Dog Paradise Above Loch Lomond')).toBeInTheDocument();
+  });
+
+  test('the CTA still reads "Book My Stay", with a note that requests are reviewed within 24 hours (Sept 21, 2026)', () => {
+    render(<App />);
+    expect(screen.getAllByText('Book My Stay')[0]).toBeInTheDocument();
+    expect(screen.getByText('Requests are reviewed within 24 hours')).toBeInTheDocument();
   });
 
   test('"Learn more" scrolls to the About section instead of navigating to a separate page', () => {
@@ -1606,7 +1614,7 @@ describe('Step 5 — Signature', () => {
     await userEvent.type(screen.getByPlaceholderText('Kim Miller'), 'Kim Miller');
     fireEvent.click(screen.getByText('Submit Agreement'));
 
-    expect(await screen.findByText("You're all set, Kim!")).toBeInTheDocument();
+    expect(await screen.findByText("Request received, Kim!")).toBeInTheDocument();
     expect(screen.getByText(/Rex/)).toBeInTheDocument();
     expect(screen.getByText('10/01/2026')).toBeInTheDocument();
     expect(screen.getByText('10/05/2026')).toBeInTheDocument();
@@ -1631,6 +1639,21 @@ describe('Step 5 — Signature', () => {
     expect(supabase.functions.invoke).toHaveBeenCalledWith('send-confirmation', expect.any(Object));
   });
 
+  test('the immediate text at submission is "request received", not the real confirmation - that now waits for admin approval', async () => {
+    await fillThrough();
+    fireEvent.click(screen.getByRole('checkbox'));
+    await userEvent.type(screen.getByPlaceholderText('Kim Miller'), 'Kim Miller');
+    fireEvent.click(screen.getByText('Submit Agreement'));
+
+    await screen.findByText('Request received, Kim!');
+    expect(supabase.functions.invoke).toHaveBeenCalledWith('send-confirmation', {
+      body: expect.objectContaining({
+        type: 'request_received',
+        message_template: DEFAULT_SETTINGS.smsRequestReceived,
+      }),
+    });
+  });
+
   test('shows an alert and stays on the form when saving fails', async () => {
     const alertSpy = jest.spyOn(window, 'alert').mockImplementation(() => {});
     mockInvokeDefaults({ 'submit-booking': async () => ({ data: null, error: { message: 'db down' } }) });
@@ -1642,7 +1665,7 @@ describe('Step 5 — Signature', () => {
 
     await waitFor(() => expect(alertSpy).toHaveBeenCalled());
     expect(alertSpy).toHaveBeenCalledWith('There was an error saving. Please try again.');
-    expect(screen.queryByText(/You're all set/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Request received/)).not.toBeInTheDocument();
     expect(screen.getByText('Sign & Submit')).toBeInTheDocument();
 
     alertSpy.mockRestore();
@@ -1653,7 +1676,7 @@ describe('Step 5 — Signature', () => {
     fireEvent.click(screen.getByRole('checkbox'));
     await userEvent.type(screen.getByPlaceholderText('Kim Miller'), 'Kim Miller');
     fireEvent.click(screen.getByText('Submit Agreement'));
-    await screen.findByText(/You're all set/);
+    await screen.findByText(/Request received/);
 
     fireEvent.click(screen.getByText('Book Another Stay'));
     expect(await screen.findByText('Owner Information')).toBeInTheDocument();
@@ -1675,7 +1698,7 @@ describe('Step 5 — Signature', () => {
     await userEvent.type(screen.getByPlaceholderText('Kim Miller'), 'Kim Miller');
     fireEvent.click(screen.getByText('Submit Agreement'));
 
-    expect(await screen.findByText(/You're all set/)).toBeInTheDocument();
+    expect(await screen.findByText(/Request received/)).toBeInTheDocument();
     await waitFor(() => expect(consoleSpy).toHaveBeenCalledWith('Text send failed:', expect.any(Error)));
 
     consoleSpy.mockRestore();
@@ -1778,13 +1801,13 @@ const UNBILLED_DOGS = [
       {
         id: 'stay-earliest', check_in: daysFromToday(-10), check_out: daysFromToday(-8),
         drop_time: '09:00:00', pickup_time: '09:00:00', estimated_cost: 105,
-        number_of_dogs: 1, submitted_at: '2026-01-01T00:00:00Z', billed_at: null,
+        number_of_dogs: 1, submitted_at: '2026-01-01T00:00:00Z', approval_status: 'approved', billed_at: null,
       },
       // Already billed - should NOT show up.
       {
         id: 'stay-already-billed', check_in: daysFromToday(-6), check_out: daysFromToday(-5),
         drop_time: '09:00:00', pickup_time: '09:00:00', estimated_cost: 105,
-        number_of_dogs: 1, submitted_at: '2026-01-01T00:00:00Z', billed_at: '2026-01-05T00:00:00Z',
+        number_of_dogs: 1, submitted_at: '2026-01-01T00:00:00Z', approval_status: 'approved', billed_at: '2026-01-05T00:00:00Z',
       },
       // Still upcoming, never billed - SHOULD show up (Sept 17, 2026 -
       // Unbilled Stays used to exclude future/in-progress stays; not any
@@ -1792,7 +1815,7 @@ const UNBILLED_DOGS = [
       {
         id: 'stay-future', check_in: daysFromToday(3), check_out: daysFromToday(5),
         drop_time: '09:00:00', pickup_time: '09:00:00', estimated_cost: 210,
-        number_of_dogs: 1, submitted_at: '2026-01-01T00:00:00Z', billed_at: null,
+        number_of_dogs: 1, submitted_at: '2026-01-01T00:00:00Z', approval_status: 'approved', billed_at: null,
       },
     ],
   },
@@ -1807,7 +1830,7 @@ const UNBILLED_DOGS = [
       {
         id: 'stay-shared', check_in: daysFromToday(-4), check_out: daysFromToday(-2),
         drop_time: '09:00:00', pickup_time: '17:00:00', estimated_cost: 380,
-        number_of_dogs: 2, submitted_at: '2026-01-01T00:00:00Z', billed_at: null,
+        number_of_dogs: 2, submitted_at: '2026-01-01T00:00:00Z', approval_status: 'approved', billed_at: null,
       },
     ],
   },
@@ -1819,7 +1842,7 @@ const UNBILLED_DOGS = [
       {
         id: 'stay-shared', check_in: daysFromToday(-4), check_out: daysFromToday(-2),
         drop_time: '09:00:00', pickup_time: '17:00:00', estimated_cost: 380,
-        number_of_dogs: 2, submitted_at: '2026-01-01T00:00:00Z', billed_at: null,
+        number_of_dogs: 2, submitted_at: '2026-01-01T00:00:00Z', approval_status: 'approved', billed_at: null,
       },
     ],
   },
@@ -1840,6 +1863,147 @@ async function loginAsAdminWithUnbilled(dogs = UNBILLED_DOGS) {
   fireEvent.click(screen.getByText('Sign In'));
   await screen.findByText('Bayview Boarding — Admin');
 }
+
+const REQUESTS_DOGS = [
+  {
+    id: 'dog-bud', name: 'Bud', breed: 'Labrador', dob: null, spay_neuter: 'yes',
+    aggression_history: 'no', aggression_detail: '', health_concerns: 'no', health_detail: '',
+    owner: { name: 'Kim', phone: '6505551111', email: 'kim@test.com' },
+    stays: [
+      // Pending - should show up in Requests.
+      {
+        id: 'stay-pending', check_in: daysFromToday(3), check_out: daysFromToday(5),
+        drop_time: '09:00:00', pickup_time: '09:00:00', estimated_cost: 210,
+        number_of_dogs: 1, submitted_at: '2026-01-01T00:00:00Z', approval_status: 'pending', billed_at: null,
+      },
+      // Already approved - should NOT show up in Requests (belongs in
+      // Unbilled Stays instead, exercised in its own describe block).
+      {
+        id: 'stay-approved', check_in: daysFromToday(10), check_out: daysFromToday(12),
+        drop_time: '09:00:00', pickup_time: '09:00:00', estimated_cost: 210,
+        number_of_dogs: 1, submitted_at: '2026-01-01T00:00:00Z', approval_status: 'approved', billed_at: null,
+      },
+      // Already denied - should NOT show up anywhere.
+      {
+        id: 'stay-denied', check_in: daysFromToday(20), check_out: daysFromToday(22),
+        drop_time: '09:00:00', pickup_time: '09:00:00', estimated_cost: 210,
+        number_of_dogs: 1, submitted_at: '2026-01-01T00:00:00Z', approval_status: 'denied', billed_at: null,
+      },
+    ],
+  },
+];
+
+async function loginAsAdminWithRequests(dogs = REQUESTS_DOGS) {
+  mockInvokeDefaults({
+    'admin-data': async (opts) => {
+      const action = opts?.body?.action;
+      if (action === 'approveStay' || action === 'denyStay') {
+        return { data: { dogs: [], totalStays: 0 }, error: null }; // decided - list refreshes empty
+      }
+      return { data: { dogs, totalStays: dogs.reduce((n, d) => n + d.stays.length, 0) }, error: null };
+    },
+  });
+  goToAdminUrl();
+  render(<App />);
+  await userEvent.type(screen.getByPlaceholderText('Password'), 'correct-password');
+  fireEvent.click(screen.getByText('Sign In'));
+  await screen.findByText('Bayview Boarding — Admin');
+}
+
+describe('Admin — logged in — Requests', () => {
+  test('shows only pending stays, with a badge count - approved/denied stays are excluded', async () => {
+    await loginAsAdminWithRequests();
+    const cards = document.querySelectorAll('.requests-section .stay-card');
+    expect(cards.length).toBe(1);
+    expect(within(cards[0]).getByText('Bud — Kim')).toBeInTheDocument();
+    const badge = document.querySelector('.requests-section .feedback-badge');
+    expect(badge).toHaveTextContent('1');
+  });
+
+  test('a friendly empty state shows when there are no pending requests', async () => {
+    await loginAsAdminWithRequests([]);
+    expect(screen.getByText('No pending requests right now.')).toBeInTheDocument();
+  });
+
+  test('expanding a request shows its details plus Approve/Deny, with no Edit or billing fields', async () => {
+    await loginAsAdminWithRequests();
+    const requestsSection = document.querySelector('.requests-section');
+    const header = within(requestsSection).getByText('Bud — Kim');
+    const card = header.closest('.stay-card');
+    fireEvent.click(header);
+    expect(within(card).getByText('Approve')).toBeInTheDocument();
+    expect(within(card).getByText('Deny')).toBeInTheDocument();
+    expect(within(card).queryByText('Edit')).not.toBeInTheDocument();
+    expect(within(card).getByText(/Estimated cost/)).toBeInTheDocument();
+  });
+
+  test('Approve sends the real confirmation text (SMS first, then marks approved) and the stay drops off Requests', async () => {
+    await loginAsAdminWithRequests();
+    const requestsSection = document.querySelector('.requests-section');
+    fireEvent.click(within(requestsSection).getByText('Bud — Kim'));
+    const card = within(requestsSection).getByText('Bud — Kim').closest('.stay-card');
+    fireEvent.click(within(card).getByText('Approve'));
+
+    await waitFor(() => expect(supabase.functions.invoke).toHaveBeenCalledWith('send-confirmation', {
+      body: expect.objectContaining({ type: 'confirmation', dog_name: 'Bud', owner_phone: '6505551111' }),
+    }));
+    await waitFor(() => expect(supabase.functions.invoke).toHaveBeenCalledWith('admin-data', {
+      body: { password: 'correct-password', action: 'approveStay', stayId: 'stay-pending' },
+    }));
+    expect(await screen.findByText('No pending requests right now.')).toBeInTheDocument();
+  });
+
+  test('Deny sends the denial text with the typed reason (SMS first, then marks denied), and the stay drops off Requests', async () => {
+    await loginAsAdminWithRequests();
+    const requestsSection = document.querySelector('.requests-section');
+    fireEvent.click(within(requestsSection).getByText('Bud — Kim'));
+    const card = within(requestsSection).getByText('Bud — Kim').closest('.stay-card');
+    fireEvent.change(within(card).getByPlaceholderText(/Reason for declining/), { target: { value: 'Fully booked that week' } });
+    fireEvent.click(within(card).getByText('Deny'));
+
+    await waitFor(() => expect(supabase.functions.invoke).toHaveBeenCalledWith('send-confirmation', {
+      body: expect.objectContaining({ type: 'denied', dog_name: 'Bud', denial_reason: 'Fully booked that week' }),
+    }));
+    await waitFor(() => expect(supabase.functions.invoke).toHaveBeenCalledWith('admin-data', {
+      body: { password: 'correct-password', action: 'denyStay', stayId: 'stay-pending', denialReason: 'Fully booked that week' },
+    }));
+    expect(await screen.findByText('No pending requests right now.')).toBeInTheDocument();
+  });
+
+  test('Deny with no reason typed sends a null denial_reason, not an empty string', async () => {
+    await loginAsAdminWithRequests();
+    const requestsSection = document.querySelector('.requests-section');
+    fireEvent.click(within(requestsSection).getByText('Bud — Kim'));
+    const card = within(requestsSection).getByText('Bud — Kim').closest('.stay-card');
+    fireEvent.click(within(card).getByText('Deny'));
+
+    await waitFor(() => expect(supabase.functions.invoke).toHaveBeenCalledWith('send-confirmation', {
+      body: expect.objectContaining({ type: 'denied', denial_reason: null }),
+    }));
+  });
+
+  test('does not mark approved if the SMS send fails - the request stays on the list', async () => {
+    mockInvokeDefaults({
+      'admin-data': async () => ({ data: { dogs: REQUESTS_DOGS, totalStays: 3 }, error: null }),
+      'send-confirmation': async () => ({ data: null, error: { message: 'twilio down' } }),
+    });
+    goToAdminUrl();
+    render(<App />);
+    await userEvent.type(screen.getByPlaceholderText('Password'), 'correct-password');
+    fireEvent.click(screen.getByText('Sign In'));
+    await screen.findByText('Bayview Boarding — Admin');
+
+    const requestsSection = document.querySelector('.requests-section');
+    fireEvent.click(within(requestsSection).getByText('Bud — Kim'));
+    const card = within(requestsSection).getByText('Bud — Kim').closest('.stay-card');
+    fireEvent.click(within(card).getByText('Approve'));
+
+    expect(await within(card).findByText('Failed to send. Please try again.')).toBeInTheDocument();
+    expect(supabase.functions.invoke).not.toHaveBeenCalledWith('admin-data', {
+      body: expect.objectContaining({ action: 'approveStay' }),
+    });
+  });
+});
 
 describe('Admin — logged in — Unbilled Stays', () => {
   test('includes every unbilled stay - past, in-progress, and future - deduping a shared multi-dog stay, sorted earliest check-in first', async () => {
@@ -2278,7 +2442,7 @@ describe('Admin — logged in', () => {
         stays: [{
           id: 'stay-shared-billed', check_in: '2026-08-01', check_out: '2026-08-03',
           drop_time: '09:00:00', pickup_time: '09:00:00', estimated_cost: 300,
-          number_of_dogs: 2, submitted_at: '2026-07-30T10:00:00Z', billed_at: '2026-08-04T00:00:00Z',
+          number_of_dogs: 2, submitted_at: '2026-07-30T10:00:00Z', approval_status: 'approved', billed_at: '2026-08-04T00:00:00Z',
         }],
       },
       {
@@ -2288,7 +2452,7 @@ describe('Admin — logged in', () => {
         stays: [{
           id: 'stay-shared-billed', check_in: '2026-08-01', check_out: '2026-08-03',
           drop_time: '09:00:00', pickup_time: '09:00:00', estimated_cost: 300,
-          number_of_dogs: 2, submitted_at: '2026-07-30T10:00:00Z', billed_at: '2026-08-04T00:00:00Z',
+          number_of_dogs: 2, submitted_at: '2026-07-30T10:00:00Z', approval_status: 'approved', billed_at: '2026-08-04T00:00:00Z',
         }],
       },
     ];
@@ -2452,6 +2616,8 @@ describe('Admin — logged in', () => {
     expect(smsEditor.getByDisplayValue('Hi {firstName}! reminder, bring {packingList}.')).toBeInTheDocument();
     expect(smsEditor.getByDisplayValue('Hi {firstName}! total ${finalCost}.')).toBeInTheDocument();
     expect(smsEditor.getByDisplayValue('Bye {dogName}! pickup at {pickupDate} {pickupTime}.')).toBeInTheDocument();
+    expect(smsEditor.getByDisplayValue(DEFAULT_SETTINGS.smsRequestReceived)).toBeInTheDocument();
+    expect(smsEditor.getByDisplayValue(DEFAULT_SETTINGS.smsDenied)).toBeInTheDocument();
 
     const reminderBox = smsEditor.getByDisplayValue('Hi {firstName}! reminder, bring {packingList}.');
     fireEvent.change(reminderBox, { target: { value: 'New reminder wording {firstName}' } });

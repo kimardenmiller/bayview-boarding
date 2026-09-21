@@ -40,7 +40,18 @@ Kim Miller and Estee Fletter at 210 Bayview Drive, San Rafael, CA.
 - Past check-in dates are rejected, client-side (StepDates) and
   server-side (submit-booking, the actual boundary); a same-day stay's
   pick-up must be after its drop-off (no such constraint across days)
-- Twilio SMS: booking confirmations (sent at submission), stay reminders
+- A submission is a REQUEST now, not an instant booking (Sept 21, 2026,
+  on request - see Data model's approval_status). The "Book My Stay"
+  button/CTA wording is unchanged; a line under it on the landing page
+  ("Requests are reviewed within 24 hours") and the rewritten
+  confirmation screen ("Request received...") set that expectation
+  instead. Every new stay starts approval_status 'pending'; admin
+  approves or denies it from the new admin Requests section (see Admin
+  panel below), which is what actually sends the real booking
+  confirmation text (or a decline) - the client's immediate text at
+  submission is a separate, distinct "request received" message.
+- Twilio SMS: booking confirmations (sent once admin approves a
+  request, not at submission - Sept 21, 2026), stay reminders
   (a daily cron job texts everyone checking in the next day, Sept 16 —
   see supabase/functions/send-reminders), pickup reminders (the same
   idea for the day before check_out instead of check_in, Sept 17 - see
@@ -67,9 +78,18 @@ Kim Miller and Estee Fletter at 210 Bayview Drive, San Rafael, CA.
   best-effort and awaited, never allowed to affect the client send's own
   success/failure.
 - Admin panel, top to bottom (reordered Sept 17 (2)(4), math/grouping
-  Sept 18): an "Unbilled Stays" review list — every never-billed stay at
-  all, past, in-progress, or future, sorted earliest check-in first
-  (previously limited to already-checked-out stays); each card is a
+  Sept 18; "Requests" added above everything else Sept 21, 2026): a
+  "Requests" section — every pending stay (a submission admin hasn't
+  approved or denied yet), sorted earliest check-in first; each card
+  expands to show the request's details (view-only - no Edit/billing
+  fields, since it isn't a real booking yet) plus "Approve" (sends the
+  real booking confirmation text, then marks it approved) and "Deny"
+  (an optional typed reason, folded into a decline text sent before the
+  stay is marked denied - same "text first, then persist" ordering as
+  billing below). Then an "Unbilled Stays" review list — every approved-
+  but-never-billed stay, past, in-progress, or future, sorted earliest
+  check-in first (previously limited to already-checked-out stays); each
+  card is a
   one-line summary until clicked, which expands it to show the stay's
   details plus "Edit" (reveals correctable dates/times, and Daily
   Rate/Holiday Upcharge % fields defaulting to the site's own settings -
@@ -150,24 +170,29 @@ direct client insert — see supabase/functions/submit-booking/index.ts.
 
 `settings` (Sept 15 (4); packing_list/sms_confirmation/sms_reminder/
 sms_billing added Sept 16 (5); sms_footer/primary_manager_phone/
-secondary_manager_phone added Sept 18, 2026) is a singleton row (day
-rate, multi-dog discount, holiday upcharge, vet clinic list, packing
-list, 4 SMS templates, the shared footer, 2 manager phone numbers) -
-the admin-configurable values calcCost/the vet dropdown/
+secondary_manager_phone added Sept 18, 2026; default_broadcast_message
+added Sept 19, 2026; sms_request_received/sms_denied added Sept 21,
+2026) is a singleton row (day rate, multi-dog discount, holiday
+upcharge, vet clinic list, packing list, 6 SMS templates, the shared
+footer, 2 manager phone numbers, the tester broadcast's saved default
+message) - the admin-configurable values calcCost/the vet dropdown/
 send-confirmation actually use, replacing hardcoded constants (the SMS
 templates and packing list used to be duplicated - once as a "reference
 copy" in src/settings.js, once for real inside send-confirmation/
 index.ts - and had already started to drift; now there's one source of
 truth). supabase/functions/settings/index.ts splits its own column list
-in two: PUBLIC_COLUMNS (everything above except the 2 phone numbers) is
-what a plain, unauthenticated read returns - every visitor needs current
-pricing/vet-list/templates to use the booking form and complete their
-own SMS sends; ADMIN_COLUMNS (PUBLIC_COLUMNS + the phone numbers) is
-returned only when the request carries the correct admin password,
-whether that's a write (`updates` present) or a dedicated
-password-only read with no `updates` (new Sept 18, 2026 - this is what
-lets Admin populate the 2 manager-phone edit fields without a public
-read ever seeing them). Kim/Estee's phone numbers used to stay
+in two: PUBLIC_COLUMNS (everything above except the phone numbers and
+the broadcast default) is what a plain, unauthenticated read returns -
+every visitor needs current pricing/vet-list/templates (sms_request_
+received/sms_denied included - the client's own browser builds the
+request-received/denial texts, same as the other 4) to use the booking
+form and complete their own SMS sends; ADMIN_COLUMNS (PUBLIC_COLUMNS +
+the phone numbers + default_broadcast_message) is returned only when
+the request carries the correct admin password, whether that's a write
+(`updates` present) or a dedicated password-only read with no `updates`
+(new Sept 18, 2026 - this is what lets Admin populate the 2 manager-
+phone edit fields without a public read ever seeing them). Kim/Estee's
+phone numbers used to stay
 completely out of this table for exactly that "public read must never
 leak a personal cell number" reason (they lived only as the
 KIM_PHONE/ESTEE_PHONE Supabase secrets) - Sept 18, 2026 moved them into
@@ -182,6 +207,20 @@ admin-authenticated response), which is also where it gets sms_footer
 still used by receive-sms/send-contact/testers/feedback (out of scope
 for the Sept 18 change - only send-confirmation's usage moved to the
 new DB columns).
+
+`stays.approval_status` (Sept 21, 2026 - 'pending'/'approved'/'denied',
+default 'pending') is the new booking request/approval workflow (see
+Rules for the standing habit that surfaced this as a Submit Idea
+suggestion from Estee). Every stay that existed before this column was
+added was backfilled to 'approved' (approved_at set to its original
+submitted_at) - only genuinely new submissions start 'pending'.
+`stays.approved_at`/`stays.denied_at` stamp when admin actually decided
+(admin-data's approveStay/denyStay actions - see Key files), and
+`stays.denial_reason` is admin's own optional typed-in explanation,
+folded into the decline text via send-confirmation's {denialReason}
+placeholder. Unbilled Stays/Past Stays both filter to
+`approval_status = 'approved'` now - a pending or denied stay was never
+a real booking, so it never shows up in either.
 
 `stays.reminder_sent_at` (Sept 16, 2026) marks a stay's drop-off reminder
 text as already sent, so the daily cron job can't double-text someone on
@@ -339,7 +378,7 @@ something this pass changes.
 - src/App.js — main app
 - src/settings.js — all configurable values (rates, vets, messages, packing list)
 - src/waiver.js — full waiver text
-- src/App.test.js — 189 passing tests (TDD), Supabase mocked via src/__mocks__/supabase.js
+- src/App.test.js — 198 passing tests (TDD), Supabase mocked via src/__mocks__/supabase.js
 - src/supabase.js — creates the Supabase client from REACT_APP_SUPABASE_URL/_KEY (falling back to production's own public values) - see Staging environment above for how the staging build overrides these
 - src/index.js — app entry point; also where Google Analytics loads (production only) and staging's noindex meta tag gets injected - see SEO & Analytics above
 - supabase/functions/send-contact/index.ts — public Contact Us form handler: relays name/email-or-phone/message to Kim & Estee by SMS (reuses KIM_PHONE/ESTEE_PHONE). Deployed normally (no --no-verify-jwt) since it's called via the Supabase JS client like settings/lookup-client/submit-booking
@@ -348,12 +387,12 @@ something this pass changes.
 - supabase/functions/send-pickup-reminders/index.ts — daily cron target, the pickup-side counterpart to send-reminders: finds stays checking out tomorrow, texts each via send-confirmation (type "pickup"), marks pickup_reminder_sent_at. Deployed with `--no-verify-jwt` - same care needed on redeploy as send-reminders
 - public/img/about/ — the 6 numbered photos on the About page, served from the public folder (not bundled) and referenced via process.env.PUBLIC_URL since the app is hosted at a subpath
 - supabase/functions/send-reminders/index.ts — daily cron target (pg_cron + pg_net, see the migration): finds stays checking in tomorrow, fetches the current sms_reminder template + packing_list from `settings`, texts each via send-confirmation, marks reminder_sent_at. Deployed with `--no-verify-jwt`; checks its own CRON_SECRET instead (see Data model for how that secret is set up without ever being committed) - be careful to keep that flag on every redeploy (a plain `supabase functions deploy send-reminders` silently re-enables JWT verification and would break the cron, same bug class as the receive-sms incident)
-- supabase/functions/settings/index.ts — public read (PUBLIC_COLUMNS) / password-gated read or write (ADMIN_COLUMNS) of day rate, multi-dog discount, holiday upcharge, vet list, packing list, the 4 SMS templates (confirmation/drop-off reminder/pickup reminder/billing), the shared sms_footer, and (admin-only) the 2 manager phone numbers plus the tester broadcast's default_broadcast_message
-- supabase/functions/submit-booking/index.ts — handles booking submission: find-or-create owner (by phone) and each dog (by owner+name), inserts the stay (incl. waiver_snapshot) + stay_dogs snapshot links (service role key)
-- supabase/functions/send-confirmation/index.ts — Twilio SMS function (outbound); accepts an optional message_template (the admin-edited settings text, with {placeholders} filled by fillTemplate, including {dogVerb} - "is"/"are" - and {billingBreakdown} - the full cost math) + packing_list from the caller; falls back to its own hardcoded 4-message-type logic (confirmation/reminder/billing/pickup) if no template is given. Every dollar placeholder ({finalCost}/{estimatedCost}) is run through formatDollars() first (whole dollars, comma-separated). Has its own direct DB read (service role, fetchFooterAndPhones) for sms_footer and the 2 manager phone numbers (Sept 18, 2026) - fills {primaryManagerPhone}/{secondaryManagerPhone} and appends the filled footer once to every message, and uses the same numbers as the destination for the Kim/Estee copy of every client send (notifyOwnersOfClientText). Called directly by the client at booking time, and by send-reminders/send-pickup-reminders/the admin panel for the other three - has its own Deno test suite (index.test.ts), added Sept 16 (5)
+- supabase/functions/settings/index.ts — public read (PUBLIC_COLUMNS) / password-gated read or write (ADMIN_COLUMNS) of day rate, multi-dog discount, holiday upcharge, vet list, packing list, the 6 SMS templates (confirmation/drop-off reminder/pickup reminder/billing/request-received/denied - the last 2 added Sept 21, 2026), the shared sms_footer, and (admin-only) the 2 manager phone numbers plus the tester broadcast's default_broadcast_message
+- supabase/functions/submit-booking/index.ts — handles booking submission: find-or-create owner (by phone) and each dog (by owner+name), inserts the stay (incl. waiver_snapshot, approval_status 'pending' - Sept 21, 2026) + stay_dogs snapshot links (service role key)
+- supabase/functions/send-confirmation/index.ts — Twilio SMS function (outbound); accepts an optional message_template (the admin-edited settings text, with {placeholders} filled by fillTemplate, including {dogVerb} - "is"/"are" - {billingBreakdown} - the full cost math - and {denialReason} - Sept 21, 2026, resolves to "" when no reason was given, never a literal unfilled placeholder) + packing_list from the caller; falls back to its own hardcoded 6-message-type logic (confirmation/reminder/billing/pickup/request_received/denied) if no template is given. Every dollar placeholder ({finalCost}/{estimatedCost}) is run through formatDollars() first (whole dollars, comma-separated). Has its own direct DB read (service role, fetchFooterAndPhones) for sms_footer and the 2 manager phone numbers (Sept 18, 2026) - fills {primaryManagerPhone}/{secondaryManagerPhone} and appends the filled footer once to every message, and uses the same numbers as the destination for the Kim/Estee copy of every client send (notifyOwnersOfClientText). Called directly by the client at booking time (type request_received - Sept 21, 2026), and by send-reminders/send-pickup-reminders/the admin panel (confirmation on approve, denied on deny, billing, pickup) - has its own Deno test suite (index.test.ts), added Sept 16 (5)
 - supabase/functions/receive-sms/index.ts — inbound SMS webhook: auto-reply + relay to Kim/Estee. Deploy with `--no-verify-jwt` (see comment at top of file) or Twilio's webhook calls silently fail
 - supabase/functions/_shared/contact.ts — pure text builders + Twilio signature validator, shared by send-confirmation and receive-sms, unit-tested via `deno test`
-- supabase/functions/admin-data/index.ts — server-side admin password check + every dog (profile + owner + stay history) (service role key, never exposed to client). Also handles billStay (Sept 17, 2026): saves corrected check-in/out/drop/pickup/cost and marks billed_at, returning the refreshed dog list
+- supabase/functions/admin-data/index.ts — server-side admin password check + every dog (profile + owner + stay history, incl. approval_status/approved_at/denied_at/denial_reason - Sept 21, 2026) (service role key, never exposed to client). Also handles billStay (Sept 17, 2026): saves corrected check-in/out/drop/pickup/cost and marks billed_at; approveStay/denyStay (Sept 21, 2026): mark a stay approved or denied (denyStay also saves an optional trimmed denial_reason) - all three just patch the DB and return the refreshed dog list, the actual SMS send is always a separate client-side send-confirmation call first (App.js), same "text actually went out" ordering for all three
 - supabase/functions/lookup-client/index.ts — returning-client autofill by phone: vet + every dog on file (returns only safe fields, never aggression/health)
 - supabase/migrations/ — schema history, including the Sept 14 dog-profiles reorg (owners/dogs/stays/stay_dogs) and the RLS lockdown history for the old flat `stays` table
 - FIXES.txt — current fix list and backlog

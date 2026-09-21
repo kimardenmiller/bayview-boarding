@@ -195,6 +195,70 @@ Deno.test('billStay: marks billed_at even with no date/cost corrections', async 
   }
 });
 
+Deno.test('approveStay: requires stayId', async () => {
+  const stub = stubSupabase();
+  try {
+    const res = await handleRequest(postRequest({ password: ADMIN_PASSWORD, action: 'approveStay' }));
+    assertEquals(res.status, 400);
+  } finally {
+    stub.restore();
+  }
+});
+
+Deno.test('approveStay: sets approval_status approved and stamps approved_at', async () => {
+  const stub = stubSupabase();
+  try {
+    const res = await handleRequest(postRequest({ password: ADMIN_PASSWORD, action: 'approveStay', stayId: 'stay-2' }));
+    assertEquals(res.status, 200);
+    const patchCall = stub.calls.find((c) => c.table === 'stays' && c.method === 'PATCH')!;
+    assertEquals(patchCall.search, '?id=eq.stay-2');
+    const body = patchCall.body as Record<string, unknown>;
+    assertEquals(body.approval_status, 'approved');
+    assertEquals(typeof body.approved_at, 'string');
+  } finally {
+    stub.restore();
+  }
+});
+
+Deno.test('denyStay: requires stayId', async () => {
+  const stub = stubSupabase();
+  try {
+    const res = await handleRequest(postRequest({ password: ADMIN_PASSWORD, action: 'denyStay' }));
+    assertEquals(res.status, 400);
+  } finally {
+    stub.restore();
+  }
+});
+
+Deno.test('denyStay: sets approval_status denied, stamps denied_at, and saves a trimmed reason', async () => {
+  const stub = stubSupabase();
+  try {
+    const res = await handleRequest(postRequest({
+      password: ADMIN_PASSWORD, action: 'denyStay', stayId: 'stay-2', denialReason: '  Fully booked that week  ',
+    }));
+    assertEquals(res.status, 200);
+    const patchCall = stub.calls.find((c) => c.table === 'stays' && c.method === 'PATCH')!;
+    const body = patchCall.body as Record<string, unknown>;
+    assertEquals(body.approval_status, 'denied');
+    assertEquals(typeof body.denied_at, 'string');
+    assertEquals(body.denial_reason, 'Fully booked that week');
+  } finally {
+    stub.restore();
+  }
+});
+
+Deno.test('denyStay: a blank/missing reason is saved as null, not an empty string', async () => {
+  const stub = stubSupabase();
+  try {
+    await handleRequest(postRequest({ password: ADMIN_PASSWORD, action: 'denyStay', stayId: 'stay-2' }));
+    const patchCall = stub.calls.find((c) => c.table === 'stays' && c.method === 'PATCH')!;
+    const body = patchCall.body as Record<string, unknown>;
+    assertEquals(body.denial_reason, null);
+  } finally {
+    stub.restore();
+  }
+});
+
 Deno.test('rejects an unknown action', async () => {
   const stub = stubSupabase();
   try {

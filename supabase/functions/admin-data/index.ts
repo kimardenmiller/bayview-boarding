@@ -62,7 +62,7 @@ function shapeDog(d: RawDog) {
 }
 
 const DOGS_SELECT =
-  "id, name, breed, dob, spay_neuter, aggression_history, aggression_detail, health_concerns, health_detail, owner:owners(name, phone, email), stay_dogs(name, breed, dob, spay_neuter, aggression_history, aggression_detail, health_concerns, health_detail, stay:stays(id, check_in, check_out, drop_time, pickup_time, notes, estimated_cost, number_of_dogs, submitted_at, waiver_snapshot, billed_at))";
+  "id, name, breed, dob, spay_neuter, aggression_history, aggression_detail, health_concerns, health_detail, owner:owners(name, phone, email), stay_dogs(name, breed, dob, spay_neuter, aggression_history, aggression_detail, health_concerns, health_detail, stay:stays(id, check_in, check_out, drop_time, pickup_time, notes, estimated_cost, number_of_dogs, submitted_at, waiver_snapshot, billed_at, approval_status, approved_at, denied_at, denial_reason))";
 
 export async function handleRequest(req: Request): Promise<Response> {
   if (req.method === "OPTIONS") {
@@ -71,10 +71,10 @@ export async function handleRequest(req: Request): Promise<Response> {
 
   try {
     const body = await req.json();
-    const { password, action, stayId, checkIn, checkOut, dropTime, pickupTime, estimatedCost } = body as {
+    const { password, action, stayId, checkIn, checkOut, dropTime, pickupTime, estimatedCost, denialReason } = body as {
       password?: string; action?: string; stayId?: string;
       checkIn?: string; checkOut?: string; dropTime?: string | null; pickupTime?: string | null;
-      estimatedCost?: number;
+      estimatedCost?: number; denialReason?: string | null;
     };
 
     if (password !== ADMIN_PASSWORD) {
@@ -116,6 +116,25 @@ export async function handleRequest(req: Request): Promise<Response> {
       if (estimatedCost !== undefined) patch.estimated_cost = estimatedCost;
 
       const { error: updateErr } = await supabase.from("stays").update(patch).eq("id", stayId);
+      if (updateErr) throw updateErr;
+    } else if (action === "approveStay") {
+      // The client-side flow (App.js) sends the real confirmation text
+      // FIRST, then calls this - same "action means it actually went
+      // out" ordering as billStay (Sept 21, 2026).
+      if (!stayId) return json({ error: "stayId is required" }, 400);
+      const { error: updateErr } = await supabase.from("stays")
+        .update({ approval_status: "approved", approved_at: new Date().toISOString() })
+        .eq("id", stayId);
+      if (updateErr) throw updateErr;
+    } else if (action === "denyStay") {
+      if (!stayId) return json({ error: "stayId is required" }, 400);
+      const { error: updateErr } = await supabase.from("stays")
+        .update({
+          approval_status: "denied",
+          denied_at: new Date().toISOString(),
+          denial_reason: denialReason?.trim() || null,
+        })
+        .eq("id", stayId);
       if (updateErr) throw updateErr;
     } else if (action) {
       return json({ error: `Unknown action: ${action}` }, 400);

@@ -1,6 +1,6 @@
 BAYVIEW BOARDING — FIX LIST
 ============================
-Last updated: September 19, 2026 (4) (SEO basics pass + Google Analytics wired up, production only)
+Last updated: September 21, 2026 (booking is now a request that admin approves or denies - Suggested by Estee)
 
 NEXT CHANGE LIST (v1.5)
 -----------------------
@@ -83,6 +83,60 @@ TWILIO STATUS
 
 COMPLETED
 ---------
+- Sept 21, 2026: Booking request/approval workflow (Suggested by Estee
+  via Submit Idea: "Button to book stay should read 'Request stay' and
+  we need a place to approve or deny the stay in admin"). Scope decided
+  in conversation:
+
+  1. The "Book My Stay" button text stays as-is (on request) - instead,
+     new copy sets the expectation: a line under the landing CTA
+     ("Requests are reviewed within 24 hours") and a rewritten
+     confirmation screen ("Request received..." instead of "You're all
+     set...", explaining a text will follow within 24 hours either way).
+  2. Every new stay starts approval_status = 'pending' (new stays
+     column, migration backfills every pre-existing stay to 'approved'
+     so nothing already on file suddenly needs a decision). The client's
+     immediate text at submission is now a new "Booking Request
+     Received" template (admin-editable, same pattern as the other SMS
+     templates) - the real "Booking Confirmation" text no longer goes
+     out at submission; it now waits until admin approves.
+  3. New admin "Requests" section, above Unbilled Stays (view-only stay
+     details, no billing fields - nothing to correct on a stay that
+     isn't a real booking yet) with Approve/Deny. Approve sends the real
+     confirmation text, then marks approved. Deny sends a new "Booking
+     Declined" template (admin-editable, with an optional typed reason
+     folded into the text via {denialReason}), then marks denied - same
+     "send the text FIRST, then persist the decision" ordering as
+     billStay, so a decision is never recorded without the client
+     actually having been told. Unbilled Stays/Past Stays now only ever
+     show approved stays - a pending or denied one was never a real
+     booking, so it stays out of both.
+  4. New admin-data actions (approveStay/denyStay), 2 new settings
+     columns/SMS templates (sms_request_received/sms_denied, both
+     public like the other 4 - the client's own browser needs to read
+     them to build the outbound text), send-confirmation gained 2 new
+     message types plus a {denialReason} placeholder that resolves to a
+     clean "" (not a literal unfilled placeholder) when no reason was
+     given.
+
+  Tests: submit-booking asserts a fresh stay is 'pending'; admin-data
+  gained approveStay/denyStay coverage (stayId required, correct
+  patch, trimmed/nulled reason); settings gained coverage for both new
+  columns (public, rejects blank, updates/trims); send-confirmation
+  gained coverage for both new message types and {denialReason}'s
+  blank-when-absent behavior. App's Jest suite gained a dedicated
+  "Admin — logged in — Requests" block (badge count, expand/Approve/
+  Deny, SMS-first-then-persist ordering, failure handling) and updated
+  the confirmation-screen/landing-page/SMS-templates-editor tests for
+  the new copy and 2 new template boxes. 198 React + 162 Deno = 360/360
+  passing.
+
+  Verified live on both production and staging: the new migration
+  backfilled every pre-existing production stay to 'approved' (0 left
+  'pending'); both deployed bundles show the new landing-page copy and
+  confirm production's Supabase project ref is absent from staging's
+  bundle and vice versa.
+
 - Sept 19, 2026 (4): SEO basics + Google Analytics, on request:
   1. Google Analytics 4 wired up via gtag.js (Measurement ID
      G-160YK5FB7D, Kim's own "Bayview Boarding" GA account/property,

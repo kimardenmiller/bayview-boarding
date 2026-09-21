@@ -22,6 +22,8 @@ const DEFAULT_SMS_TEMPLATES = {
   reminder: SETTINGS.SMS_REMINDER,
   billing: SETTINGS.SMS_BILLING,
   pickupReminder: SETTINGS.SMS_PICKUP_REMINDER,
+  requestReceived: SETTINGS.SMS_REQUEST_RECEIVED,
+  denied: SETTINGS.SMS_DENIED,
 };
 const DEFAULT_SMS_FOOTER = SETTINGS.SMS_FOOTER;
 
@@ -757,8 +759,12 @@ function Confirmation({ stay, onNewBooking }) {
   return (
     <div className="step confirmation">
       <div className="confirm-icon">✓</div>
-      <h2>You're all set, {stay.owner_name?.split(' ')[0]}!</h2>
-      <p>We've received your signed agreement for <strong>{stay.dog_name}</strong>.</p>
+      <h2>Request received, {stay.owner_name?.split(' ')[0]}!</h2>
+      <p>
+        We've received your booking request and signed agreement for <strong>{stay.dog_name}</strong>.
+        We'll review it and text you within 24 hours to confirm it - or let you know if we can't
+        accommodate it.
+      </p>
       <div className="confirm-blocks">
         <div className="confirm-block">
           <div className="confirm-block-label">Drop-off</div>
@@ -780,7 +786,7 @@ function Confirmation({ stay, onNewBooking }) {
           <div className="cost-note">Final invoice at pickup</div>
         </div>
       )}
-      <p className="confirm-sub">We'll be in touch if we have any questions. See you soon!</p>
+      <p className="confirm-sub">We'll be in touch if we have any questions. Thanks for your patience!</p>
       <button className="btn-secondary" onClick={onNewBooking}>Book Another Stay</button>
     </div>
   );
@@ -855,6 +861,15 @@ function AdminView({
   const [billingEdits, setBillingEdits] = useState({});
   const [billingSendStatus, setBillingSendStatus] = useState({});
   const [sendingBillId, setSendingBillId] = useState(null);
+  // Booking request review (Sept 21, 2026, on request - see Submit Idea
+  // from Estee) - a new stay starts 'pending' until admin approves or
+  // denies it here. denyReasonDrafts is a free-text optional reason per
+  // stay id, included in the denial text if given (no confirmation step
+  // for either action, same as every other admin decision in this
+  // panel - see Rules/CLAUDE.md on that established pattern).
+  const [sendingRequestId, setSendingRequestId] = useState(null);
+  const [requestActionStatus, setRequestActionStatus] = useState({});
+  const [denyReasonDrafts, setDenyReasonDrafts] = useState({});
   // Click-to-expand (Sept 17, 2026 - replaced "every field always visible
   // inline" now that the list includes every unbilled stay, not just
   // already-checked-out ones, and would otherwise be a wall of inputs).
@@ -947,12 +962,14 @@ function AdminView({
       setPackingList(data.packingList);
       setEditPackingList(data.packingList);
     }
-    if (data.smsConfirmation || data.smsReminder || data.smsBilling || data.smsPickupReminder) {
+    if (data.smsConfirmation || data.smsReminder || data.smsBilling || data.smsPickupReminder || data.smsRequestReceived || data.smsDenied) {
       const next = {
         confirmation: data.smsConfirmation ?? smsTemplates.confirmation,
         reminder: data.smsReminder ?? smsTemplates.reminder,
         billing: data.smsBilling ?? smsTemplates.billing,
         pickupReminder: data.smsPickupReminder ?? smsTemplates.pickupReminder,
+        requestReceived: data.smsRequestReceived ?? smsTemplates.requestReceived,
+        denied: data.smsDenied ?? smsTemplates.denied,
       };
       setSmsTemplates(next);
       setEditSms(next);
@@ -1190,6 +1207,66 @@ function AdminView({
     setTotalStays(data.totalStays);
   }
 
+  // Approve/deny a pending request (Sept 21, 2026) - same "send the text
+  // FIRST, then persist the decision" ordering as sendBill above: the
+  // status should only change once the client has actually been texted,
+  // not just because admin clicked a button.
+  async function approveRequest(stay) {
+    setSendingRequestId(stay.id);
+    setRequestActionStatus(prev => ({ ...prev, [stay.id]: null }));
+    const { data: smsData, error: smsErr } = await supabase.functions.invoke('send-confirmation', {
+      body: {
+        type: 'confirmation', owner_name: stay.ownerName, owner_phone: stay.ownerPhone,
+        dog_name: stay.dogNames.join(' & '), check_in: stay.check_in, check_out: stay.check_out,
+        drop_time: stay.drop_time, pickup_time: stay.pickup_time, estimated_cost: stay.estimated_cost,
+        message_template: smsTemplates.confirmation,
+      },
+    });
+    if (smsErr || smsData?.error) {
+      setSendingRequestId(null);
+      setRequestActionStatus(prev => ({ ...prev, [stay.id]: 'Failed to send. Please try again.' }));
+      return;
+    }
+    const { data, error: fnError } = await supabase.functions.invoke('admin-data', {
+      body: { password: pw, action: 'approveStay', stayId: stay.id },
+    });
+    setSendingRequestId(null);
+    if (fnError || data?.error) {
+      setRequestActionStatus(prev => ({ ...prev, [stay.id]: 'Sent, but failed to save - it may show as pending again.' }));
+      return;
+    }
+    setDogs(data.dogs);
+    setTotalStays(data.totalStays);
+  }
+
+  async function denyRequest(stay) {
+    const reason = (denyReasonDrafts[stay.id] || '').trim();
+    setSendingRequestId(stay.id);
+    setRequestActionStatus(prev => ({ ...prev, [stay.id]: null }));
+    const { data: smsData, error: smsErr } = await supabase.functions.invoke('send-confirmation', {
+      body: {
+        type: 'denied', owner_name: stay.ownerName, owner_phone: stay.ownerPhone,
+        dog_name: stay.dogNames.join(' & '), check_in: stay.check_in, check_out: stay.check_out,
+        message_template: smsTemplates.denied, denial_reason: reason || null,
+      },
+    });
+    if (smsErr || smsData?.error) {
+      setSendingRequestId(null);
+      setRequestActionStatus(prev => ({ ...prev, [stay.id]: 'Failed to send. Please try again.' }));
+      return;
+    }
+    const { data, error: fnError } = await supabase.functions.invoke('admin-data', {
+      body: { password: pw, action: 'denyStay', stayId: stay.id, denialReason: reason || null },
+    });
+    setSendingRequestId(null);
+    if (fnError || data?.error) {
+      setRequestActionStatus(prev => ({ ...prev, [stay.id]: 'Sent, but failed to save - it may show as pending again.' }));
+      return;
+    }
+    setDogs(data.dogs);
+    setTotalStays(data.totalStays);
+  }
+
   if (!authed) {
     return (
       <div className="admin-overlay">
@@ -1208,17 +1285,37 @@ function AdminView({
 
   const feedbackOpenCount = feedback.filter(f => f.status === 'open').length;
 
+  // Every never-decided stay, across all dogs, deduped by stay id (a
+  // shared multi-dog booking otherwise appears once per dog) - the new
+  // top-of-panel Requests section (Sept 21, 2026). Sorted earliest
+  // check-in first, same as Unbilled Stays below.
+  const pendingByStayId = new Map();
+  dogs.forEach(d => {
+    (d.stays || []).forEach(s => {
+      if (s.approval_status === 'pending') {
+        if (pendingByStayId.has(s.id)) {
+          pendingByStayId.get(s.id).dogNames.push(d.name);
+        } else {
+          pendingByStayId.set(s.id, { ...s, dogNames: [d.name], ownerName: d.owner?.name, ownerPhone: d.owner?.phone });
+        }
+      }
+    });
+  });
+  const pendingRequests = Array.from(pendingByStayId.values()).sort((a, b) => a.check_in.localeCompare(b.check_in));
+
   // Every dog's stay history already carries billed_at - no separate
   // fetch needed, just flatten across dogs and dedupe by stay id (a
   // shared multi-dog stay otherwise appears once per dog). "Unbilled"
-  // means never billed, full stop - future and in-progress stays are
+  // means approved but never billed - future and in-progress stays are
   // included too (Sept 17, 2026 - previously limited to already-checked-
   // out stays), sorted earliest check-in first so admin sees what's
-  // coming up, not just what's overdue.
+  // coming up, not just what's overdue. A still-pending or denied stay
+  // isn't a real booking yet (or ever), so it stays out of this list -
+  // see Requests above (Sept 21, 2026).
   const unbilledByStayId = new Map();
   dogs.forEach(d => {
     (d.stays || []).forEach(s => {
-      if (!s.billed_at) {
+      if (s.approval_status === 'approved' && !s.billed_at) {
         if (unbilledByStayId.has(s.id)) {
           unbilledByStayId.get(s.id).dogNames.push(d.name);
         } else {
@@ -1244,7 +1341,7 @@ function AdminView({
     const phone = d.owner?.phone;
     if (!phone) return;
     (d.stays || []).forEach(s => {
-      if (!s.billed_at) return;
+      if (s.approval_status !== 'approved' || !s.billed_at) return;
       if (!pastStaysByOwnerPhone.has(phone)) {
         pastStaysByOwnerPhone.set(phone, { ownerName: d.owner?.name, ownerPhone: phone, staysById: new Map() });
       }
@@ -1274,6 +1371,90 @@ function AdminView({
     o.dogNames.some(n => n.toLowerCase().includes(search.toLowerCase()))
   );
   const selectedOwner = pastStaysOwners.find(o => o.ownerPhone === selectedOwnerPhone) || null;
+
+  // The Requests section (Sept 21, 2026) - a simpler sibling of
+  // renderStayCard below: view-only details (no Edit/billing fields,
+  // nothing to correct on a stay that isn't a real booking yet) plus
+  // Approve/Deny. Shares expandedStayId/expandedWaiver with the other
+  // stay lists - a stay id can only appear in one section at a time
+  // (pending vs. approved), so there's no collision risk.
+  function renderRequestCard(s) {
+    const isExpanded = expandedStayId === s.id;
+    return (
+      <div key={s.id} className="stay-card">
+        <div
+          className="stay-dates"
+          style={{ cursor: 'pointer' }}
+          onClick={() => setExpandedStayId(isExpanded ? null : s.id)}
+        >
+          <span>{s.dogNames.join(' & ')} — {s.ownerName}</span>
+        </div>
+        <div className="stay-meta">{formatDate(s.check_in)} – {formatDate(s.check_out)}</div>
+        {isExpanded && (
+          <div style={{ marginTop: 8 }}>
+            <div className="stay-meta">{s.ownerPhone}</div>
+            <div className="stay-meta">
+              Drop-off: {s.drop_time ? s.drop_time.slice(0, 5) : '—'} · Pickup: {s.pickup_time ? s.pickup_time.slice(0, 5) : '—'}
+            </div>
+            <div className="stay-meta">
+              Estimated cost: {s.estimated_cost != null ? `$${formatMoney(s.estimated_cost)}` : '—'}
+            </div>
+            {s.notes && <div className="stay-notes">"{s.notes}"</div>}
+            {Array.isArray(s.waiver_snapshot) && s.waiver_snapshot.length > 0 && (
+              <div style={{ marginTop: 6 }}>
+                <button
+                  className="back-btn"
+                  style={{ fontSize: '0.78rem' }}
+                  onClick={() => setExpandedWaiver(w => (w === s.id ? null : s.id))}
+                >
+                  {expandedWaiver === s.id ? 'Hide waiver as signed' : 'View waiver as signed'}
+                </button>
+                {expandedWaiver === s.id && (
+                  <div className="waiver-scroll" style={{ marginTop: 8, maxHeight: 260 }}>
+                    {s.waiver_snapshot.map((section, si) => (
+                      <div className="waiver-section" key={si}>
+                        <div className="waiver-section-title">{section.title}</div>
+                        <p>{section.body}</p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+            <div style={{ marginTop: 8 }}>
+              <input
+                placeholder="Reason for declining (optional, included in the text if you deny)"
+                value={denyReasonDrafts[s.id] || ''}
+                onChange={e => setDenyReasonDrafts(prev => ({ ...prev, [s.id]: e.target.value }))}
+                style={{ width: '100%', padding: '6px 10px', border: '1.5px solid #D5D9DE', borderRadius: 6, fontSize: '0.85rem' }}
+              />
+            </div>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 8, flexWrap: 'wrap' }}>
+              <button
+                className="btn-primary"
+                style={{ padding: '4px 10px', fontSize: '0.78rem' }}
+                disabled={sendingRequestId === s.id}
+                onClick={() => approveRequest(s)}
+              >
+                {sendingRequestId === s.id ? 'Sending...' : 'Approve'}
+              </button>
+              <button
+                className="btn-secondary"
+                style={{ padding: '4px 10px', fontSize: '0.78rem', color: '#C0392B', borderColor: '#C0392B' }}
+                disabled={sendingRequestId === s.id}
+                onClick={() => denyRequest(s)}
+              >
+                Deny
+              </button>
+              {requestActionStatus[s.id] && (
+                <span className="field-error" style={{ fontSize: '0.78rem' }}>{requestActionStatus[s.id]}</span>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
 
   // Shared by Unbilled Stays and Past Stays (Sept 18, 2026) - same
   // click-to-expand card, same Edit/Recalculate/Send Billing Text
@@ -1575,6 +1756,16 @@ function AdminView({
           <button className="close-btn" onClick={onClose}>✕</button>
         </div>
 
+        <div className="rate-setting requests-section">
+          <label className="field-label">
+            Requests {pendingRequests.length > 0 && <span className="feedback-badge" style={{ marginLeft: 6 }}>{pendingRequests.length}</span>}
+          </label>
+          {pendingRequests.length === 0 && <p className="empty" style={{ padding: '8px 0' }}>No pending requests right now.</p>}
+          <div className="stay-history">
+            {pendingRequests.map(renderRequestCard)}
+          </div>
+        </div>
+
         <div className="rate-setting unbilled-section">
           <label className="field-label">
             Unbilled Stays {unbilledStays.length > 0 && <span className="feedback-badge" style={{ marginLeft: 6 }}>{unbilledStays.length}</span>}
@@ -1713,7 +1904,7 @@ function AdminView({
         <div className="rate-setting sms-editor">
           <label className="field-label">SMS Message Templates</label>
           <div style={{ fontSize: '0.72rem', color: '#6B7A8A', marginBottom: 10 }}>
-            Placeholders: {'{firstName} {dogName} {dogVerb} {dropDate} {dropTime} {pickDate} {pickTime} {estimatedCost} {finalCost} {billingBreakdown} {packingList} {primaryManagerPhone} {secondaryManagerPhone}'}
+            Placeholders: {'{firstName} {dogName} {dogVerb} {dropDate} {dropTime} {pickDate} {pickTime} {estimatedCost} {finalCost} {billingBreakdown} {packingList} {primaryManagerPhone} {secondaryManagerPhone} {denialReason} (Booking Declined only)'}
           </div>
 
           <div className="text-footer-editor" style={{ marginBottom: 12 }}>
@@ -1781,7 +1972,9 @@ function AdminView({
           </div>
 
           {[
+            { key: 'requestReceived', label: 'Booking Request Received' },
             { key: 'confirmation', label: 'Booking Confirmation' },
+            { key: 'denied', label: 'Booking Declined' },
             { key: 'reminder', label: 'Drop-off Reminder' },
             { key: 'pickupReminder', label: 'Pickup Reminder' },
             { key: 'billing', label: 'Billing' },
@@ -1850,6 +2043,11 @@ function Landing({ onStart, onLearnMore, aboutSectionRef }) {
           </div>
           <div className="landing-bottom">
             <button className="landing-cta" onClick={onStart}>Book My Stay</button>
+            {/* Sept 21, 2026, on request: booking now starts a request,
+                reviewed within 24 hours, not an instant booking - the CTA
+                itself stays "Book My Stay" on purpose, so this sets that
+                expectation up front instead. */}
+            <p className="landing-request-note">Requests are reviewed within 24 hours</p>
             <button className="landing-learn-more" onClick={onLearnMore}>New? Learn more →</button>
           </div>
         </div>
@@ -2262,12 +2460,14 @@ export default function App() {
       if (typeof data.holidayUpcharge === 'number') setHolidayUpcharge(data.holidayUpcharge);
       if (Array.isArray(data.vets)) setVets(data.vets);
       if (Array.isArray(data.packingList)) setPackingList(data.packingList);
-      if (data.smsConfirmation || data.smsReminder || data.smsBilling || data.smsPickupReminder) {
+      if (data.smsConfirmation || data.smsReminder || data.smsBilling || data.smsPickupReminder || data.smsRequestReceived || data.smsDenied) {
         setSmsTemplates({
           confirmation: data.smsConfirmation ?? DEFAULT_SMS_TEMPLATES.confirmation,
           reminder: data.smsReminder ?? DEFAULT_SMS_TEMPLATES.reminder,
           billing: data.smsBilling ?? DEFAULT_SMS_TEMPLATES.billing,
           pickupReminder: data.smsPickupReminder ?? DEFAULT_SMS_TEMPLATES.pickupReminder,
+          requestReceived: data.smsRequestReceived ?? DEFAULT_SMS_TEMPLATES.requestReceived,
+          denied: data.smsDenied ?? DEFAULT_SMS_TEMPLATES.denied,
         });
       }
       if (data.smsFooter) setSmsFooter(data.smsFooter);
@@ -2339,10 +2539,15 @@ export default function App() {
       };
       setCurrentStay(confirmation);
       setSubmitted(true);
-      // Send confirmation text
+      // A submission is a request now, not an instant booking (Sept 21,
+      // 2026, on request - see Submit Idea from Estee) - this text just
+      // acknowledges receipt; the real confirmation only goes out once
+      // admin approves it from the new admin Requests section
+      // (approveRequest below).
       try {
         await supabase.functions.invoke('send-confirmation', {
           body: {
+            type: 'request_received',
             owner_name: confirmation.owner_name,
             owner_phone: form.ownerPhone,
             dog_name: confirmation.dog_name,
@@ -2351,7 +2556,7 @@ export default function App() {
             drop_time: confirmation.drop_time,
             pickup_time: confirmation.pickup_time,
             estimated_cost: confirmation.estimated_cost,
-            message_template: smsTemplates.confirmation,
+            message_template: smsTemplates.requestReceived,
           }
         });
       } catch (textErr) {

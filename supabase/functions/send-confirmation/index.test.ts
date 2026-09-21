@@ -303,6 +303,78 @@ Deno.test('with a message_template: fills {pickupDate}/{pickupTime} for a pickup
   }
 });
 
+Deno.test('with no message_template, type request_received: builds the "request received, review within 24 hours" message', async () => {
+  const stub = stubEnvironment();
+  try {
+    await handleRequest(sendRequest({
+      type: 'request_received', owner_name: 'Kim Miller', owner_phone: '4155550199', dog_name: 'Rex',
+      check_in: '2026-10-01', check_out: '2026-10-03', estimated_cost: 210,
+    }));
+    assertEquals(
+      stub.calls[0].body,
+      `Hi Kim! We've received your booking request for Rex - Thu, Oct 1 to Sat, Oct 3. We'll review it and confirm within 24 hours. Estimated cost: $210. — Kim & Estee\n\n${FILLED_FOOTER}`,
+    );
+  } finally {
+    stub.restore();
+  }
+});
+
+Deno.test('with no message_template, type denied: includes the reason when given', async () => {
+  const stub = stubEnvironment();
+  try {
+    await handleRequest(sendRequest({
+      type: 'denied', owner_name: 'Kim Miller', owner_phone: '4155550199', dog_name: 'Rex',
+      check_in: '2026-10-01', check_out: '2026-10-03', denial_reason: 'Fully booked that week',
+    }));
+    assertEquals(
+      stub.calls[0].body,
+      `Hi Kim! Unfortunately we're unable to accept your booking request for Rex (Thu, Oct 1 - Sat, Oct 3). Reason: Fully booked that week. Please feel free to reach out with any questions. — Kim & Estee\n\n${FILLED_FOOTER}`,
+    );
+  } finally {
+    stub.restore();
+  }
+});
+
+Deno.test('with no message_template, type denied: reads cleanly with no reason given', async () => {
+  const stub = stubEnvironment();
+  try {
+    await handleRequest(sendRequest({
+      type: 'denied', owner_name: 'Kim Miller', owner_phone: '4155550199', dog_name: 'Rex',
+      check_in: '2026-10-01', check_out: '2026-10-03',
+    }));
+    assertEquals(
+      stub.calls[0].body,
+      `Hi Kim! Unfortunately we're unable to accept your booking request for Rex (Thu, Oct 1 - Sat, Oct 3). Please feel free to reach out with any questions. — Kim & Estee\n\n${FILLED_FOOTER}`,
+    );
+  } finally {
+    stub.restore();
+  }
+});
+
+Deno.test('with a message_template: fills {denialReason}, blank (not the literal placeholder) when no reason given', async () => {
+  const stub = stubEnvironment();
+  try {
+    await handleRequest(sendRequest({
+      owner_name: 'Kim Miller', owner_phone: '4155550199', dog_name: 'Rex',
+      message_template: 'Sorry {dogName}.{denialReason} Bye.', denial_reason: 'Fully booked',
+    }));
+    assertEquals(stub.calls[0].body, `Sorry Rex. Reason: Fully booked. Bye.\n\n${FILLED_FOOTER}`);
+
+    const noReason = stubEnvironment();
+    try {
+      await handleRequest(sendRequest({
+        owner_name: 'Kim Miller', owner_phone: '4155550199', dog_name: 'Rex',
+        message_template: 'Sorry {dogName}.{denialReason} Bye.',
+      }));
+      assertEquals(noReason.calls[0].body, `Sorry Rex. Bye.\n\n${FILLED_FOOTER}`);
+    } finally {
+      noReason.restore();
+    }
+  } finally {
+    stub.restore();
+  }
+});
+
 Deno.test('no footer is appended (just skipped) if sms_footer happens to be blank', async () => {
   const stub = stubEnvironment({ settingsRow: { ...DEFAULT_SETTINGS_ROW, sms_footer: '' } });
   try {

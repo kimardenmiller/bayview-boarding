@@ -300,6 +300,10 @@ Deno.test('a new owner with a new dog creates one owner, one dog, one stay, one 
 
     assertEquals(data.stay.owner_name, 'Kim Miller');
     assertEquals(data.stay.dog_names, ['Rex']);
+    // A submission is a request now, not an instant booking (Sept 21,
+    // 2026) - admin approves/denies it from the new Requests section.
+    assertEquals(stub.db.stays[0].approval_status, 'pending');
+    assertEquals(data.stay.approval_status, 'pending');
   } finally {
     stub.restore();
   }

@@ -51,7 +51,8 @@ export const SETTINGS = {
   //            - see formatCostBreakdownText in App.js), {packingList}
   //            (already formatted as one "• item" bullet per line),
   //            {primaryManagerPhone}, {secondaryManagerPhone} (renamed
-  //            from {kimPhone}/{esteePhone} Sept 18, 2026)
+  //            from {kimPhone}/{esteePhone} Sept 18, 2026), {denialReason}
+  //            (the denied template only - Sept 21, 2026, see above)
   //
   // None of the 4 templates below end with "Reply STOP to opt out..."
   // any more (Sept 18, 2026) - that's now SMS_FOOTER, a single shared
@@ -70,6 +71,16 @@ export const SETTINGS = {
   SMS_BILLING: `Hi {firstName}! Thank you for visiting Bayview Boarding with {dogName}. Here's your billing detail:\n{billingBreakdown}\nTotal: ${'{finalCost}'}\n\nThanks for choosing Bayview Boarding! — Kim & Estee`,
 
   SMS_PICKUP_REMINDER: `It's been wonderful having {dogName}! We have you down for pick up at {pickupDate} {pickupTime}. Please let us know in our shared group text thread if anything has changed. Otherwise, we'll see you tomorrow at {pickupTime}. — Kim & Estee`,
+
+  // Sent immediately at submission now (Sept 21, 2026) - a booking is a
+  // REQUEST until admin approves it; SMS_CONFIRMATION above now only
+  // goes out once that happens (see App.js's approveRequest).
+  SMS_REQUEST_RECEIVED: `Hi {firstName}! We've received your booking request for {dogName} - {dropDate} to {pickDate}. We'll review it and confirm within 24 hours. Estimated cost: ${'{estimatedCost}'}.`,
+
+  // Sent if admin declines a request instead (Sept 21, 2026). {denialReason}
+  // is admin's own optional typed-in reason, already formatted as " Reason:
+  // ...." (or blank) by send-confirmation - never a raw/empty placeholder.
+  SMS_DENIED: `Hi {firstName}! Unfortunately we're unable to accept your booking request for {dogName} ({dropDate} - {pickDate}).{denialReason} Please feel free to reach out with any questions.`,
 
   // Appended once, server-side, to the end of every outbound client SMS
   // (Sept 18, 2026 - "Text Message Footer") - not stored per-template.

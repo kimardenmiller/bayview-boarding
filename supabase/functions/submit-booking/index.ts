@@ -181,7 +181,9 @@ export async function handleRequest(req: Request): Promise<Response> {
       }
     }
 
-    // The stay itself.
+    // The stay itself - starts 'pending' (Sept 21, 2026): every new
+    // submission is a request now, not an instant booking, until admin
+    // approves or denies it from the new admin Requests section.
     const { data: insertedStays, error: stayErr } = await supabase.from("stays").insert({
       owner_id: ownerId,
       check_in: body.checkIn,
@@ -194,7 +196,8 @@ export async function handleRequest(req: Request): Promise<Response> {
       signature: body.signature!.trim(),
       client_timezone: body.clientTimezone || null,
       waiver_snapshot: body.waiverSnapshot,
-    }).select("id, check_in, check_out, drop_time, pickup_time, estimated_cost, submitted_at");
+      approval_status: "pending",
+    }).select("id, check_in, check_out, drop_time, pickup_time, estimated_cost, submitted_at, approval_status");
     if (stayErr) throw stayErr;
     const stay = insertedStays[0];
 

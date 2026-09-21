@@ -35,6 +35,7 @@
    used on plain white where the classic shade reads fine). */
 .landing-learn-more { display: block; margin: 14px auto 0; background: none; border: none; color: #6EA8FE; font-size: 0.76rem; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
 .landing-learn-more:hover { opacity: 0.85; }
+.landing-request-note { margin: 10px 0 0; color: rgba(255,255,255,.82); font-size: 0.76rem; text-shadow: 0 1px 4px rgba(0,0,0,.4); }
 
 .about { min-height: 100vh; min-height: 100dvh; background: #fff; }
 .about-content { max-width: 560px; margin: 0 auto; padding: 28px 20px 48px; }

@@ -36,6 +36,8 @@ interface SettingsRow {
   sms_billing: string;
   sms_pickup_reminder: string;
   sms_footer: string;
+  sms_request_received: string;
+  sms_denied: string;
   primary_manager_phone?: string;
   secondary_manager_phone?: string;
   default_broadcast_message?: string;
@@ -49,7 +51,7 @@ interface SettingsRow {
 // that must never reach a public read, since those are the actual phone
 // numbers those placeholders get filled with.
 const PUBLIC_COLUMNS =
-  "day_rate, multi_dog_discount, holiday_upcharge, vets, packing_list, sms_confirmation, sms_reminder, sms_billing, sms_pickup_reminder, sms_footer";
+  "day_rate, multi_dog_discount, holiday_upcharge, vets, packing_list, sms_confirmation, sms_reminder, sms_billing, sms_pickup_reminder, sms_footer, sms_request_received, sms_denied";
 const ADMIN_ONLY_COLUMNS = "primary_manager_phone, secondary_manager_phone, default_broadcast_message";
 const ADMIN_COLUMNS = `${PUBLIC_COLUMNS}, ${ADMIN_ONLY_COLUMNS}`;
 
@@ -65,6 +67,8 @@ function toClientShape(row: SettingsRow) {
     smsBilling: row.sms_billing,
     smsPickupReminder: row.sms_pickup_reminder,
     smsFooter: row.sms_footer,
+    smsRequestReceived: row.sms_request_received,
+    smsDenied: row.sms_denied,
   };
   // Only present at all when the row was fetched with ADMIN_COLUMNS -
   // a public caller's response simply never has these keys, rather than
@@ -87,6 +91,8 @@ interface UpdatesInput {
   smsBilling?: string;
   smsPickupReminder?: string;
   smsFooter?: string;
+  smsRequestReceived?: string;
+  smsDenied?: string;
   primaryManagerPhone?: string;
   secondaryManagerPhone?: string;
   defaultBroadcastMessage?: string;
@@ -163,6 +169,12 @@ function validateUpdates(updates: UpdatesInput): string[] {
   if (updates.smsFooter !== undefined && !updates.smsFooter?.trim()) {
     errors.push("smsFooter must not be blank");
   }
+  if (updates.smsRequestReceived !== undefined && !updates.smsRequestReceived?.trim()) {
+    errors.push("smsRequestReceived must not be blank");
+  }
+  if (updates.smsDenied !== undefined && !updates.smsDenied?.trim()) {
+    errors.push("smsDenied must not be blank");
+  }
   if (updates.defaultBroadcastMessage !== undefined && !updates.defaultBroadcastMessage?.trim()) {
     errors.push("defaultBroadcastMessage must not be blank");
   }
@@ -210,6 +222,8 @@ export async function handleRequest(req: Request): Promise<Response> {
       if (updates.smsBilling !== undefined) patch.sms_billing = updates.smsBilling.trim();
       if (updates.smsPickupReminder !== undefined) patch.sms_pickup_reminder = updates.smsPickupReminder.trim();
       if (updates.smsFooter !== undefined) patch.sms_footer = updates.smsFooter.trim();
+      if (updates.smsRequestReceived !== undefined) patch.sms_request_received = updates.smsRequestReceived.trim();
+      if (updates.smsDenied !== undefined) patch.sms_denied = updates.smsDenied.trim();
       if (updates.primaryManagerPhone !== undefined) patch.primary_manager_phone = updates.primaryManagerPhone.trim();
       if (updates.secondaryManagerPhone !== undefined) patch.secondary_manager_phone = updates.secondaryManagerPhone.trim();
       if (updates.defaultBroadcastMessage !== undefined) patch.default_broadcast_message = updates.defaultBroadcastMessage.trim();

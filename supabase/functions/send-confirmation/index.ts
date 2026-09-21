@@ -141,7 +141,7 @@ export async function handleRequest(req: Request): Promise<Response> {
     const {
       type, owner_name, owner_phone, dog_name, check_in, check_out,
       drop_time, pickup_time, estimated_cost, final_cost,
-      message_template, packing_list, billing_breakdown,
+      message_template, packing_list, billing_breakdown, denial_reason,
     } = JSON.parse(text);
 
     const firstName = owner_name?.split(" ")[0] || "there";
@@ -164,6 +164,11 @@ export async function handleRequest(req: Request): Promise<Response> {
       billingBreakdown: billing_breakdown || "",
       packingList: packingListStr,
       primaryManagerPhone: primaryPhone, secondaryManagerPhone: secondaryPhone,
+      // A leading space + trailing period baked in here (not in the
+      // template) so the sentence reads correctly whether or not a
+      // reason was given - {denialReason} just disappears cleanly when
+      // blank instead of leaving an awkward gap (Sept 21, 2026).
+      denialReason: denial_reason ? ` Reason: ${denial_reason}.` : "",
     };
 
     let message = "";
@@ -184,6 +189,14 @@ export async function handleRequest(req: Request): Promise<Response> {
       message = `Hi ${firstName}! Thank you for visiting Bayview Boarding with ${dog_name}. Here's your billing detail:${breakdownBlock}\nTotal: $${formatDollars(final_cost)}\n\nThanks for choosing Bayview Boarding! — Kim & Estee`;
     } else if (type === "pickup") {
       message = `It's been wonderful having ${dog_name}! We have you down for pick up at ${pickDate} ${pickTimeStr}. Please let us know in our shared group text thread if anything has changed. Otherwise, we'll see you tomorrow at ${pickTimeStr}. — Kim & Estee`;
+    } else if (type === "request_received") {
+      // Sept 21, 2026: a submission is a request now, not an instant
+      // booking - this goes out immediately at submission; the real
+      // confirmation (below) now waits until admin approves it instead.
+      message = `Hi ${firstName}! We've received your booking request for ${dog_name} - ${dropDate} to ${pickDate}. We'll review it and confirm within 24 hours. Estimated cost: $${formatDollars(estimated_cost)}. — Kim & Estee`;
+    } else if (type === "denied") {
+      const reasonSuffix = denial_reason ? ` Reason: ${denial_reason}.` : "";
+      message = `Hi ${firstName}! Unfortunately we're unable to accept your booking request for ${dog_name} (${dropDate} - ${pickDate}).${reasonSuffix} Please feel free to reach out with any questions. — Kim & Estee`;
     } else {
       // Default: confirmation
       message = `Hi ${firstName}! ${dog_name}'s stay at Bayview Boarding is confirmed. Drop-off: ${dropDate} at ${dropTimeStr}. Pick-up: ${pickDate} at ${pickTimeStr}. Estimated cost: $${formatDollars(estimated_cost)}. — Kim & Estee`;

@@ -18,6 +18,8 @@ const DEFAULT_ROW = {
   sms_billing: 'Hi {firstName}! total: ${finalCost}.',
   sms_pickup_reminder: 'Bye {dogName}! pickup at {pickupDate} {pickupTime}.',
   sms_footer: 'Reply STOP to opt out. Text Kim {primaryManagerPhone} & Estee {secondaryManagerPhone}.',
+  sms_request_received: 'Hi {firstName}! Request received for {dogName}.',
+  sms_denied: 'Hi {firstName}! Sorry, we can\'t take {dogName}.{denialReason}',
   primary_manager_phone: '4155550101',
   secondary_manager_phone: '4155550102',
   default_broadcast_message: 'Please have a look at our staging site and tell us what you think!',
@@ -98,6 +100,8 @@ Deno.test('a plain read requires no password (public) and never includes the man
       smsBilling: DEFAULT_ROW.sms_billing,
       smsPickupReminder: DEFAULT_ROW.sms_pickup_reminder,
       smsFooter: DEFAULT_ROW.sms_footer,
+      smsRequestReceived: DEFAULT_ROW.sms_request_received,
+      smsDenied: DEFAULT_ROW.sms_denied,
     });
     assertEquals('primaryManagerPhone' in data, false);
     assertEquals('secondaryManagerPhone' in data, false);
@@ -361,6 +365,10 @@ Deno.test('rejects a blank SMS template, without touching the database', async (
     assertEquals(footer.status, 400);
     const broadcast = await handleRequest(postRequest({ password: ADMIN_PASSWORD, updates: { defaultBroadcastMessage: '   ' } }));
     assertEquals(broadcast.status, 400);
+    const requestReceived = await handleRequest(postRequest({ password: ADMIN_PASSWORD, updates: { smsRequestReceived: '   ' } }));
+    assertEquals(requestReceived.status, 400);
+    const denied = await handleRequest(postRequest({ password: ADMIN_PASSWORD, updates: { smsDenied: '' } }));
+    assertEquals(denied.status, 400);
     assertEquals(stub.calls.length, 0);
   } finally {
     stub.restore();
@@ -377,6 +385,22 @@ Deno.test('updates the shared SMS footer, trimming it', async () => {
     assertEquals(res.status, 200);
     const data = await res.json();
     assertEquals(data.smsFooter, 'New footer {primaryManagerPhone}');
+  } finally {
+    stub.restore();
+  }
+});
+
+Deno.test('updates the request-received and denied templates, trimming each', async () => {
+  const stub = stubSupabase();
+  try {
+    const res = await handleRequest(postRequest({
+      password: ADMIN_PASSWORD,
+      updates: { smsRequestReceived: '  New request text  ', smsDenied: '  New denied text  ' },
+    }));
+    assertEquals(res.status, 200);
+    const data = await res.json();
+    assertEquals(data.smsRequestReceived, 'New request text');
+    assertEquals(data.smsDenied, 'New denied text');
   } finally {
     stub.restore();
   }
