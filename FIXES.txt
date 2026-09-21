@@ -1,6 +1,6 @@
 BAYVIEW BOARDING — FIX LIST
 ============================
-Last updated: September 21, 2026 (8) (new "Awaiting Payment" admin section - a billed stay isn't Paid until admin marks it so)
+Last updated: September 21, 2026 (9) (link-preview image is now the landing hero photo, and preview URLs are absolute so they actually resolve when shared)
 
 NEXT CHANGE LIST (v1.5)
 -----------------------
@@ -62,6 +62,24 @@ TWILIO STATUS
 
 COMPLETED
 ---------
+- Sept 21, 2026 (9): Link-preview image, on request ("can it be our
+  opening page image?") - og:image/twitter:image now point at the
+  landing hero photo (public/img/hero-dog.jpg, a copy of src/img/
+  hero-dog.jpg - the JS-imported original gets a webpack content hash,
+  so it has no stable URL a static meta tag could reference) instead of
+  an About-page gallery photo.
+
+  Also fixed while in there: production's canonical/og:url/og:image were
+  RELATIVE paths ("/bayview-boarding/img/..."), unlike staging's (which
+  were already absolute, since build:staging explicitly passes a full
+  PUBLIC_URL). The Open Graph spec requires absolute URLs for these -
+  some crawlers resolve a relative one anyway, but not reliably, so link
+  previews could plausibly have been silently broken on some platforms
+  the whole time. package.json's plain `build` script now also passes an
+  explicit absolute PUBLIC_URL, matching build:staging's approach -
+  verified live, every meta tag and every image/asset reference in the
+  production bundle now resolves to a full https:// URL.
+
 - Sept 21, 2026 (8): Payment tracking, on request - "billed" alone never
   answered "has this actually been paid?":
   1. New stays.paid_at column. Every stay already billed before this

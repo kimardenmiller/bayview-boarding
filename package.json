@@ -12,7 +12,7 @@
   },
   "scripts": {
     "start": "react-scripts start",
-    "build": "REACT_APP_GA_MEASUREMENT_ID=G-160YK5FB7D react-scripts build",
+    "build": "PUBLIC_URL=https://kimardenmiller.github.io/bayview-boarding REACT_APP_GA_MEASUREMENT_ID=G-160YK5FB7D react-scripts build",
     "predeploy": "npm run build",
     "deploy": "gh-pages -d build --add",
     "build:staging": "PUBLIC_URL=https://kimardenmiller.github.io/bayview-boarding/staging REACT_APP_SUPABASE_URL=https://uqmjudozfqlmiepnqodx.supabase.co REACT_APP_SUPABASE_KEY=sb_publishable_5a9wgA9-6_SFKd235QWwzQ_-pm0cv9C react-scripts build",

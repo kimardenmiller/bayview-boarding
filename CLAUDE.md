@@ -393,10 +393,21 @@ Twitter card tags, a self-referencing canonical URL (all in public/
 index.html, using %PUBLIC_URL% so each build points at itself), and
 public/sitemap.xml - necessarily just the one URL, since this is a
 client-side SPA with no server-side routing and so no other distinct
-crawlable paths exist. public/robots.txt lives at a path GitHub Pages
-crawlers never actually check (robots.txt is only honored at the true
-domain root, kimardenmiller.github.io/robots.txt, and this site is at a
-subpath of that shared domain, not a custom domain) - kept anyway for
+crawlable paths exist. The link-preview image (og:image/twitter:image,
+Sept 21, 2026) is the landing hero photo - public/img/hero-dog.jpg, a
+copy of src/img/hero-dog.jpg kept in sync manually (the JS-imported
+original gets a webpack content hash on every build, so it has no
+stable URL a static meta tag could reference). Every %PUBLIC_URL%-based
+URL (canonical/og:url/og:image, plus every image src that uses
+process.env.PUBLIC_URL, like the About page gallery) resolves to a full
+https:// URL, not a relative path - package.json's `build` script
+passes an explicit absolute PUBLIC_URL for exactly this (Sept 21, 2026;
+build:staging already did), since Open Graph requires absolute URLs and
+a relative one isn't reliably honored by every platform. public/
+robots.txt lives at a path GitHub Pages crawlers never actually check
+(robots.txt is only honored at the true domain root,
+kimardenmiller.github.io/robots.txt, and this site is at a subpath of
+that shared domain, not a custom domain) - kept anyway for
 convention and its Sitemap: reference, submittable to Search Console
 directly regardless. This is a client-side-only SPA with no
 server-side rendering, so a crawler that doesn't execute JS still sees
