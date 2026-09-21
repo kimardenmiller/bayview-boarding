@@ -1942,6 +1942,15 @@ describe('Admin — logged in — Requests', () => {
     expect(within(card).getByText(/Estimated cost/)).toBeInTheDocument();
   });
 
+  test('a "View" button makes it obvious a request card is clickable (Sept 21, 2026)', async () => {
+    await loginAsAdminWithRequests();
+    const requestsSection = document.querySelector('.requests-section');
+    const card = within(requestsSection).getByText('Bud — Kim').closest('.stay-card');
+    expect(within(card).getByText('View')).toBeInTheDocument();
+    fireEvent.click(within(card).getByText('View'));
+    expect(within(card).getByText('Hide')).toBeInTheDocument();
+  });
+
   test('Approve sends the real confirmation text (SMS first, then marks approved) and the stay drops off Requests', async () => {
     await loginAsAdminWithRequests();
     const requestsSection = document.querySelector('.requests-section');
@@ -2033,6 +2042,17 @@ describe('Admin — logged in — Unbilled Stays', () => {
     expect(within(card).getByText(/Estimated cost/)).toBeInTheDocument();
     fireEvent.click(header);
     expect(within(card).queryByText('Edit')).not.toBeInTheDocument();
+  });
+
+  test('a "View" button makes it obvious the card is clickable, toggling to "Hide" once expanded (Sept 21, 2026)', async () => {
+    await loginAsAdminWithUnbilled();
+    const card = screen.getByText('Fido & Bud — Kim').closest('.stay-card');
+    const viewBtn = within(card).getByText('View');
+    fireEvent.click(viewBtn);
+    expect(within(card).getByText('Hide')).toBeInTheDocument();
+    expect(within(card).queryByText('View')).not.toBeInTheDocument();
+    fireEvent.click(within(card).getByText('Hide'));
+    expect(within(card).getByText('View')).toBeInTheDocument();
   });
 
   test('Edit reveals the editable dates/times/cost fields, and Recalculate updates the cost from the real cost logic', async () => {
@@ -2472,6 +2492,31 @@ describe('Admin — logged in', () => {
     const cards = document.querySelectorAll('.stay-card');
     expect(cards).toHaveLength(1); // deduped, not one per dog
     expect(within(cards[0]).getByText('Don & Bob — Pat')).toBeInTheDocument();
+  });
+
+  test('Past Stays: a denied request shows up too, marked "Rejected", with its reason and no Edit/billing controls (Sept 21, 2026)', async () => {
+    const deniedDog = [{
+      id: 'dog-rex', name: 'Rex', breed: 'Lab', dob: null, spay_neuter: 'yes',
+      aggression_history: 'no', aggression_detail: '', health_concerns: 'no', health_detail: '',
+      owner: { name: 'Sam', phone: '6505554444', email: 'sam@test.com' },
+      stays: [{
+        id: 'stay-denied-1', check_in: '2026-08-01', check_out: '2026-08-03',
+        drop_time: '09:00:00', pickup_time: '09:00:00', estimated_cost: 210,
+        number_of_dogs: 1, submitted_at: '2026-07-30T10:00:00Z',
+        approval_status: 'denied', denial_reason: 'Fully booked that week', billed_at: null,
+      }],
+    }];
+    await loginAsAdmin(deniedDog, 0);
+
+    fireEvent.click(screen.getByText('Sam'));
+    await screen.findByRole('heading', { name: 'Sam' });
+    const card = screen.getByText('Rex — Sam').closest('.stay-card');
+    expect(within(card).getByText('Rejected')).toBeInTheDocument();
+
+    fireEvent.click(within(card).getByText('View'));
+    expect(within(card).getByText('Reason given: "Fully booked that week"')).toBeInTheDocument();
+    expect(within(card).queryByText('Edit')).not.toBeInTheDocument();
+    expect(within(card).queryByText('Send Billing Text')).not.toBeInTheDocument();
   });
 
   test('updates and displays the day rate after Save', async () => {

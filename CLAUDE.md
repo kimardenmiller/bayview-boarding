@@ -104,14 +104,18 @@ Kim Miller and Estee Fletter at 210 Bayview Drive, San Rafael, CA.
   or without opening Edit first - see billed_at below). Below that,
   "Past Stays" — grouped by OWNER now, not by dog (Sept 18, 2026 - an
   owner with 2 dogs used to get 2 rows), scoped to fully billed stays
-  only (the direct counterpart to Unbilled Stays; together the two cover
-  every signed agreement on file, which is why the old running "{n}
-  signed agreements on file" count was deleted rather than kept).
+  PLUS denied requests, shown view-only and marked "Rejected" (Sept 21,
+  2026 - previously a denied request just vanished from admin entirely
+  once decided; now it's a record, with the typed reason if one was
+  given, but no Edit/Send Billing Text - there's nothing to bill).
   Opening an owner lists their past stays as the exact same
-  click-to-expand card Unbilled Stays uses - a shared multi-dog stay
-  shows as one card naming every dog, and "Edit"/"Send Billing Text"
-  work identically for a first bill or a correction-and-resend (billStay
-  just patches fields and re-stamps billed_at either way). A "Site
+  click-to-expand card Unbilled Stays uses (each card now has an
+  explicit "View"/"Hide" button - Sept 21, 2026 - previously the whole
+  row was clickable with no visible sign of it) - a shared multi-dog
+  stay shows as one card naming every dog, and "Edit"/"Send Billing
+  Text" work identically for a first bill or a correction-and-resend
+  (billStay just patches fields and re-stamps billed_at either way). A
+  "Site
   Settings" header (Sept 18, 2026) then separates those two day-to-day
   lookup sections from everything below: a "💡 Ideas & Bugs" section
   (Sept 16 (8) — see feedback below) with an open-count badge, each
@@ -381,7 +385,7 @@ something this pass changes.
 - src/App.js — main app
 - src/settings.js — all configurable values (rates, vets, messages, packing list)
 - src/waiver.js — full waiver text
-- src/App.test.js — 199 passing tests (TDD), Supabase mocked via src/__mocks__/supabase.js
+- src/App.test.js — 202 passing tests (TDD), Supabase mocked via src/__mocks__/supabase.js
 - src/supabase.js — creates the Supabase client from REACT_APP_SUPABASE_URL/_KEY (falling back to production's own public values) - see Staging environment above for how the staging build overrides these
 - src/index.js — app entry point; also where Google Analytics loads (production only) and staging's noindex meta tag gets injected - see SEO & Analytics above
 - supabase/functions/send-contact/index.ts — public Contact Us form handler: relays name/email-or-phone/message to Kim & Estee by SMS (reuses KIM_PHONE/ESTEE_PHONE). Deployed normally (no --no-verify-jwt) since it's called via the Supabase JS client like settings/lookup-client/submit-booking

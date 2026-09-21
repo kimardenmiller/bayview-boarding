@@ -1,6 +1,6 @@
 BAYVIEW BOARDING — FIX LIST
 ============================
-Last updated: September 21, 2026 (4) (the "non-binding request" notice moved from the landing page to the booking page itself, above Owner Information)
+Last updated: September 21, 2026 (5) (admin stay/request cards get a "View" button; denied requests now show in Past Stays, marked Rejected)
 
 NEXT CHANGE LIST (v1.5)
 -----------------------
@@ -92,6 +92,26 @@ TWILIO STATUS
 
 COMPLETED
 ---------
+- Sept 21, 2026 (5): Two small admin-panel changes, on request:
+  1. Every stay/request card in Unbilled Stays, Past Stays, and Requests
+     now shows an explicit "View"/"Hide" button (was: the whole row was
+     clickable, but nothing signaled that).
+  2. Denied requests now show up in Past Stays too, marked "Rejected" -
+     previously a denied request just vanished from admin entirely once
+     decided, with no record anywhere in the UI. Shown view-only (no
+     Edit/Send Billing Text - there's nothing to bill on a rejected
+     request) with the typed reason, if one was given, right in the
+     expanded view.
+  Also revised the booking-page notice's wording (still above Owner
+  Information): "You are entering a non-binding booking request that
+  will be reviewed and confirmed, usually within a few hours, always
+  within 24 hours. In the event we need to turn down your request
+  we'll explain why."
+  Tests: 3 new (View/Hide toggle on both a stay card and a request
+  card; a denied stay appearing in Past Stays as Rejected, reason
+  shown, no billing controls). 202/202 Jest passing. Verified live on
+  both production and staging.
+
 - Sept 21, 2026 (4): The "requests are reviewed within 24 hours" notice
   moved from the landing page CTA to the actual booking page, right
   above "Owner Information" (on request) - a boxed callout (new

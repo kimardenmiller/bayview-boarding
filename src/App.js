@@ -414,9 +414,9 @@ function StepOwner({ data, onChange, onNext, vetOptions, multiDogDiscount }) {
           the actual booking page, right above the first field, is where
           this matters most. */}
       <p className="request-notice">
-        You are booking a non-binding booking request that will be reviewed and confirmed.
-        We usually respond within a few hours, always within 24 hours. In the event we need
-        to turn down your request we'll explain why.
+        You are entering a non-binding booking request that will be reviewed and confirmed,
+        usually within a few hours, always within 24 hours. In the event we need to turn down
+        your request we'll explain why.
       </p>
       <h2 className="step-title">Owner Information</h2>
       <p className="step-intro">
@@ -1334,22 +1334,26 @@ function AdminView({
   });
   const unbilledStays = Array.from(unbilledByStayId.values()).sort((a, b) => a.check_in.localeCompare(b.check_in));
 
-  // "Past Stays" = fully billed stays, the counterpart lookup to Unbilled
-  // Stays above - together the two sections cover every signed agreement
-  // on file, so there's no separate running total needed any more. Grouped
-  // by owner rather than by dog (Sept 18, 2026) - an owner with 2 dogs
-  // used to get 2 separate rows; now one row per owner, and opening it
-  // lists their past STAYS (deduped by stay id across a shared multi-dog
-  // booking, same as Unbilled Stays) rather than one dog's history alone.
-  // perDog keeps each dog's own frozen aggression/health/DOB snapshot for
-  // that specific stay, since only name/dates/cost/notes/waiver are
-  // actually shared across dogs on the same stay.
+  // "Past Stays" = fully billed stays, PLUS denied requests kept here as
+  // a record (marked "Rejected" - Sept 21, 2026, on request; previously
+  // a denied request just vanished from admin entirely once decided).
+  // Together with Unbilled Stays, this covers every signed agreement on
+  // file plus every decided-against request. Grouped by owner rather
+  // than by dog (Sept 18, 2026) - an owner with 2 dogs used to get 2
+  // separate rows; now one row per owner, and opening it lists their
+  // past STAYS (deduped by stay id across a shared multi-dog booking,
+  // same as Unbilled Stays) rather than one dog's history alone. perDog
+  // keeps each dog's own frozen aggression/health/DOB snapshot for that
+  // specific stay, since only name/dates/cost/notes/waiver are actually
+  // shared across dogs on the same stay.
   const pastStaysByOwnerPhone = new Map();
   dogs.forEach(d => {
     const phone = d.owner?.phone;
     if (!phone) return;
     (d.stays || []).forEach(s => {
-      if (s.approval_status !== 'approved' || !s.billed_at) return;
+      const isBilled = s.approval_status === 'approved' && s.billed_at;
+      const isDenied = s.approval_status === 'denied';
+      if (!isBilled && !isDenied) return;
       if (!pastStaysByOwnerPhone.has(phone)) {
         pastStaysByOwnerPhone.set(phone, { ownerName: d.owner?.name, ownerPhone: phone, staysById: new Map() });
       }
@@ -1392,10 +1396,13 @@ function AdminView({
       <div key={s.id} className="stay-card">
         <div
           className="stay-dates"
-          style={{ cursor: 'pointer' }}
+          style={{ cursor: 'pointer', justifyContent: 'space-between' }}
           onClick={() => setExpandedStayId(isExpanded ? null : s.id)}
         >
           <span>{s.dogNames.join(' & ')} — {s.ownerName}</span>
+          <button className="btn-secondary" style={{ padding: '4px 10px', fontSize: '0.78rem', flexShrink: 0 }}>
+            {isExpanded ? 'Hide' : 'View'}
+          </button>
         </div>
         <div className="stay-meta">{formatDate(s.check_in)} – {formatDate(s.check_out)}</div>
         {isExpanded && (
@@ -1480,18 +1487,29 @@ function AdminView({
       <div key={s.id} className="stay-card">
         <div
           className="stay-dates"
-          style={{ cursor: 'pointer' }}
+          style={{ cursor: 'pointer', justifyContent: 'space-between' }}
           onClick={() => {
             setExpandedStayId(isExpanded ? null : s.id);
             if (isExpanded) setEditingStayId(null);
           }}
         >
-          <span>{s.dogNames.join(' & ')} — {s.ownerName}</span>
+          <span>
+            {s.dogNames.join(' & ')} — {s.ownerName}
+            {s.approval_status === 'denied' && (
+              <span className="stay-flag" style={{ marginLeft: 8, verticalAlign: 'middle' }}>Rejected</span>
+            )}
+          </span>
+          <button className="btn-secondary" style={{ padding: '4px 10px', fontSize: '0.78rem', flexShrink: 0 }}>
+            {isExpanded ? 'Hide' : 'View'}
+          </button>
         </div>
         <div className="stay-meta">{formatDate(s.check_in)} – {formatDate(s.check_out)}</div>
         {isExpanded && (
           <div style={{ marginTop: 8 }}>
             <div className="stay-meta">{s.ownerPhone}</div>
+            {s.approval_status === 'denied' && s.denial_reason && (
+              <div className="stay-notes">Reason given: "{s.denial_reason}"</div>
+            )}
             {!isEditing ? (
               <>
                 <div className="stay-meta">
@@ -1577,22 +1595,24 @@ function AdminView({
                 </div>
               </>
             )}
-            <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 8, flexWrap: 'wrap' }}>
-              <button className="btn-secondary" style={{ padding: '4px 10px', fontSize: '0.78rem' }} onClick={() => setEditingStayId(isEditing ? null : s.id)}>
-                {isEditing ? 'Done Editing' : 'Edit'}
-              </button>
-              <button
-                className="btn-primary"
-                style={{ padding: '4px 10px', fontSize: '0.78rem' }}
-                disabled={sendingBillId === s.id}
-                onClick={() => sendBill(s)}
-              >
-                {sendingBillId === s.id ? 'Sending...' : 'Send Billing Text'}
-              </button>
-              {billingSendStatus[s.id] && (
-                <span className="field-error" style={{ fontSize: '0.78rem' }}>{billingSendStatus[s.id]}</span>
-              )}
-            </div>
+            {s.approval_status !== 'denied' && (
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 8, flexWrap: 'wrap' }}>
+                <button className="btn-secondary" style={{ padding: '4px 10px', fontSize: '0.78rem' }} onClick={() => setEditingStayId(isEditing ? null : s.id)}>
+                  {isEditing ? 'Done Editing' : 'Edit'}
+                </button>
+                <button
+                  className="btn-primary"
+                  style={{ padding: '4px 10px', fontSize: '0.78rem' }}
+                  disabled={sendingBillId === s.id}
+                  onClick={() => sendBill(s)}
+                >
+                  {sendingBillId === s.id ? 'Sending...' : 'Send Billing Text'}
+                </button>
+                {billingSendStatus[s.id] && (
+                  <span className="field-error" style={{ fontSize: '0.78rem' }}>{billingSendStatus[s.id]}</span>
+                )}
+              </div>
+            )}
           </div>
         )}
       </div>
