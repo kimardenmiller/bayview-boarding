@@ -1,30 +1,21 @@
 BAYVIEW BOARDING — FIX LIST
 ============================
-Last updated: September 21, 2026 (booking is now a request that admin approves or denies - Suggested by Estee)
+Last updated: September 21, 2026 (2) (Kim corrected the malformed Manager 2 Phone number)
 
 NEXT CHANGE LIST (v1.5)
 -----------------------
-1. ACTION NEEDED FROM KIM:
-   a. The Manager 2 Phone (Estee) saved in Admin > SMS Message
-      Templates > "Manager Phone Numbers" looks malformed - it's missing
-      its opening parenthesis (reads like "510) 432-9791" instead of
-      "(510) 432-9791"), confirmed via a read-only query Sept 19, 2026.
-      Claude flagged this rather than silently correcting it, since it's
-      real contact info Claude was never given and shouldn't guess at
-      even for an apparently-obvious punctuation fix - please open
-      Admin and confirm/correct both manager phone numbers.
-   b. Staging environment (see Sept 19, 2026 COMPLETED entry below) has
-      no Twilio credentials set yet, so no real/test SMS goes out from
-      there until you add some - ideally Twilio Console's own "Test
-      Credentials" (Account > API keys & tokens > Test credentials),
-      which use magic numbers and never really send or cost anything,
-      exactly matching this project's original staging plan. The
-      booking flow itself works fully without them (only the
-      confirmation text silently fails to send); set via
-      `supabase secrets set TWILIO_ACCOUNT_SID=... TWILIO_AUTH_TOKEN=...
-      TWILIO_PHONE=... --project-ref uqmjudozfqlmiepnqodx`. The staging
-      ADMIN_PASSWORD Claude generated was shared with Kim directly in
-      chat (not written anywhere in this repo).
+1. ACTION NEEDED FROM KIM: Staging environment (see Sept 19, 2026
+   COMPLETED entry below) has no Twilio credentials set yet, so no
+   real/test SMS goes out from there until you add some - ideally
+   Twilio Console's own "Test Credentials" (Account > API keys & tokens
+   > Test credentials), which use magic numbers and never really send
+   or cost anything, exactly matching this project's original staging
+   plan. The booking flow itself works fully without them (only the
+   confirmation text silently fails to send); set via
+   `supabase secrets set TWILIO_ACCOUNT_SID=... TWILIO_AUTH_TOKEN=...
+   TWILIO_PHONE=... --project-ref uqmjudozfqlmiepnqodx`. The staging
+   ADMIN_PASSWORD Claude generated was shared with Kim directly in
+   chat (not written anywhere in this repo).
 2. STANDING: check the "Submit Idea" queue (admin panel > 💡 Ideas & Bugs)
    at the start of any work session in this project, not just when Kim
    flags something - this is the actual mechanism for surfacing tester
@@ -83,6 +74,9 @@ TWILIO STATUS
 
 COMPLETED
 ---------
+- Sept 21, 2026 (2): Kim corrected the Manager 2 Phone (Estee) number -
+  confirmed via a read-only query it now reads "510-432-9791", no
+  longer missing its opening parenthesis.
 - Sept 21, 2026: Booking request/approval workflow (Suggested by Estee
   via Submit Idea: "Button to book stay should read 'Request stay' and
   we need a place to approve or deny the stay in admin"). Scope decided
