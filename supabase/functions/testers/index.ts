@@ -17,8 +17,15 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 const ADMIN_PASSWORD = Deno.env.get('ADMIN_PASSWORD')!;
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+// Sept 21, 2026: prefers a restricted API key (SID + Secret) over the
+// raw Auth Token, falling back to Account SID + Auth Token if no API key
+// is set (staging) - see send-confirmation/index.ts.
 const TWILIO_ACCOUNT_SID = Deno.env.get('TWILIO_ACCOUNT_SID')!;
-const TWILIO_AUTH_TOKEN = Deno.env.get('TWILIO_AUTH_TOKEN')!;
+const TWILIO_API_KEY_SID = Deno.env.get('TWILIO_API_KEY_SID');
+const TWILIO_API_KEY_SECRET = Deno.env.get('TWILIO_API_KEY_SECRET');
+const TWILIO_AUTH_TOKEN = Deno.env.get('TWILIO_AUTH_TOKEN');
+const TWILIO_AUTH_USER = TWILIO_API_KEY_SID || TWILIO_ACCOUNT_SID;
+const TWILIO_AUTH_SECRET = TWILIO_API_KEY_SECRET || TWILIO_AUTH_TOKEN;
 const TWILIO_FROM = Deno.env.get('TWILIO_PHONE')!;
 
 const corsHeaders = {
@@ -49,7 +56,7 @@ async function sendSms(to: string, body: string): Promise<boolean> {
     {
       method: 'POST',
       headers: {
-        Authorization: 'Basic ' + btoa(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`),
+        Authorization: 'Basic ' + btoa(`${TWILIO_AUTH_USER}:${TWILIO_AUTH_SECRET}`),
         'Content-Type': 'application/x-www-form-urlencoded',
       },
       body: new URLSearchParams({ From: TWILIO_FROM, To: formattedTo, Body: body }),

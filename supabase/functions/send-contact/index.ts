@@ -10,8 +10,17 @@ import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 // (only receive-sms and send-reminders, called by Twilio/pg_cron directly,
 // need that flag).
 
+// Sept 21, 2026: prefers a restricted API key (SID + Secret) over the
+// raw Auth Token, falling back to Account SID + Auth Token if no API key
+// is set (staging) - see send-confirmation/index.ts for the full
+// rationale (same change, same reasoning, across every function that
+// sends outbound Twilio SMS).
 const TWILIO_ACCOUNT_SID = Deno.env.get('TWILIO_ACCOUNT_SID')!;
-const TWILIO_AUTH_TOKEN = Deno.env.get('TWILIO_AUTH_TOKEN')!;
+const TWILIO_API_KEY_SID = Deno.env.get('TWILIO_API_KEY_SID');
+const TWILIO_API_KEY_SECRET = Deno.env.get('TWILIO_API_KEY_SECRET');
+const TWILIO_AUTH_TOKEN = Deno.env.get('TWILIO_AUTH_TOKEN');
+const TWILIO_AUTH_USER = TWILIO_API_KEY_SID || TWILIO_ACCOUNT_SID;
+const TWILIO_AUTH_SECRET = TWILIO_API_KEY_SECRET || TWILIO_AUTH_TOKEN;
 const TWILIO_FROM = Deno.env.get('TWILIO_PHONE')!;
 const KIM_PHONE = Deno.env.get('KIM_PHONE')!;
 const ESTEE_PHONE = Deno.env.get('ESTEE_PHONE')!;
@@ -31,7 +40,7 @@ async function sendSms(to: string, body: string): Promise<boolean> {
     {
       method: 'POST',
       headers: {
-        Authorization: 'Basic ' + btoa(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`),
+        Authorization: 'Basic ' + btoa(`${TWILIO_AUTH_USER}:${TWILIO_AUTH_SECRET}`),
         'Content-Type': 'application/x-www-form-urlencoded',
       },
       body: new URLSearchParams({ From: TWILIO_FROM, To: formattedTo, Body: body }),

@@ -1,7 +1,8 @@
 import { assertEquals } from 'https://deno.land/std@0.168.0/testing/asserts.ts';
 
 Deno.env.set('TWILIO_ACCOUNT_SID', 'ACtest');
-Deno.env.set('TWILIO_AUTH_TOKEN', 'test-token');
+Deno.env.set('TWILIO_API_KEY_SID', 'SKtest');
+Deno.env.set('TWILIO_API_KEY_SECRET', 'test-api-key-secret');
 Deno.env.set('TWILIO_PHONE', '+14155550100');
 Deno.env.set('SUPABASE_URL', 'https://example.supabase.co');
 Deno.env.set('SUPABASE_SERVICE_ROLE_KEY', 'test-service-role-key');
@@ -21,13 +22,14 @@ const FILLED_FOOTER = "Reply STOP to opt out. Replies to this number aren't moni
 // depends on both, not just Twilio.
 function stubEnvironment({ settingsRow = DEFAULT_SETTINGS_ROW, twilioOk = true } = {}) {
   const original = globalThis.fetch;
-  const twilioCalls: { to: string; body: string }[] = [];
+  const twilioCalls: { to: string; body: string; authorization: string }[] = [];
   let settingsCallCount = 0;
   globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
     const url = new URL(String(input instanceof Request ? input.url : input));
     if (url.hostname === 'api.twilio.com') {
       const params = new URLSearchParams(String(init?.body));
-      twilioCalls.push({ to: params.get('To') || '', body: params.get('Body') || '' });
+      const authorization = (init?.headers as Record<string, string> | undefined)?.['Authorization'] || '';
+      twilioCalls.push({ to: params.get('To') || '', body: params.get('Body') || '', authorization });
       return twilioOk
         ? new Response(JSON.stringify({ success: true, sid: 'SMtest' }), { status: 200 })
         : new Response(JSON.stringify({ message: 'bad request' }), { status: 400 });
@@ -90,6 +92,16 @@ Deno.test('answers CORS preflight', async () => {
 Deno.test('rejects an empty body', async () => {
   const res = await handleRequest(new Request('https://x/functions/v1/send-confirmation', { method: 'POST', body: '' }));
   assertEquals(res.status, 400);
+});
+
+Deno.test('authenticates outbound Twilio calls with the API key (SID + Secret), not the Account SID + Auth Token (Sept 21, 2026)', async () => {
+  const stub = stubEnvironment();
+  try {
+    await handleRequest(sendRequest({ owner_name: 'Kim Miller', owner_phone: '4155550199', dog_name: 'Rex', message_template: 'Hi.' }));
+    assertEquals(stub.calls[0].authorization, 'Basic ' + btoa('SKtest:test-api-key-secret'));
+  } finally {
+    stub.restore();
+  }
 });
 
 Deno.test('with no message_template: builds the default confirmation message and appends the shared footer', async () => {

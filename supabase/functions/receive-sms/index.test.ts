@@ -11,6 +11,8 @@ const ESTEE_PHONE = '(510) 432-9791';
 
 Deno.env.set('TWILIO_ACCOUNT_SID', 'ACtest');
 Deno.env.set('TWILIO_AUTH_TOKEN', FAKE_AUTH_TOKEN);
+Deno.env.set('TWILIO_API_KEY_SID', 'SKtest');
+Deno.env.set('TWILIO_API_KEY_SECRET', 'test-api-key-secret');
 Deno.env.set('TWILIO_PHONE', '+16502522433');
 Deno.env.set('KIM_PHONE', KIM_PHONE);
 Deno.env.set('ESTEE_PHONE', ESTEE_PHONE);

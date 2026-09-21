@@ -20,7 +20,18 @@ import { buildAutoReply, buildRelayWarning, validateTwilioSignature, escapeXml }
 // approval is still pending - unrelated to this flag.)
 
 const TWILIO_ACCOUNT_SID = Deno.env.get('TWILIO_ACCOUNT_SID')!;
+// TWILIO_AUTH_TOKEN is always required regardless of the outbound-auth
+// choice below - Twilio signs webhook requests with the real Auth Token
+// for signature validation, a Twilio platform requirement that isn't
+// swappable with an API key. The outbound reply/relay send below prefers
+// a restricted API key over this same Auth Token when one is set (Sept
+// 21, 2026) - see send-confirmation/index.ts for the rationale shared by
+// every function that sends outbound Twilio SMS.
 const TWILIO_AUTH_TOKEN = Deno.env.get('TWILIO_AUTH_TOKEN')!;
+const TWILIO_API_KEY_SID = Deno.env.get('TWILIO_API_KEY_SID');
+const TWILIO_API_KEY_SECRET = Deno.env.get('TWILIO_API_KEY_SECRET');
+const TWILIO_AUTH_USER = TWILIO_API_KEY_SID || TWILIO_ACCOUNT_SID;
+const TWILIO_AUTH_SECRET = TWILIO_API_KEY_SECRET || TWILIO_AUTH_TOKEN;
 const TWILIO_FROM = Deno.env.get('TWILIO_PHONE')!;
 const KIM_PHONE = Deno.env.get('KIM_PHONE')!;
 const ESTEE_PHONE = Deno.env.get('ESTEE_PHONE')!;
@@ -39,7 +50,7 @@ async function sendSms(to: string, body: string) {
     {
       method: 'POST',
       headers: {
-        Authorization: 'Basic ' + btoa(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`),
+        Authorization: 'Basic ' + btoa(`${TWILIO_AUTH_USER}:${TWILIO_AUTH_SECRET}`),
         'Content-Type': 'application/x-www-form-urlencoded',
       },
       body: new URLSearchParams({ From: TWILIO_FROM, To: formattedTo, Body: body }),

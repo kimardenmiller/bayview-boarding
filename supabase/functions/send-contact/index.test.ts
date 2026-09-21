@@ -1,7 +1,8 @@
 import { assertEquals } from 'https://deno.land/std@0.168.0/testing/asserts.ts';
 
 Deno.env.set('TWILIO_ACCOUNT_SID', 'ACtest');
-Deno.env.set('TWILIO_AUTH_TOKEN', 'test-token');
+Deno.env.set('TWILIO_API_KEY_SID', 'SKtest');
+Deno.env.set('TWILIO_API_KEY_SECRET', 'test-api-key-secret');
 Deno.env.set('TWILIO_PHONE', '+14155550100');
 Deno.env.set('KIM_PHONE', '4155550101');
 Deno.env.set('ESTEE_PHONE', '4155550102');

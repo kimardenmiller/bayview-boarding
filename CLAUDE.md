@@ -311,6 +311,7 @@ call itself is dropped, not for a routine secret rotation.
 - GitHub Pages hosting (kimardenmiller.github.io/bayview-boarding)
 - Admin password: set as the `ADMIN_PASSWORD` Supabase secret (`supabase secrets set ADMIN_PASSWORD=...`) — never in source, checked server-side by the admin-data function
 - Twilio phone: see src/settings.js PHONE (business's own public contact number)
+- Twilio auth (Sept 21, 2026): every function that sends an outbound SMS (send-confirmation, send-contact, testers, feedback, receive-sms's own reply) authenticates with `TWILIO_API_KEY_SID`/`TWILIO_API_KEY_SECRET` if set, falling back to `TWILIO_ACCOUNT_SID`/`TWILIO_AUTH_TOKEN` otherwise — a restricted, independently-revocable API key is Twilio's own recommendation over the Auth Token (full, unscoped account access), but staging deliberately still runs on the fallback: genuine Twilio "Test Credentials" (Account SID + Auth Token) have no API-key equivalent, and they're the only mechanism that guarantees a send can never actually go out. `TWILIO_ACCOUNT_SID` is always required either way (every request URL needs the real Account SID regardless of which credential authenticates it), and `TWILIO_AUTH_TOKEN` stays in use by receive-sms specifically for Twilio's webhook signature check, which only works with the real Auth Token — never an API key, on any environment.
 
 ## Staging environment (Sept 19, 2026)
 Same repo, no second codebase: a `staging` git branch (currently

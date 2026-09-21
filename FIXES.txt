@@ -1,21 +1,39 @@
 BAYVIEW BOARDING — FIX LIST
 ============================
-Last updated: September 21, 2026 (2) (Kim corrected the malformed Manager 2 Phone number)
+Last updated: September 21, 2026 (3) (outbound Twilio sends prefer a restricted API key over the raw Auth Token, on Twilio's own recommendation)
 
 NEXT CHANGE LIST (v1.5)
 -----------------------
-1. ACTION NEEDED FROM KIM: Staging environment (see Sept 19, 2026
-   COMPLETED entry below) has no Twilio credentials set yet, so no
-   real/test SMS goes out from there until you add some - ideally
-   Twilio Console's own "Test Credentials" (Account > API keys & tokens
-   > Test credentials), which use magic numbers and never really send
-   or cost anything, exactly matching this project's original staging
-   plan. The booking flow itself works fully without them (only the
-   confirmation text silently fails to send); set via
-   `supabase secrets set TWILIO_ACCOUNT_SID=... TWILIO_AUTH_TOKEN=...
-   TWILIO_PHONE=... --project-ref uqmjudozfqlmiepnqodx`. The staging
-   ADMIN_PASSWORD Claude generated was shared with Kim directly in
-   chat (not written anywhere in this repo).
+1. ACTION NEEDED FROM KIM:
+   a. Staging environment (see Sept 19, 2026 COMPLETED entry below) has
+      no Twilio credentials set yet, so no real/test SMS goes out from
+      there until you add some - ideally Twilio Console's own "Test
+      Credentials" (Account > API keys & tokens > Test credentials),
+      which use magic numbers and never really send or cost anything,
+      exactly matching this project's original staging plan (this is
+      still the right choice for staging even after (b) below - Test
+      Credentials have no API-key equivalent, and they're the only
+      mechanism that guarantees a send can never actually go out). The
+      booking flow itself works fully without them (only the
+      confirmation text silently fails to send); set via
+      `supabase secrets set TWILIO_ACCOUNT_SID=... TWILIO_AUTH_TOKEN=...
+      TWILIO_PHONE=... --project-ref uqmjudozfqlmiepnqodx`. The staging
+      ADMIN_PASSWORD Claude generated was shared with Kim directly in
+      chat (not written anywhere in this repo).
+   b. Production's live Twilio credential is still the raw Auth Token
+      (full, unscoped account access) - Sept 21, 2026's change (see
+      COMPLETED below) makes every function PREFER a restricted API key
+      instead, but nothing switches over until one actually exists.
+      Create one in Twilio Console (Account > API keys & tokens >
+      Create API key - Standard type is fine), then set
+      `supabase secrets set TWILIO_API_KEY_SID=... TWILIO_API_KEY_SECRET=...
+      --project-ref dmkfhcreqzmabeihqwgy` (TWILIO_ACCOUNT_SID and
+      TWILIO_AUTH_TOKEN both stay - the Account SID is still needed in
+      every request URL, and the Auth Token is still needed by
+      receive-sms for Twilio's webhook signature check, which only
+      works with the real Auth Token, never an API key). No redeploy
+      needed once the secrets are set - the code already checks for
+      them.
 2. STANDING: check the "Submit Idea" queue (admin panel > 💡 Ideas & Bugs)
    at the start of any work session in this project, not just when Kim
    flags something - this is the actual mechanism for surfacing tester
@@ -74,6 +92,36 @@ TWILIO STATUS
 
 COMPLETED
 ---------
+- Sept 21, 2026 (3): Outbound Twilio calls prefer a restricted API key
+  over the raw Auth Token, on request (Twilio's own security guidance:
+  the Auth Token grants full, unscoped account access and can't be
+  restricted or independently rotated, unlike an API key). Every
+  function that sends an outbound SMS (send-confirmation, send-contact,
+  testers, feedback, receive-sms's own reply/relay) now tries
+  TWILIO_API_KEY_SID/TWILIO_API_KEY_SECRET first, falling back to
+  TWILIO_ACCOUNT_SID/TWILIO_AUTH_TOKEN if no API key is set - this is
+  what lets staging keep using genuine Twilio Test Credentials (see
+  NEXT CHANGE LIST item 1a for why: Test Credentials have no API-key
+  equivalent, and are the only mechanism that guarantees a send can
+  never actually go out, regardless of destination number). Twilio's
+  API always takes the real Account SID in the URL path either way.
+  receive-sms's webhook signature check is a separate matter entirely -
+  Twilio signs those with the real Auth Token specifically, a platform
+  requirement with no API-key alternative, so that secret stays in use
+  there regardless of which credential authenticates outbound sends.
+
+  Tests: send-confirmation gained a test confirming the API key is used
+  when set, plus a dedicated separate test file (a fresh module import
+  is needed to exercise "no API key configured" cleanly) confirming the
+  Account-SID+Auth-Token fallback still works. 198 React + 164 Deno =
+  362/362 passing.
+
+  Deployed to both production and staging - safe by construction: with
+  no TWILIO_API_KEY_SID/SECRET secret set yet on either project, both
+  fall back to their existing credential, so this shipped with zero
+  behavior change on either side. See NEXT CHANGE LIST item 1b for what
+  Kim still needs to do to actually switch production over.
+
 - Sept 21, 2026 (2): Kim corrected the Manager 2 Phone (Estee) number -
   confirmed via a read-only query it now reads "510-432-9791", no
   longer missing its opening parenthesis.

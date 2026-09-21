@@ -2,8 +2,23 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { buildOwnerCopyNotice } from "../_shared/contact.ts";
 
+// Sept 21, 2026: outbound REST calls prefer a restricted API key
+// (SID + Secret) over the raw Auth Token, on Twilio's own recommendation
+// - an API key can be scoped and independently revoked/rotated without
+// touching the Auth Token itself (which grants full, unscoped account
+// access). Falls back to TWILIO_ACCOUNT_SID + TWILIO_AUTH_TOKEN if no API
+// key is set - staging deliberately still uses that pair (Twilio's real
+// "Test Credentials" have no API-key equivalent, and they're the only
+// mechanism that guarantees a send can never actually go out, regardless
+// of destination number - see FIXES.txt). TWILIO_ACCOUNT_SID is always
+// required either way - Twilio's API takes the real Account SID in the
+// URL path regardless of which credential authenticates the request.
 const TWILIO_ACCOUNT_SID = Deno.env.get("TWILIO_ACCOUNT_SID")!;
-const TWILIO_AUTH_TOKEN = Deno.env.get("TWILIO_AUTH_TOKEN")!;
+const TWILIO_API_KEY_SID = Deno.env.get("TWILIO_API_KEY_SID");
+const TWILIO_API_KEY_SECRET = Deno.env.get("TWILIO_API_KEY_SECRET");
+const TWILIO_AUTH_TOKEN = Deno.env.get("TWILIO_AUTH_TOKEN");
+const TWILIO_AUTH_USER = TWILIO_API_KEY_SID || TWILIO_ACCOUNT_SID;
+const TWILIO_AUTH_SECRET = TWILIO_API_KEY_SECRET || TWILIO_AUTH_TOKEN;
 const TWILIO_FROM = Deno.env.get("TWILIO_PHONE")!;
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -76,7 +91,7 @@ async function sendTwilioSms(to: string, body: string): Promise<{ ok: boolean; r
     {
       method: "POST",
       headers: {
-        "Authorization": "Basic " + btoa(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`),
+        "Authorization": "Basic " + btoa(`${TWILIO_AUTH_USER}:${TWILIO_AUTH_SECRET}`),
         "Content-Type": "application/x-www-form-urlencoded",
       },
       body: new URLSearchParams({ From: TWILIO_FROM, To: to, Body: body }),
