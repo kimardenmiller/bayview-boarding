@@ -1,39 +1,25 @@
 BAYVIEW BOARDING — FIX LIST
 ============================
-Last updated: September 21, 2026 (5) (admin stay/request cards get a "View" button; denied requests now show in Past Stays, marked Rejected)
+Last updated: September 21, 2026 (6) (Kim set production's TWILIO_API_KEY_SID/SECRET - production now authenticates outbound Twilio calls with the restricted API key)
 
 NEXT CHANGE LIST (v1.5)
 -----------------------
-1. ACTION NEEDED FROM KIM:
-   a. Staging environment (see Sept 19, 2026 COMPLETED entry below) has
-      no Twilio credentials set yet, so no real/test SMS goes out from
-      there until you add some - ideally Twilio Console's own "Test
-      Credentials" (Account > API keys & tokens > Test credentials),
-      which use magic numbers and never really send or cost anything,
-      exactly matching this project's original staging plan (this is
-      still the right choice for staging even after (b) below - Test
-      Credentials have no API-key equivalent, and they're the only
-      mechanism that guarantees a send can never actually go out). The
-      booking flow itself works fully without them (only the
-      confirmation text silently fails to send); set via
-      `supabase secrets set TWILIO_ACCOUNT_SID=... TWILIO_AUTH_TOKEN=...
-      TWILIO_PHONE=... --project-ref uqmjudozfqlmiepnqodx`. The staging
-      ADMIN_PASSWORD Claude generated was shared with Kim directly in
-      chat (not written anywhere in this repo).
-   b. Production's live Twilio credential is still the raw Auth Token
-      (full, unscoped account access) - Sept 21, 2026's change (see
-      COMPLETED below) makes every function PREFER a restricted API key
-      instead, but nothing switches over until one actually exists.
-      Create one in Twilio Console (Account > API keys & tokens >
-      Create API key - Standard type is fine), then set
-      `supabase secrets set TWILIO_API_KEY_SID=... TWILIO_API_KEY_SECRET=...
-      --project-ref dmkfhcreqzmabeihqwgy` (TWILIO_ACCOUNT_SID and
-      TWILIO_AUTH_TOKEN both stay - the Account SID is still needed in
-      every request URL, and the Auth Token is still needed by
-      receive-sms for Twilio's webhook signature check, which only
-      works with the real Auth Token, never an API key). No redeploy
-      needed once the secrets are set - the code already checks for
-      them.
+1. ACTION NEEDED FROM KIM: Staging environment (see Sept 19, 2026
+   COMPLETED entry below) has no Twilio credentials set yet, so no
+   real/test SMS goes out from there until you add some - ideally
+   Twilio Console's own "Test Credentials" (Account > API keys & tokens
+   > Test credentials), which use magic numbers and never really send
+   or cost anything, exactly matching this project's original staging
+   plan (this is the right choice for staging even now that production
+   uses a restricted API key instead - see Sept 21, 2026 (3) COMPLETED
+   below - Test Credentials have no API-key equivalent, and they're the
+   only mechanism that guarantees a send can never actually go out).
+   The booking flow itself works fully without them (only the
+   confirmation text silently fails to send); set via
+   `supabase secrets set TWILIO_ACCOUNT_SID=... TWILIO_AUTH_TOKEN=...
+   TWILIO_PHONE=... --project-ref uqmjudozfqlmiepnqodx`. The staging
+   ADMIN_PASSWORD Claude generated was shared with Kim directly in
+   chat (not written anywhere in this repo).
 2. STANDING: check the "Submit Idea" queue (admin panel > 💡 Ideas & Bugs)
    at the start of any work session in this project, not just when Kim
    flags something - this is the actual mechanism for surfacing tester
@@ -92,6 +78,13 @@ TWILIO STATUS
 
 COMPLETED
 ---------
+- Sept 21, 2026 (6): Kim created a restricted Twilio API key and set
+  TWILIO_API_KEY_SID/TWILIO_API_KEY_SECRET on production (confirmed via
+  `supabase secrets list` - both present, same timestamp). Production
+  now authenticates every outbound Twilio send with that key instead of
+  the raw Auth Token - see Sept 21, 2026 (3) below for the change
+  itself. No redeploy was needed. Staging still has no Twilio
+  credentials at all (see NEXT CHANGE LIST item 1).
 - Sept 21, 2026 (5): Two small admin-panel changes, on request:
   1. Every stay/request card in Unbilled Stays, Past Stays, and Requests
      now shows an explicit "View"/"Hide" button (was: the whole row was
