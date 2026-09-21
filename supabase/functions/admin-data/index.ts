@@ -62,7 +62,7 @@ function shapeDog(d: RawDog) {
 }
 
 const DOGS_SELECT =
-  "id, name, breed, dob, spay_neuter, aggression_history, aggression_detail, health_concerns, health_detail, owner:owners(name, phone, email), stay_dogs(name, breed, dob, spay_neuter, aggression_history, aggression_detail, health_concerns, health_detail, stay:stays(id, check_in, check_out, drop_time, pickup_time, notes, estimated_cost, number_of_dogs, submitted_at, waiver_snapshot, billed_at, approval_status, approved_at, denied_at, denial_reason))";
+  "id, name, breed, dob, spay_neuter, aggression_history, aggression_detail, health_concerns, health_detail, owner:owners(name, phone, email), stay_dogs(name, breed, dob, spay_neuter, aggression_history, aggression_detail, health_concerns, health_detail, stay:stays(id, check_in, check_out, drop_time, pickup_time, notes, estimated_cost, number_of_dogs, submitted_at, waiver_snapshot, billed_at, paid_at, approval_status, approved_at, denied_at, denial_reason))";
 
 export async function handleRequest(req: Request): Promise<Response> {
   if (req.method === "OPTIONS") {
@@ -134,6 +134,15 @@ export async function handleRequest(req: Request): Promise<Response> {
           denied_at: new Date().toISOString(),
           denial_reason: denialReason?.trim() || null,
         })
+        .eq("id", stayId);
+      if (updateErr) throw updateErr;
+    } else if (action === "markPaid") {
+      // Just a status flip (Sept 21, 2026) - unlike billStay/approveStay/
+      // denyStay, there's no client-facing text this is confirming went
+      // out first; admin is just recording that payment was received.
+      if (!stayId) return json({ error: "stayId is required" }, 400);
+      const { error: updateErr } = await supabase.from("stays")
+        .update({ paid_at: new Date().toISOString() })
         .eq("id", stayId);
       if (updateErr) throw updateErr;
     } else if (action) {

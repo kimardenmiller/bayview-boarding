@@ -249,12 +249,12 @@ const SAMPLE_DOGS = [
         id: 'stay-1', check_in: '2026-09-01', check_out: '2026-09-03', drop_time: '09:00:00', pickup_time: '17:00:00',
         estimated_cost: 210, submitted_at: '2026-08-30T10:00:00Z', notes: 'Loves belly rubs', number_of_dogs: 1,
         dob: '2020-01-01', aggression_history: 'no', aggression_detail: '', health_concerns: 'no', health_detail: '',
-        waiver_snapshot: [{ title: 'Risks & Releases', body: 'Test waiver body text.' }], approval_status: 'approved', billed_at: '2026-09-04T00:00:00Z',
+        waiver_snapshot: [{ title: 'Risks & Releases', body: 'Test waiver body text.' }], approval_status: 'approved', billed_at: '2026-09-04T00:00:00Z', paid_at: '2026-09-04T00:00:00Z',
       },
       {
         id: 'stay-3', check_in: '2026-06-01', check_out: '2026-06-02', drop_time: '09:00:00', pickup_time: '17:00:00',
         estimated_cost: 105, submitted_at: '2026-05-30T10:00:00Z', notes: '', number_of_dogs: 1,
-        dob: null, aggression_history: 'no', aggression_detail: '', health_concerns: 'no', health_detail: '', approval_status: 'approved', billed_at: '2026-06-03T00:00:00Z',
+        dob: null, aggression_history: 'no', aggression_detail: '', health_concerns: 'no', health_detail: '', approval_status: 'approved', billed_at: '2026-06-03T00:00:00Z', paid_at: '2026-06-03T00:00:00Z',
       },
     ],
   },
@@ -268,7 +268,7 @@ const SAMPLE_DOGS = [
         id: 'stay-2', check_in: '2026-09-05', check_out: '2026-09-06', drop_time: '10:00:00', pickup_time: '12:00:00',
         estimated_cost: null, submitted_at: '2026-08-31T10:00:00Z', notes: '', number_of_dogs: 1,
         dob: null, aggression_history: 'yes', aggression_detail: 'Barks at mail carrier',
-        health_concerns: 'yes', health_detail: 'Mild hip dysplasia', approval_status: 'approved', billed_at: '2026-09-07T00:00:00Z',
+        health_concerns: 'yes', health_detail: 'Mild hip dysplasia', approval_status: 'approved', billed_at: '2026-09-07T00:00:00Z', paid_at: '2026-09-07T00:00:00Z',
       },
     ],
   },
@@ -1812,7 +1812,7 @@ const UNBILLED_DOGS = [
       {
         id: 'stay-already-billed', check_in: daysFromToday(-6), check_out: daysFromToday(-5),
         drop_time: '09:00:00', pickup_time: '09:00:00', estimated_cost: 105,
-        number_of_dogs: 1, submitted_at: '2026-01-01T00:00:00Z', approval_status: 'approved', billed_at: '2026-01-05T00:00:00Z',
+        number_of_dogs: 1, submitted_at: '2026-01-01T00:00:00Z', approval_status: 'approved', billed_at: '2026-01-05T00:00:00Z', paid_at: '2026-01-05T00:00:00Z',
       },
       // Still upcoming, never billed - SHOULD show up (Sept 17, 2026 -
       // Unbilled Stays used to exclude future/in-progress stays; not any
@@ -2137,6 +2137,20 @@ describe('Admin — logged in — Unbilled Stays', () => {
   });
 });
 
+describe('Admin — logged in — Awaiting Payment', () => {
+  test('shows a billed-but-unpaid stay, with a badge count', async () => {
+    await loginAsAdmin(AWAITING_PAYMENT_DOGS, 2);
+    const section = document.querySelector('.awaiting-payment-section');
+    expect(within(section).getAllByText(/— (Kim|Estee)/).length).toBe(2);
+    expect(section.querySelector('.feedback-badge')).toHaveTextContent('2');
+  });
+
+  test('a friendly empty state shows when nothing is awaiting payment', async () => {
+    await loginAsAdmin([], 0);
+    expect(screen.getByText('Nothing billed and awaiting payment right now.')).toBeInTheDocument();
+  });
+});
+
 describe('Admin — logged in — Ideas & Bugs', () => {
   test('the entry button shows the open count as a badge', async () => {
     await loginAsAdminWithFeedback();
@@ -2301,6 +2315,32 @@ describe('Admin — logged in — Testers', () => {
   });
 });
 
+// Billed but not yet paid - the current home for Edit/(re)send-billing
+// controls (Sept 21, 2026, on request: once paid, a stay is a closed,
+// view-only record in Past Stays instead - see the Mark Paid tests).
+const AWAITING_PAYMENT_DOGS = [
+  {
+    id: 'dog-bud-ap', name: 'Bud', breed: 'Labrador', dob: null, spay_neuter: 'yes',
+    aggression_history: 'no', aggression_detail: '', health_concerns: 'no', health_detail: '',
+    owner: { name: 'Kim', phone: '6505551111', email: 'kim@test.com' },
+    stays: [{
+      id: 'stay-ap-1', check_in: '2026-09-01', check_out: '2026-09-03', drop_time: '09:00:00', pickup_time: '17:00:00',
+      estimated_cost: 210, submitted_at: '2026-08-30T10:00:00Z', notes: '', number_of_dogs: 1,
+      approval_status: 'approved', billed_at: '2026-09-04T00:00:00Z', paid_at: null,
+    }],
+  },
+  {
+    id: 'dog-choco-ap', name: 'Choco', breed: 'Poodle', dob: null, spay_neuter: 'no',
+    aggression_history: 'no', aggression_detail: '', health_concerns: 'no', health_detail: '',
+    owner: { name: 'Estee', phone: '6505552222', email: 'estee@test.com' },
+    stays: [{
+      id: 'stay-ap-2', check_in: '2026-09-05', check_out: '2026-09-06', drop_time: '10:00:00', pickup_time: '12:00:00',
+      estimated_cost: null, submitted_at: '2026-08-31T10:00:00Z', notes: '', number_of_dogs: 1,
+      approval_status: 'approved', billed_at: '2026-09-07T00:00:00Z', paid_at: null,
+    }],
+  },
+];
+
 describe('Admin — logged in', () => {
   test('filters the owner list by owner or dog name', async () => {
     await loginAsAdmin();
@@ -2329,7 +2369,7 @@ describe('Admin — logged in', () => {
 
     // collapsed by default - click to expand
     fireEvent.click(within(budCards[0]).getByText(/Bud — Kim/));
-    expect(within(budCards[0]).getByText(/Billed cost: \$210/)).toBeInTheDocument();
+    expect(within(budCards[0]).getByText(/Paid cost: \$210/)).toBeInTheDocument();
     expect(within(budCards[0]).getByText(/Loves belly rubs/)).toBeInTheDocument();
     expect(within(budCards[0]).getByText(/DOB:/)).toBeInTheDocument();
 
@@ -2366,11 +2406,8 @@ describe('Admin — logged in', () => {
   });
 
   test('Billing SMS: Edit shows the final cost defaulting to the estimate, and Send calls send-confirmation with type billing', async () => {
-    await loginAsAdmin();
-    fireEvent.click(screen.getByText('Kim'));
-    await screen.findByRole('heading', { name: 'Kim' });
-
-    const budCard = document.querySelectorAll('.stay-card')[0];
+    await loginAsAdmin(AWAITING_PAYMENT_DOGS, 2);
+    const budCard = document.querySelector('.awaiting-payment-section .stay-card');
     fireEvent.click(within(budCard).getByText(/Bud — Kim/));
     fireEvent.click(within(budCard).getByText('Edit'));
     expect(within(budCard).getByDisplayValue('210')).toBeInTheDocument(); // defaults to that stay's estimate
@@ -2390,11 +2427,8 @@ describe('Admin — logged in', () => {
   });
 
   test('Billing SMS: admin can adjust the final cost before (re)sending', async () => {
-    await loginAsAdmin();
-    fireEvent.click(screen.getByText('Kim'));
-    await screen.findByRole('heading', { name: 'Kim' });
-
-    const budCard = document.querySelectorAll('.stay-card')[0];
+    await loginAsAdmin(AWAITING_PAYMENT_DOGS, 2);
+    const budCard = document.querySelector('.awaiting-payment-section .stay-card');
     fireEvent.click(within(budCard).getByText(/Bud — Kim/));
     fireEvent.click(within(budCard).getByText('Edit'));
     const costInput = within(budCard).getByDisplayValue('210');
@@ -2407,11 +2441,9 @@ describe('Admin — logged in', () => {
   });
 
   test('Billing SMS: refuses to send with no amount entered', async () => {
-    await loginAsAdmin();
-    fireEvent.click(screen.getByText('Estee')); // Choco's stay has a null estimate
-    await screen.findByRole('heading', { name: 'Estee' });
-
-    const chocoCard = document.querySelector('.stay-card');
+    await loginAsAdmin(AWAITING_PAYMENT_DOGS, 2); // Choco's stay has a null estimate
+    const cards = document.querySelectorAll('.awaiting-payment-section .stay-card');
+    const chocoCard = cards[1]; // sorted by check-in - Choco's is later than Bud's
     fireEvent.click(within(chocoCard).getByText(/Choco — Estee/));
     fireEvent.click(within(chocoCard).getByText('Send Billing Text'));
     expect(await within(chocoCard).findByText('Enter a valid amount first')).toBeInTheDocument();
@@ -2420,7 +2452,7 @@ describe('Admin — logged in', () => {
 
   test('Billing SMS: shows an error and does not claim success if the send fails', async () => {
     mockInvokeDefaults({
-      'admin-data': async () => ({ data: { dogs: SAMPLE_DOGS, totalStays: SAMPLE_TOTAL_STAYS }, error: null }),
+      'admin-data': async () => ({ data: { dogs: AWAITING_PAYMENT_DOGS, totalStays: 2 }, error: null }),
       'send-confirmation': async () => ({ data: null, error: { message: 'Twilio down' } }),
     });
     goToAdminUrl();
@@ -2428,13 +2460,22 @@ describe('Admin — logged in', () => {
     await userEvent.type(screen.getByPlaceholderText('Password'), 'correct-password');
     fireEvent.click(screen.getByText('Sign In'));
     await screen.findByText('Bayview Boarding — Admin');
-    fireEvent.click(screen.getByText('Kim'));
-    await screen.findByRole('heading', { name: 'Kim' });
 
-    const budCard = document.querySelectorAll('.stay-card')[0];
+    const budCard = document.querySelector('.awaiting-payment-section .stay-card');
     fireEvent.click(within(budCard).getByText(/Bud — Kim/));
     fireEvent.click(within(budCard).getByText('Send Billing Text'));
     expect(await within(budCard).findByText('Failed to send. Please try again.')).toBeInTheDocument();
+  });
+
+  test('Mark Paid: moves a billed stay to Past Stays, shown as "Paid"', async () => {
+    await loginAsAdmin(AWAITING_PAYMENT_DOGS, 2);
+    const budCard = document.querySelector('.awaiting-payment-section .stay-card');
+    fireEvent.click(within(budCard).getByText(/Bud — Kim/));
+    fireEvent.click(within(budCard).getByText('Mark Paid'));
+
+    await waitFor(() => expect(supabase.functions.invoke).toHaveBeenCalledWith('admin-data', {
+      body: { password: 'correct-password', action: 'markPaid', stayId: 'stay-ap-1' },
+    }));
   });
 
   test('← All Owners returns from the owner detail view to Past Stays', async () => {
@@ -2467,7 +2508,7 @@ describe('Admin — logged in', () => {
         stays: [{
           id: 'stay-shared-billed', check_in: '2026-08-01', check_out: '2026-08-03',
           drop_time: '09:00:00', pickup_time: '09:00:00', estimated_cost: 300,
-          number_of_dogs: 2, submitted_at: '2026-07-30T10:00:00Z', approval_status: 'approved', billed_at: '2026-08-04T00:00:00Z',
+          number_of_dogs: 2, submitted_at: '2026-07-30T10:00:00Z', approval_status: 'approved', billed_at: '2026-08-04T00:00:00Z', paid_at: '2026-08-04T00:00:00Z',
         }],
       },
       {
@@ -2477,7 +2518,7 @@ describe('Admin — logged in', () => {
         stays: [{
           id: 'stay-shared-billed', check_in: '2026-08-01', check_out: '2026-08-03',
           drop_time: '09:00:00', pickup_time: '09:00:00', estimated_cost: 300,
-          number_of_dogs: 2, submitted_at: '2026-07-30T10:00:00Z', approval_status: 'approved', billed_at: '2026-08-04T00:00:00Z',
+          number_of_dogs: 2, submitted_at: '2026-07-30T10:00:00Z', approval_status: 'approved', billed_at: '2026-08-04T00:00:00Z', paid_at: '2026-08-04T00:00:00Z',
         }],
       },
     ];

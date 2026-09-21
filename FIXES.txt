@@ -1,6 +1,6 @@
 BAYVIEW BOARDING — FIX LIST
 ============================
-Last updated: September 21, 2026 (7) (closed the staging-Twilio item - staying without live SMS on staging, on request)
+Last updated: September 21, 2026 (8) (new "Awaiting Payment" admin section - a billed stay isn't Paid until admin marks it so)
 
 NEXT CHANGE LIST (v1.5)
 -----------------------
@@ -62,6 +62,36 @@ TWILIO STATUS
 
 COMPLETED
 ---------
+- Sept 21, 2026 (8): Payment tracking, on request - "billed" alone never
+  answered "has this actually been paid?":
+  1. New stays.paid_at column. Every stay already billed before this
+     migration was backfilled to paid (paid_at = billed_at) - same
+     reasoning as the approval_status backfill (Sept 21 stay_approval_
+     workflow migration): this business has actually been getting paid
+     all along, so nothing already on file should suddenly need a
+     decision that was never really pending. Only genuinely new bills,
+     from here on, start unpaid.
+  2. New admin "Awaiting Payment" section, between Unbilled Stays and
+     Past Stays - every billed-but-unpaid stay, with a "Mark Paid"
+     button alongside the existing Edit/Send Billing Text (still there,
+     in case the amount needs correcting before payment actually comes
+     in). Unlike billStay/approveStay/denyStay, marking paid isn't tied
+     to any text send first - there's no client-facing message it's
+     confirming went out, just admin recording that payment arrived.
+  3. Once marked paid, a stay moves to Past Stays and shows "Paid" (the
+     "Billed cost"/"Estimated cost" line now also has a "Paid cost"
+     state) - it's a closed, view-only record there, same as a denied
+     ("Rejected") one, no more Edit/Send Billing Text.
+  Tests: admin-data gained markPaid coverage (stayId required, sets only
+  paid_at); App's Jest suite gained an Awaiting Payment section describe
+  block, a Mark Paid test, and the Billing SMS tests (which exercise
+  Edit/resend) now run against a dedicated billed-but-unpaid fixture
+  instead of Past Stays, since that's where those controls actually live
+  now. 205 React + 166 Deno = 371/371 passing.
+  Verified live on both production and staging: the migration backfilled
+  both of production's already-billed stays to paid, leaving nothing
+  stuck in an ambiguous state.
+
 - Sept 21, 2026 (7): Closed the staging-Twilio item, on request - staying
   without live SMS on staging rather than pursuing either option
   investigated:

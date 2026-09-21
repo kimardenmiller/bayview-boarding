@@ -259,6 +259,31 @@ Deno.test('denyStay: a blank/missing reason is saved as null, not an empty strin
   }
 });
 
+Deno.test('markPaid: requires stayId', async () => {
+  const stub = stubSupabase();
+  try {
+    const res = await handleRequest(postRequest({ password: ADMIN_PASSWORD, action: 'markPaid' }));
+    assertEquals(res.status, 400);
+  } finally {
+    stub.restore();
+  }
+});
+
+Deno.test('markPaid: sets paid_at, nothing else', async () => {
+  const stub = stubSupabase();
+  try {
+    const res = await handleRequest(postRequest({ password: ADMIN_PASSWORD, action: 'markPaid', stayId: 'stay-2' }));
+    assertEquals(res.status, 200);
+    const patchCall = stub.calls.find((c) => c.table === 'stays' && c.method === 'PATCH')!;
+    assertEquals(patchCall.search, '?id=eq.stay-2');
+    const body = patchCall.body as Record<string, unknown>;
+    assertEquals(Object.keys(body), ['paid_at']);
+    assertEquals(typeof body.paid_at, 'string');
+  } finally {
+    stub.restore();
+  }
+});
+
 Deno.test('rejects an unknown action', async () => {
   const stub = stubSupabase();
   try {

@@ -101,23 +101,28 @@ Kim Miller and Estee Fletter at 210 Bayview Drive, San Rafael, CA.
   read as a math error once a 2nd-dog discount was actually applied,
   fixed Sept 18, 2026), + holiday-night upcharge if any, = total - see
   calcCostBreakdown) and "Send Billing Text" (works with
-  or without opening Edit first - see billed_at below). Below that,
-  "Past Stays" — grouped by OWNER now, not by dog (Sept 18, 2026 - an
-  owner with 2 dogs used to get 2 rows), scoped to fully billed stays
-  PLUS denied requests, shown view-only and marked "Rejected" (Sept 21,
-  2026 - previously a denied request just vanished from admin entirely
-  once decided; now it's a record, with the typed reason if one was
-  given, but no Edit/Send Billing Text - there's nothing to bill).
+  or without opening Edit first - see billed_at below). Then "Awaiting
+  Payment" (Sept 21, 2026, on request) — every billed-but-not-yet-paid
+  stay, same card/Edit/Send Billing Text as Unbilled Stays (in case the
+  billed amount needs correcting before payment comes in), plus a new
+  "Mark Paid" button — unlike billStay/approveStay/denyStay, this isn't
+  tied to any text send first, it's just admin recording that payment
+  actually arrived. Below that, "Past Stays" — grouped by OWNER now, not
+  by dog (Sept 18, 2026 - an owner with 2 dogs used to get 2 rows),
+  scoped to fully billed AND PAID stays PLUS denied requests, both shown
+  view-only (Sept 21, 2026): a paid stay shows "Paid" and a denied one
+  shows "Rejected" (with its typed reason, if one was given) - neither
+  has Edit/Send Billing Text any more, since both are closed records now
+  (previously a denied request just vanished from admin entirely once
+  decided, and a billed stay stayed editable/re-billable forever).
   Opening an owner lists their past stays as the exact same
-  click-to-expand card Unbilled Stays uses (each card now has an
-  explicit "View"/"Hide" button - Sept 21, 2026 - previously the whole
-  row was clickable with no visible sign of it) - a shared multi-dog
-  stay shows as one card naming every dog, and "Edit"/"Send Billing
-  Text" work identically for a first bill or a correction-and-resend
-  (billStay just patches fields and re-stamps billed_at either way). A
-  "Site
-  Settings" header (Sept 18, 2026) then separates those two day-to-day
-  lookup sections from everything below: a "💡 Ideas & Bugs" section
+  click-to-expand card Unbilled Stays/Awaiting Payment use (each card
+  has an explicit "View"/"Hide" button - Sept 21, 2026 - previously the
+  whole row was clickable with no visible sign of it) - a shared
+  multi-dog stay shows as one card naming every dog. A "Site
+  Settings" header (Sept 18, 2026) then separates those day-to-day
+  lookup sections (Requests/Unbilled Stays/Awaiting Payment/Past Stays)
+  from everything below: a "💡 Ideas & Bugs" section
   (Sept 16 (8) — see feedback below) with an open-count badge, each
   submission's status buttons now also including a permanent "Delete"
   (Sept 18, 2026, no confirmation step - same pattern as testers'
@@ -240,6 +245,18 @@ still need billing" wasn't something the app could actually answer. Set
 by admin-data's billStay action (see Rules/Key files) only once the
 billing SMS has actually been sent successfully, never just on admin
 clicking a button.
+
+`stays.paid_at` (Sept 21, 2026) is the same idea one step further -
+"billed" never answered "has this actually been paid?" Set by
+admin-data's markPaid action once admin confirms payment actually
+arrived - unlike billStay/approveStay/denyStay, this one isn't preceded
+by any text send (there's no client-facing message to confirm went out
+first, just a status admin is recording). A billed-but-unpaid stay
+shows in the admin "Awaiting Payment" section; once paid_at is set, it
+moves to Past Stays as a closed, view-only record showing "Paid". Every
+stay already billed before this column existed was backfilled to paid
+(paid_at = billed_at) - same reasoning as the approval_status backfill
+above.
 
 `stays.waiver_snapshot` (Sept 16 (5), jsonb) captures the exact
 WAIVER_SECTIONS content (array of {title, body}) as shown and signed at
@@ -390,7 +407,7 @@ something this pass changes.
 - src/App.js — main app
 - src/settings.js — all configurable values (rates, vets, messages, packing list)
 - src/waiver.js — full waiver text
-- src/App.test.js — 202 passing tests (TDD), Supabase mocked via src/__mocks__/supabase.js
+- src/App.test.js — 205 passing tests (TDD), Supabase mocked via src/__mocks__/supabase.js
 - src/supabase.js — creates the Supabase client from REACT_APP_SUPABASE_URL/_KEY (falling back to production's own public values) - see Staging environment above for how the staging build overrides these
 - src/index.js — app entry point; also where Google Analytics loads (production only) and staging's noindex meta tag gets injected - see SEO & Analytics above
 - supabase/functions/send-contact/index.ts — public Contact Us form handler: relays name/email-or-phone/message to Kim & Estee by SMS (reuses KIM_PHONE/ESTEE_PHONE). Deployed normally (no --no-verify-jwt) since it's called via the Supabase JS client like settings/lookup-client/submit-booking
@@ -404,7 +421,7 @@ something this pass changes.
 - supabase/functions/send-confirmation/index.ts — Twilio SMS function (outbound); accepts an optional message_template (the admin-edited settings text, with {placeholders} filled by fillTemplate, including {dogVerb} - "is"/"are" - {billingBreakdown} - the full cost math - and {denialReason} - Sept 21, 2026, resolves to "" when no reason was given, never a literal unfilled placeholder) + packing_list from the caller; falls back to its own hardcoded 6-message-type logic (confirmation/reminder/billing/pickup/request_received/denied) if no template is given. Every dollar placeholder ({finalCost}/{estimatedCost}) is run through formatDollars() first (whole dollars, comma-separated). Has its own direct DB read (service role, fetchFooterAndPhones) for sms_footer and the 2 manager phone numbers (Sept 18, 2026) - fills {primaryManagerPhone}/{secondaryManagerPhone} and appends the filled footer once to every message, and uses the same numbers as the destination for the Kim/Estee copy of every client send (notifyOwnersOfClientText). Called directly by the client at booking time (type request_received - Sept 21, 2026), and by send-reminders/send-pickup-reminders/the admin panel (confirmation on approve, denied on deny, billing, pickup) - has its own Deno test suite (index.test.ts), added Sept 16 (5)
 - supabase/functions/receive-sms/index.ts — inbound SMS webhook: auto-reply + relay to Kim/Estee. Deploy with `--no-verify-jwt` (see comment at top of file) or Twilio's webhook calls silently fail
 - supabase/functions/_shared/contact.ts — pure text builders + Twilio signature validator, shared by send-confirmation and receive-sms, unit-tested via `deno test`
-- supabase/functions/admin-data/index.ts — server-side admin password check + every dog (profile + owner + stay history, incl. approval_status/approved_at/denied_at/denial_reason - Sept 21, 2026) (service role key, never exposed to client). Also handles billStay (Sept 17, 2026): saves corrected check-in/out/drop/pickup/cost and marks billed_at; approveStay/denyStay (Sept 21, 2026): mark a stay approved or denied (denyStay also saves an optional trimmed denial_reason) - all three just patch the DB and return the refreshed dog list, the actual SMS send is always a separate client-side send-confirmation call first (App.js), same "text actually went out" ordering for all three
+- supabase/functions/admin-data/index.ts — server-side admin password check + every dog (profile + owner + stay history, incl. approval_status/approved_at/denied_at/denial_reason/paid_at - Sept 21, 2026) (service role key, never exposed to client). Also handles billStay (Sept 17, 2026): saves corrected check-in/out/drop/pickup/cost and marks billed_at; approveStay/denyStay (Sept 21, 2026): mark a stay approved or denied (denyStay also saves an optional trimmed denial_reason) - both patch the DB and return the refreshed dog list, the actual SMS send is always a separate client-side send-confirmation call first (App.js), same "text actually went out" ordering as billStay; markPaid (Sept 21, 2026): just sets paid_at, no text send involved at all - there's no client-facing message this action is confirming went out
 - supabase/functions/lookup-client/index.ts — returning-client autofill by phone: vet + every dog on file (returns only safe fields, never aggression/health)
 - supabase/migrations/ — schema history, including the Sept 14 dog-profiles reorg (owners/dogs/stays/stay_dogs) and the RLS lockdown history for the old flat `stays` table
 - FIXES.txt — current fix list and backlog

@@ -878,6 +878,13 @@ function AdminView({
   const [sendingRequestId, setSendingRequestId] = useState(null);
   const [requestActionStatus, setRequestActionStatus] = useState({});
   const [denyReasonDrafts, setDenyReasonDrafts] = useState({});
+  // Payment tracking (Sept 21, 2026, on request) - "billed" alone never
+  // answered "has this actually been paid?"; marking paid is a plain
+  // admin decision, not tied to any text send (unlike approve/deny/bill,
+  // which all send first, then persist) - there's no client-facing
+  // message this action is confirming actually went out.
+  const [markingPaidId, setMarkingPaidId] = useState(null);
+  const [paidStatus, setPaidStatus] = useState({});
   // Click-to-expand (Sept 17, 2026 - replaced "every field always visible
   // inline" now that the list includes every unbilled stay, not just
   // already-checked-out ones, and would otherwise be a wall of inputs).
@@ -1275,6 +1282,23 @@ function AdminView({
     setTotalStays(data.totalStays);
   }
 
+  // Just a status flip, unlike approve/deny/bill above - no text to send
+  // first, so no "send then persist" ordering needed here.
+  async function markPaid(stay) {
+    setMarkingPaidId(stay.id);
+    setPaidStatus(prev => ({ ...prev, [stay.id]: null }));
+    const { data, error: fnError } = await supabase.functions.invoke('admin-data', {
+      body: { password: pw, action: 'markPaid', stayId: stay.id },
+    });
+    setMarkingPaidId(null);
+    if (fnError || data?.error) {
+      setPaidStatus(prev => ({ ...prev, [stay.id]: 'Failed to save. Please try again.' }));
+      return;
+    }
+    setDogs(data.dogs);
+    setTotalStays(data.totalStays);
+  }
+
   if (!authed) {
     return (
       <div className="admin-overlay">
@@ -1334,7 +1358,27 @@ function AdminView({
   });
   const unbilledStays = Array.from(unbilledByStayId.values()).sort((a, b) => a.check_in.localeCompare(b.check_in));
 
-  // "Past Stays" = fully billed stays, PLUS denied requests kept here as
+  // "Awaiting Payment" (Sept 21, 2026, on request) = billed but not yet
+  // marked paid - the gap "billed" alone used to leave unanswered
+  // ("has this actually been paid?"). Sorted earliest check-in first,
+  // same as the other lists. Still fully editable/re-billable here (see
+  // renderStayCard) in case the billed amount needs correcting before
+  // payment - only actually marking it paid makes it a closed record.
+  const awaitingPaymentByStayId = new Map();
+  dogs.forEach(d => {
+    (d.stays || []).forEach(s => {
+      if (s.approval_status === 'approved' && s.billed_at && !s.paid_at) {
+        if (awaitingPaymentByStayId.has(s.id)) {
+          awaitingPaymentByStayId.get(s.id).dogNames.push(d.name);
+        } else {
+          awaitingPaymentByStayId.set(s.id, { ...s, dogNames: [d.name], ownerName: d.owner?.name, ownerPhone: d.owner?.phone });
+        }
+      }
+    });
+  });
+  const awaitingPaymentStays = Array.from(awaitingPaymentByStayId.values()).sort((a, b) => a.check_in.localeCompare(b.check_in));
+
+  // "Past Stays" = fully billed AND paid stays, PLUS denied requests kept here as
   // a record (marked "Rejected" - Sept 21, 2026, on request; previously
   // a denied request just vanished from admin entirely once decided).
   // Together with Unbilled Stays, this covers every signed agreement on
@@ -1351,9 +1395,9 @@ function AdminView({
     const phone = d.owner?.phone;
     if (!phone) return;
     (d.stays || []).forEach(s => {
-      const isBilled = s.approval_status === 'approved' && s.billed_at;
+      const isPaid = s.approval_status === 'approved' && s.billed_at && s.paid_at;
       const isDenied = s.approval_status === 'denied';
-      if (!isBilled && !isDenied) return;
+      if (!isPaid && !isDenied) return;
       if (!pastStaysByOwnerPhone.has(phone)) {
         pastStaysByOwnerPhone.set(phone, { ownerName: d.owner?.name, ownerPhone: phone, staysById: new Map() });
       }
@@ -1498,6 +1542,9 @@ function AdminView({
             {s.approval_status === 'denied' && (
               <span className="stay-flag" style={{ marginLeft: 8, verticalAlign: 'middle' }}>Rejected</span>
             )}
+            {s.paid_at && (
+              <span className="stay-paid-badge" style={{ marginLeft: 8, verticalAlign: 'middle' }}>Paid</span>
+            )}
           </span>
           <button className="btn-secondary" style={{ padding: '4px 10px', fontSize: '0.78rem', flexShrink: 0 }}>
             {isExpanded ? 'Hide' : 'View'}
@@ -1516,7 +1563,7 @@ function AdminView({
                   Drop-off: {billingFieldFor(s, 'dropTime', s.drop_time ? s.drop_time.slice(0, 5) : '') || '—'} · Pickup: {billingFieldFor(s, 'pickupTime', s.pickup_time ? s.pickup_time.slice(0, 5) : '') || '—'}
                 </div>
                 <div className="stay-meta">
-                  {s.billed_at ? 'Billed cost' : 'Estimated cost'}: {(() => {
+                  {s.paid_at ? 'Paid cost' : s.billed_at ? 'Billed cost' : 'Estimated cost'}: {(() => {
                     const fc = billingFieldFor(s, 'finalCost', s.estimated_cost != null ? String(s.estimated_cost) : '');
                     return fc ? `$${formatMoney(fc)}` : '—';
                   })()}
@@ -1595,7 +1642,7 @@ function AdminView({
                 </div>
               </>
             )}
-            {s.approval_status !== 'denied' && (
+            {s.approval_status === 'approved' && !s.paid_at && (
               <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 8, flexWrap: 'wrap' }}>
                 <button className="btn-secondary" style={{ padding: '4px 10px', fontSize: '0.78rem' }} onClick={() => setEditingStayId(isEditing ? null : s.id)}>
                   {isEditing ? 'Done Editing' : 'Edit'}
@@ -1608,8 +1655,21 @@ function AdminView({
                 >
                   {sendingBillId === s.id ? 'Sending...' : 'Send Billing Text'}
                 </button>
+                {s.billed_at && (
+                  <button
+                    className="btn-primary"
+                    style={{ padding: '4px 10px', fontSize: '0.78rem', background: '#7D9B76' }}
+                    disabled={markingPaidId === s.id}
+                    onClick={() => markPaid(s)}
+                  >
+                    {markingPaidId === s.id ? 'Saving...' : 'Mark Paid'}
+                  </button>
+                )}
                 {billingSendStatus[s.id] && (
                   <span className="field-error" style={{ fontSize: '0.78rem' }}>{billingSendStatus[s.id]}</span>
+                )}
+                {paidStatus[s.id] && (
+                  <span className="field-error" style={{ fontSize: '0.78rem' }}>{paidStatus[s.id]}</span>
                 )}
               </div>
             )}
@@ -1801,6 +1861,16 @@ function AdminView({
           {unbilledStays.length === 0 && <p className="empty" style={{ padding: '8px 0' }}>Nothing to bill right now.</p>}
           <div className="stay-history">
             {unbilledStays.map(renderStayCard)}
+          </div>
+        </div>
+
+        <div className="rate-setting awaiting-payment-section">
+          <label className="field-label">
+            Awaiting Payment {awaitingPaymentStays.length > 0 && <span className="feedback-badge" style={{ marginLeft: 6 }}>{awaitingPaymentStays.length}</span>}
+          </label>
+          {awaitingPaymentStays.length === 0 && <p className="empty" style={{ padding: '8px 0' }}>Nothing billed and awaiting payment right now.</p>}
+          <div className="stay-history">
+            {awaitingPaymentStays.map(renderStayCard)}
           </div>
         </div>
 
