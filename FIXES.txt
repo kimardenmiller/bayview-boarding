@@ -1,6 +1,6 @@
 BAYVIEW BOARDING — FIX LIST
 ============================
-Last updated: September 21, 2026 (9) (link-preview image is now the landing hero photo, and preview URLs are absolute so they actually resolve when shared)
+Last updated: September 21, 2026 (10) (About page photos are now admin-manageable, in Supabase Storage instead of hardcoded)
 
 NEXT CHANGE LIST (v1.5)
 -----------------------
@@ -62,6 +62,60 @@ TWILIO STATUS
 
 COMPLETED
 ---------
+- Sept 21, 2026 (10): About page photos are now admin-manageable, on
+  request ("what's the best way to manage the photos and their order,
+  under Admin?") - Supabase Storage version, per Kim's choice between
+  that and staying code-only:
+  1. New public Storage bucket ("about-photos" - a photo isn't sensitive,
+     same trust level as the git-tracked public/img/about files it
+     replaces). The ORDERED LIST itself (which photos, what order, each
+     one's alt text) lives in a new settings.about_photos jsonb column
+     instead of a new table - same singleton-row pattern as vets/
+     packing_list, public (every visitor's browser needs it to render
+     the About page), admin-write-gated through the existing settings
+     Edge Function.
+  2. New, dedicated `about-photos` Edge Function, entirely admin-
+     password-gated, 2 actions: upload (multipart/form-
+     data - stores the file under a fresh random name, NEVER the
+     client's own filename, and appends {path, alt} to settings.
+     about_photos) and delete (removes the file from Storage AND drops
+     that entry from settings.about_photos, in the same call, so the two
+     can't drift out of sync waiting on a separate save). Both are
+     immediate/atomic - unlike reordering or alt-text edits (which stay
+     local until "Save Photo Order" is clicked, same as the packing
+     list), upload/delete touch real Storage files, so leaving them
+     half-done behind an unclicked Save risked orphaned files or
+     references to files that no longer exist.
+  3. New Admin > "About Photos" section (Site Settings area): a
+     thumbnail + editable alt text + Up/Down + Remove per photo, a file
+     picker to upload a new one, and "Save Photo Order" for reordering/
+     alt-text changes.
+  4. The 6 existing photos were migrated into both production's and
+     staging's new Storage buckets (same filenames, e.g. "1-choco.jpeg",
+     kept for continuity) and settings.about_photos backfilled to
+     reference them - the site's About section looks identical to before
+     this shipped, just admin-manageable now. The old hardcoded array
+     (now DEFAULT_ABOUT_PHOTOS) stays only as a fallback - used before
+     the live settings fetch resolves, or if it/Storage is ever
+     unreachable - deliberately self-contained (references the
+     git-tracked public/ folder, not Storage) so it still works even if
+     Storage itself is down.
+
+  Tests: about-photos gained full Deno coverage (password gates, file/
+  image-type validation, random-filename generation, the delete-drops-
+  just-that-entry behavior). settings gained coverage for the new
+  column (list validation, trim, empty list allowed - unlike vets/
+  packing_list, "no photos yet" is a legitimate state). App's Jest suite
+  gained a dedicated "About Photos" admin block plus a live-photos-
+  replace-the-fallback test on the public page; the shared Supabase
+  mock gained a `storage.from().getPublicUrl()` stub since aboutPhotoSrc
+  (App.js) now calls it for any live (non-fallback) photo.
+  212 React + 179 Deno = 391/391 passing.
+
+  Verified live on both production and staging: the public settings
+  read returns all 6 migrated photos, each resolves to a working public
+  Storage URL, and both deployed bundles carry the new admin section.
+
 - Sept 21, 2026 (9): Link-preview image, on request ("can it be our
   opening page image?") - og:image/twitter:image now point at the
   landing hero photo (public/img/hero-dog.jpg, a copy of src/img/

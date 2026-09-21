@@ -51,6 +51,12 @@ function mockInvokeDefaults(overrides = {}) {
   const currentSettings = { ...DEFAULT_SETTINGS };
   let currentFeedback = [];
   let currentTesters = [];
+  // resetMocks (see src/__mocks__/supabase.js's own comment) wipes this
+  // implementation before every test too, same as functions.invoke below -
+  // re-established here rather than at the mock file's module scope.
+  supabase.storage.from.mockImplementation((bucket) => ({
+    getPublicUrl: (path) => ({ data: { publicUrl: `https://mock-storage.test/${bucket}/${path}` } }),
+  }));
   supabase.functions.invoke.mockImplementation((fn, opts) => {
     if (overrides[fn]) return overrides[fn](opts);
     if (fn === 'lookup-client') return Promise.resolve({ data: { found: false }, error: null });
@@ -811,6 +817,19 @@ describe('Landing — About Us, embedded on the home page', () => {
     expect(photos.length).toBe(6);
     expect(photos[0].src).toContain('1-choco');
     expect(photos[5].src).toContain('6-china-camp-bay-line');
+  });
+
+  test('once the live settings fetch resolves, admin-managed Storage photos replace the hardcoded fallback (Sept 21, 2026)', async () => {
+    mockInvokeDefaults({
+      settings: async () => ({
+        data: { ...DEFAULT_SETTINGS, aboutPhotos: [{ path: 'live-photo.jpg', alt: 'A live photo' }] },
+        error: null,
+      }),
+    });
+    render(<App />);
+    const photo = await screen.findByAltText('A live photo');
+    expect(photo.src).toContain('live-photo.jpg');
+    expect(document.querySelectorAll('.about-gallery-img').length).toBe(1);
   });
 
   test('About section shows the Rover rating as a link to the Rover reviews, with dated review quotes', () => {
@@ -2148,6 +2167,136 @@ describe('Admin — logged in — Awaiting Payment', () => {
   test('a friendly empty state shows when nothing is awaiting payment', async () => {
     await loginAsAdmin([], 0);
     expect(screen.getByText('Nothing billed and awaiting payment right now.')).toBeInTheDocument();
+  });
+});
+
+const SAMPLE_ABOUT_PHOTOS = [
+  { path: 'existing1.jpg', alt: 'Choco' },
+  { path: 'existing2.jpg', alt: 'Milo' },
+];
+
+async function loginAsAdminWithPhotos(aboutPhotos = SAMPLE_ABOUT_PHOTOS) {
+  const currentSettings = { ...DEFAULT_SETTINGS, aboutPhotos };
+  mockInvokeDefaults({
+    'admin-data': async () => ({ data: { dogs: [], totalStays: 0 }, error: null }),
+    settings: async (opts) => {
+      const updates = opts?.body?.updates;
+      if (updates) Object.assign(currentSettings, updates);
+      return { data: { ...currentSettings }, error: null };
+    },
+    'about-photos': async (opts) => {
+      const { path } = opts?.body || {};
+      currentSettings.aboutPhotos = currentSettings.aboutPhotos.filter(p => p.path !== path);
+      return { data: { aboutPhotos: currentSettings.aboutPhotos }, error: null };
+    },
+  });
+  goToAdminUrl();
+  render(<App />);
+  await userEvent.type(screen.getByPlaceholderText('Password'), 'correct-password');
+  fireEvent.click(screen.getByText('Sign In'));
+  await screen.findByText('Bayview Boarding — Admin');
+}
+
+describe('Admin — logged in — About Photos', () => {
+  test('shows every existing photo as a thumbnail with an editable alt-text field', async () => {
+    await loginAsAdminWithPhotos();
+    const section = document.querySelector('.about-photos-editor');
+    expect(within(section).getByDisplayValue('Choco')).toBeInTheDocument();
+    expect(within(section).getByDisplayValue('Milo')).toBeInTheDocument();
+    expect(section.querySelectorAll('img').length).toBe(2);
+  });
+
+  test('reordering with Up/Down, then Save Photo Order, persists the new order', async () => {
+    await loginAsAdminWithPhotos();
+    const section = document.querySelector('.about-photos-editor');
+    fireEvent.click(within(section).getByLabelText('Move photo 2 up'));
+    fireEvent.click(within(section).getByText('Save Photo Order'));
+
+    await waitFor(() => expect(supabase.functions.invoke).toHaveBeenCalledWith('settings', {
+      body: {
+        password: 'correct-password',
+        updates: { aboutPhotos: [{ path: 'existing2.jpg', alt: 'Milo' }, { path: 'existing1.jpg', alt: 'Choco' }] },
+      },
+    }));
+  });
+
+  test('editing alt text, then Save Photo Order, persists it', async () => {
+    await loginAsAdminWithPhotos();
+    const section = document.querySelector('.about-photos-editor');
+    fireEvent.change(within(section).getByDisplayValue('Choco'), { target: { value: 'Choco on the trail' } });
+    fireEvent.click(within(section).getByText('Save Photo Order'));
+
+    await waitFor(() => expect(supabase.functions.invoke).toHaveBeenCalledWith('settings', {
+      body: {
+        password: 'correct-password',
+        updates: { aboutPhotos: [{ path: 'existing1.jpg', alt: 'Choco on the trail' }, { path: 'existing2.jpg', alt: 'Milo' }] },
+      },
+    }));
+  });
+
+  test('uploading a photo sends it immediately (password + file), no separate Save needed', async () => {
+    mockInvokeDefaults({
+      'admin-data': async () => ({ data: { dogs: [], totalStays: 0 }, error: null }),
+      'about-photos': async (opts) => {
+        const form = opts?.body;
+        expect(form.get('password')).toBe('correct-password');
+        expect(form.get('file').name).toBe('bud.jpg');
+        return {
+          data: { aboutPhotos: [{ path: 'uploaded123.jpg', alt: '' }] },
+          error: null,
+        };
+      },
+    });
+    goToAdminUrl();
+    render(<App />);
+    await userEvent.type(screen.getByPlaceholderText('Password'), 'correct-password');
+    fireEvent.click(screen.getByText('Sign In'));
+    await screen.findByText('Bayview Boarding — Admin');
+
+    const section = document.querySelector('.about-photos-editor');
+    const file = new File(['fake-image-bytes'], 'bud.jpg', { type: 'image/jpeg' });
+    const fileInput = within(section).getByLabelText('Upload a photo');
+    await userEvent.upload(fileInput, file);
+
+    // The mocked response is the authoritative new list (just the one
+    // freshly-uploaded photo, alt text still blank) - replaces whatever
+    // the fallback showed before the upload, same as a real save would.
+    // A raw querySelector, not getByRole('img') - a blank alt="" makes
+    // the browser/testing-library treat the image as decorative, with
+    // no accessible "img" role at all.
+    await waitFor(() => expect(section.querySelectorAll('img')).toHaveLength(1));
+    expect(section.querySelector('img').src).toContain('uploaded123.jpg');
+  });
+
+  test('removing a photo deletes it immediately (no separate Save needed)', async () => {
+    await loginAsAdminWithPhotos();
+    const section = document.querySelector('.about-photos-editor');
+    const chocoRow = within(section).getByDisplayValue('Choco').closest('div');
+    fireEvent.click(within(chocoRow).getByText('Remove'));
+
+    await waitFor(() => expect(supabase.functions.invoke).toHaveBeenCalledWith('about-photos', {
+      body: { password: 'correct-password', action: 'delete', path: 'existing1.jpg' },
+    }));
+    expect(await within(section).findAllByRole('img')).toHaveLength(1);
+    expect(within(section).queryByDisplayValue('Choco')).not.toBeInTheDocument();
+  });
+
+  test('shows an error and does not lose the list if an upload fails', async () => {
+    mockInvokeDefaults({
+      'admin-data': async () => ({ data: { dogs: [], totalStays: 0 }, error: null }),
+      'about-photos': async () => ({ data: null, error: { message: 'Upload failed' } }),
+    });
+    goToAdminUrl();
+    render(<App />);
+    await userEvent.type(screen.getByPlaceholderText('Password'), 'correct-password');
+    fireEvent.click(screen.getByText('Sign In'));
+    await screen.findByText('Bayview Boarding — Admin');
+
+    const section = document.querySelector('.about-photos-editor');
+    const file = new File(['x'], 'bud.jpg', { type: 'image/jpeg' });
+    await userEvent.upload(within(section).getByLabelText('Upload a photo'), file);
+
+    expect(await within(section).findByText('Failed to upload. Please try again.')).toBeInTheDocument();
   });
 });
 

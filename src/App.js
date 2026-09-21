@@ -803,7 +803,8 @@ function Confirmation({ stay, onNewBooking }) {
 function AdminView({
   onClose, rate, setRate, multiDogDiscount, setMultiDogDiscount,
   holidayUpcharge, setHolidayUpcharge, vets, setVets,
-  packingList, setPackingList, smsTemplates, setSmsTemplates,
+  packingList, setPackingList, aboutPhotos, setAboutPhotos,
+  smsTemplates, setSmsTemplates,
   smsFooter, setSmsFooter,
 }) {
   const [pw, setPw] = useState('');
@@ -822,6 +823,17 @@ function AdminView({
   const [newVetText, setNewVetText] = useState('');
   const [editPackingList, setEditPackingList] = useState(packingList);
   const [newPackingItemText, setNewPackingItemText] = useState('');
+  // About page photos (Sept 21, 2026) - editAboutPhotos mirrors
+  // editPackingList's pattern (reorder/alt-text edits are local until
+  // "Save Photo Order" is clicked), but Upload/Remove are each their own
+  // immediate, atomic server call (via the about-photos Edge Function,
+  // not settings) since they touch actual Storage files, not just this
+  // JSON array - see approveRequest/denyRequest above for the same
+  // "destructive/creating actions are immediate" reasoning.
+  const [editAboutPhotos, setEditAboutPhotos] = useState(aboutPhotos);
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
+  const [deletingPhotoPath, setDeletingPhotoPath] = useState(null);
+  const [photoActionError, setPhotoActionError] = useState('');
   const [editSms, setEditSms] = useState(smsTemplates);
   const [editSmsFooter, setEditSmsFooter] = useState(smsFooter);
   // Manager phone numbers (Sept 18, 2026) - unlike every other field
@@ -946,6 +958,7 @@ function AdminView({
     setEditHolidayUpcharge(String(holidayUpcharge * 100));
     setEditVets(vets);
     setEditPackingList(packingList);
+    setEditAboutPhotos(aboutPhotos);
     setEditSms(smsTemplates);
     setEditSmsFooter(smsFooter);
   }
@@ -976,6 +989,18 @@ function AdminView({
     if (data.packingList) {
       setPackingList(data.packingList);
       setEditPackingList(data.packingList);
+    }
+    // Array.isArray, not a truthy check - an empty photo list is valid
+    // (see App's own public-fetch handling above), and `updates` is the
+    // only reliable signal this write actually touched aboutPhotos at
+    // all (unlike packingList above, [] is still truthy in JS, so a
+    // plain `if (data.aboutPhotos)` would technically also work here,
+    // but this stays consistent with the primaryManagerPhone/
+    // defaultBroadcastMessage pattern below of checking what was
+    // actually sent, not just what came back).
+    if (updates.aboutPhotos !== undefined && Array.isArray(data.aboutPhotos)) {
+      setAboutPhotos(data.aboutPhotos);
+      setEditAboutPhotos(data.aboutPhotos);
     }
     if (data.smsConfirmation || data.smsReminder || data.smsBilling || data.smsPickupReminder || data.smsRequestReceived || data.smsDenied) {
       const next = {
@@ -1046,6 +1071,58 @@ function AdminView({
       [next[index], next[target]] = [next[target], next[index]];
       return next;
     });
+  }
+
+  // About page photos (Sept 21, 2026) - editAlt/movePhoto are local-only,
+  // same as packing list's editPackingItem/movePackingItem (persisted
+  // only once "Save Photo Order" is clicked). uploadPhoto/removePhoto are
+  // each their own immediate server call instead (see the state
+  // declarations above for why) - both hit the about-photos Edge
+  // Function, not settings, since they touch actual Storage files.
+  function editPhotoAlt(index, value) {
+    setEditAboutPhotos(list => list.map((p, i) => (i === index ? { ...p, alt: value } : p)));
+  }
+
+  function movePhoto(index, direction) {
+    setEditAboutPhotos(list => {
+      const target = index + direction;
+      if (target < 0 || target >= list.length) return list;
+      const next = [...list];
+      [next[index], next[target]] = [next[target], next[index]];
+      return next;
+    });
+  }
+
+  async function uploadPhoto(file) {
+    if (!file) return;
+    setUploadingPhoto(true);
+    setPhotoActionError('');
+    const form = new FormData();
+    form.append('password', pw);
+    form.append('file', file);
+    const { data, error: fnError } = await supabase.functions.invoke('about-photos', { body: form });
+    setUploadingPhoto(false);
+    if (fnError || data?.error) {
+      setPhotoActionError(data?.error || 'Failed to upload. Please try again.');
+      return;
+    }
+    setAboutPhotos(data.aboutPhotos);
+    setEditAboutPhotos(data.aboutPhotos);
+  }
+
+  async function removePhoto(path) {
+    setDeletingPhotoPath(path);
+    setPhotoActionError('');
+    const { data, error: fnError } = await supabase.functions.invoke('about-photos', {
+      body: { password: pw, action: 'delete', path },
+    });
+    setDeletingPhotoPath(null);
+    if (fnError || data?.error) {
+      setPhotoActionError(data?.error || 'Failed to remove. Please try again.');
+      return;
+    }
+    setAboutPhotos(data.aboutPhotos);
+    setEditAboutPhotos(data.aboutPhotos);
   }
 
   async function updateFeedbackStatus(id, status) {
@@ -1999,6 +2076,69 @@ function AdminView({
           </div>
         </div>
 
+        <div className="rate-setting about-photos-editor">
+          <label className="field-label">About Photos (shown on the home page)</label>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 8 }}>
+            {editAboutPhotos.map((p, i) => (
+              <div key={p.path || p.src || i} style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: '0.85rem' }}>
+                <img
+                  src={aboutPhotoSrc(p)}
+                  alt={p.alt}
+                  style={{ width: 44, height: 44, objectFit: 'cover', borderRadius: 6, flexShrink: 0 }}
+                />
+                <input
+                  aria-label={`Photo ${i + 1} alt text`}
+                  placeholder="Alt text"
+                  value={p.alt}
+                  onChange={e => editPhotoAlt(i, e.target.value)}
+                  style={{ flex: 1, padding: '4px 8px', border: '1.5px solid #D5D9DE', borderRadius: 6, fontSize: '0.85rem', fontFamily: 'inherit' }}
+                />
+                <button
+                  className="btn-secondary"
+                  aria-label={`Move photo ${i + 1} up`}
+                  style={{ padding: '4px 8px', fontSize: '0.78rem' }}
+                  disabled={i === 0}
+                  onClick={() => movePhoto(i, -1)}
+                >
+                  ↑
+                </button>
+                <button
+                  className="btn-secondary"
+                  aria-label={`Move photo ${i + 1} down`}
+                  style={{ padding: '4px 8px', fontSize: '0.78rem' }}
+                  disabled={i === editAboutPhotos.length - 1}
+                  onClick={() => movePhoto(i, 1)}
+                >
+                  ↓
+                </button>
+                <button
+                  className="btn-secondary"
+                  style={{ padding: '4px 10px', fontSize: '0.78rem' }}
+                  disabled={!p.path || deletingPhotoPath === p.path}
+                  onClick={() => removePhoto(p.path)}
+                >
+                  {deletingPhotoPath === p.path ? 'Removing...' : 'Remove'}
+                </button>
+              </div>
+            ))}
+            {editAboutPhotos.length === 0 && <p className="empty" style={{ padding: '8px 0' }}>No photos yet.</p>}
+          </div>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+            <input
+              type="file"
+              accept="image/*"
+              aria-label="Upload a photo"
+              disabled={uploadingPhoto}
+              onChange={e => { const file = e.target.files?.[0]; e.target.value = ''; uploadPhoto(file); }}
+            />
+            {uploadingPhoto && <span style={{ fontSize: '0.78rem', color: '#6B7A8A' }}>Uploading...</span>}
+          </div>
+          {photoActionError && <div className="field-error" style={{ marginTop: 6 }}>{photoActionError}</div>}
+          <div style={{ marginTop: 8 }}>
+            <button className="btn-primary" style={{ padding: '6px 14px' }} disabled={savingSettings} onClick={() => saveSettings({ aboutPhotos: editAboutPhotos })}>Save Photo Order</button>
+          </div>
+        </div>
+
         <div className="rate-setting sms-editor">
           <label className="field-label">SMS Message Templates</label>
           <div style={{ fontSize: '0.72rem', color: '#6B7A8A', marginBottom: 10 }}>
@@ -2130,7 +2270,7 @@ function AdminView({
 // below it in normal page flow - "Learn more" (and the nav menu's
 // "About Us", from anywhere else in the app - see App's scrollToAbout)
 // scrolls to it instead of navigating to a separate screen.
-function Landing({ onStart, onLearnMore, aboutSectionRef }) {
+function Landing({ onStart, onLearnMore, aboutSectionRef, aboutPhotos }) {
   return (
     <>
       <div className="landing">
@@ -2147,7 +2287,7 @@ function Landing({ onStart, onLearnMore, aboutSectionRef }) {
       </div>
       <div className="about" ref={aboutSectionRef}>
         <div className="about-content">
-          <AboutContent onStart={onStart} />
+          <AboutContent onStart={onStart} aboutPhotos={aboutPhotos} />
         </div>
       </div>
     </>
@@ -2177,10 +2317,15 @@ const ABOUT_REVIEWS = [
   { author: 'Rennie G.', date: 'Nov 18, 2022', quote: "We are very happy with Kim's care of Dusty for this one night stay. Kim was very attentive and kept us informed. We are comfortable leaving Dusty in Kim's care and will be boarding Dusty for longer stays with Kim in the near future." },
 ];
 
-// Photos supplied directly (public/img/about/) - filenames were numbered by
-// Kim to set the display order; served from the public folder (not
-// imported/bundled) since there are several of them and some are sizeable.
-const ABOUT_PHOTOS = [
+// Fallback only (Sept 21, 2026) - used until the public settings fetch
+// resolves, or if it/Supabase Storage is ever unreachable, so the About
+// section never shows literally no photos at all. The real,
+// admin-manageable list now lives in Supabase (settings.about_photos,
+// see the migration + Admin > About Photos) with the actual image files
+// in Storage instead of this git-tracked public/ folder - these 6 were
+// migrated there directly, so in normal operation this constant is
+// never actually rendered, only kept as a safety net.
+const DEFAULT_ABOUT_PHOTOS = [
   { src: `${process.env.PUBLIC_URL}/img/about/1-choco.jpeg`, alt: 'Choco' },
   { src: `${process.env.PUBLIC_URL}/img/about/2-milo.jpeg`, alt: 'Milo' },
   { src: `${process.env.PUBLIC_URL}/img/about/3-china-camp-shoreline-trail.jpg`, alt: 'China Camp shoreline trail' },
@@ -2188,6 +2333,18 @@ const ABOUT_PHOTOS = [
   { src: `${process.env.PUBLIC_URL}/img/about/5-bayview-acre.jpg`, alt: 'The acre at Bayview' },
   { src: `${process.env.PUBLIC_URL}/img/about/6-china-camp-bay-line.jpg`, alt: 'China Camp, along the bay' },
 ];
+
+// Resolves either shape a photo entry can be in: the hardcoded fallback
+// above (already a full `src` URL, no Supabase Storage involved at all -
+// deliberately self-contained so it still works even if Storage itself
+// is ever unreachable) or a live one fetched from settings.about_photos
+// (just a `path` within the "about-photos" Storage bucket - getPublicUrl
+// is a pure string-construction call, not a network request, so this is
+// cheap to call inline at render time for every photo).
+function aboutPhotoSrc(photo) {
+  if (photo.src) return photo.src;
+  return supabase.storage.from('about-photos').getPublicUrl(photo.path).data.publicUrl;
+}
 
 // Approximate-location map (About page "Location" section). A specific
 // point Kim placed ~300 yards past the actual address (Sept 16, 2026),
@@ -2205,7 +2362,7 @@ const ABOUT_MAP_LINK_URL = 'https://maps.app.goo.gl/xWg4sCFVpevDCKd16';
 // its own "Learn more" tap, so first-time visitors can see who they're
 // trusting with their dog just by scrolling, before they commit to
 // starting the booking flow.
-function AboutContent({ onStart }) {
+function AboutContent({ onStart, aboutPhotos }) {
   return (
     <>
       <h1 className="about-title about-title--center">Dog Paradise <br />Above <br />Loch Lomond</h1>
@@ -2225,8 +2382,8 @@ function AboutContent({ onStart }) {
         </p>
 
         <div className="about-gallery">
-          {ABOUT_PHOTOS.map((p, i) => (
-            <img key={i} className="about-gallery-img" src={p.src} alt={p.alt} loading="lazy" />
+          {aboutPhotos.map((p, i) => (
+            <img key={p.path || p.src || i} className="about-gallery-img" src={aboutPhotoSrc(p)} alt={p.alt} loading="lazy" />
           ))}
         </div>
 
@@ -2534,6 +2691,7 @@ export default function App() {
   const [holidayUpcharge, setHolidayUpcharge] = useState(DEFAULT_HOLIDAY_UPCHARGE);
   const [vets, setVets] = useState(DEFAULT_VETS);
   const [packingList, setPackingList] = useState(DEFAULT_PACKING_LIST);
+  const [aboutPhotos, setAboutPhotos] = useState(DEFAULT_ABOUT_PHOTOS);
   const [smsTemplates, setSmsTemplates] = useState(DEFAULT_SMS_TEMPLATES);
   const [smsFooter, setSmsFooter] = useState(DEFAULT_SMS_FOOTER);
 
@@ -2564,6 +2722,11 @@ export default function App() {
         });
       }
       if (data.smsFooter) setSmsFooter(data.smsFooter);
+      // Unlike vets/packingList, an empty list here is valid (a real,
+      // if unlikely, "no photos uploaded yet" state) - always trust the
+      // live fetch once it resolves, rather than only overriding the
+      // fallback when non-empty.
+      if (Array.isArray(data.aboutPhotos)) setAboutPhotos(data.aboutPhotos);
     }).catch(() => {}); // network hiccup - keep the defaults, don't crash the page
   }, []);
 
@@ -2672,6 +2835,7 @@ export default function App() {
     holidayUpcharge, setHolidayUpcharge,
     vets, setVets,
     packingList, setPackingList,
+    aboutPhotos, setAboutPhotos,
     smsTemplates, setSmsTemplates,
     smsFooter, setSmsFooter,
   };
@@ -2717,7 +2881,7 @@ export default function App() {
   } else if (showSubmitIdea) {
     pageContent = <SubmitIdea onBack={goToLanding} />;
   } else if (showLanding) {
-    pageContent = <Landing onStart={goToBooking} onLearnMore={scrollToAbout} aboutSectionRef={aboutSectionRef} />;
+    pageContent = <Landing onStart={goToBooking} onLearnMore={scrollToAbout} aboutSectionRef={aboutSectionRef} aboutPhotos={aboutPhotos} />;
   } else {
     pageContent = (
       <>

@@ -20,6 +20,7 @@ const DEFAULT_ROW = {
   sms_footer: 'Reply STOP to opt out. Text Kim {primaryManagerPhone} & Estee {secondaryManagerPhone}.',
   sms_request_received: 'Hi {firstName}! Request received for {dogName}.',
   sms_denied: 'Hi {firstName}! Sorry, we can\'t take {dogName}.{denialReason}',
+  about_photos: [{ path: 'abc123.jpg', alt: 'Choco' }, { path: 'def456.jpg', alt: 'Milo' }],
   primary_manager_phone: '4155550101',
   secondary_manager_phone: '4155550102',
   default_broadcast_message: 'Please have a look at our staging site and tell us what you think!',
@@ -102,6 +103,7 @@ Deno.test('a plain read requires no password (public) and never includes the man
       smsFooter: DEFAULT_ROW.sms_footer,
       smsRequestReceived: DEFAULT_ROW.sms_request_received,
       smsDenied: DEFAULT_ROW.sms_denied,
+      aboutPhotos: DEFAULT_ROW.about_photos,
     });
     assertEquals('primaryManagerPhone' in data, false);
     assertEquals('secondaryManagerPhone' in data, false);
@@ -416,6 +418,38 @@ Deno.test('updates the default broadcast message, trimming it', async () => {
     assertEquals(res.status, 200);
     const data = await res.json();
     assertEquals(data.defaultBroadcastMessage, 'New default broadcast text');
+  } finally {
+    stub.restore();
+  }
+});
+
+Deno.test('updates the about-page photo list, trimming each path/alt, and allows an empty list', async () => {
+  const stub = stubSupabase();
+  try {
+    const res = await handleRequest(postRequest({
+      password: ADMIN_PASSWORD,
+      updates: { aboutPhotos: [{ path: '  new123.jpg  ', alt: '  A new photo  ' }] },
+    }));
+    assertEquals(res.status, 200);
+    const data = await res.json();
+    assertEquals(data.aboutPhotos, [{ path: 'new123.jpg', alt: 'A new photo' }]);
+
+    const cleared = await handleRequest(postRequest({ password: ADMIN_PASSWORD, updates: { aboutPhotos: [] } }));
+    assertEquals(cleared.status, 200);
+    assertEquals((await cleared.json()).aboutPhotos, []);
+  } finally {
+    stub.restore();
+  }
+});
+
+Deno.test('rejects an aboutPhotos update that is not a list, or has an entry with no path', async () => {
+  const stub = stubSupabase();
+  try {
+    const notList = await handleRequest(postRequest({ password: ADMIN_PASSWORD, updates: { aboutPhotos: 'nope' } }));
+    assertEquals(notList.status, 400);
+    const noPath = await handleRequest(postRequest({ password: ADMIN_PASSWORD, updates: { aboutPhotos: [{ alt: 'Missing path' }] } }));
+    assertEquals(noPath.status, 400);
+    assertEquals(stub.calls.length, 0);
   } finally {
     stub.restore();
   }

@@ -25,6 +25,16 @@ function json(body: unknown, status = 200): Response {
   });
 }
 
+// `path` is the file's location within the "about-photos" Storage
+// bucket (public, see the migration) - the client resolves it to an
+// actual URL itself via supabase.storage.from('about-photos')
+// .getPublicUrl(path), same as it already knows the Supabase project
+// URL/key (both public/anon, already in the client bundle).
+interface AboutPhoto {
+  path: string;
+  alt: string;
+}
+
 interface SettingsRow {
   day_rate: number;
   multi_dog_discount: number;
@@ -38,6 +48,7 @@ interface SettingsRow {
   sms_footer: string;
   sms_request_received: string;
   sms_denied: string;
+  about_photos: AboutPhoto[];
   primary_manager_phone?: string;
   secondary_manager_phone?: string;
   default_broadcast_message?: string;
@@ -51,7 +62,7 @@ interface SettingsRow {
 // that must never reach a public read, since those are the actual phone
 // numbers those placeholders get filled with.
 const PUBLIC_COLUMNS =
-  "day_rate, multi_dog_discount, holiday_upcharge, vets, packing_list, sms_confirmation, sms_reminder, sms_billing, sms_pickup_reminder, sms_footer, sms_request_received, sms_denied";
+  "day_rate, multi_dog_discount, holiday_upcharge, vets, packing_list, sms_confirmation, sms_reminder, sms_billing, sms_pickup_reminder, sms_footer, sms_request_received, sms_denied, about_photos";
 const ADMIN_ONLY_COLUMNS = "primary_manager_phone, secondary_manager_phone, default_broadcast_message";
 const ADMIN_COLUMNS = `${PUBLIC_COLUMNS}, ${ADMIN_ONLY_COLUMNS}`;
 
@@ -69,6 +80,7 @@ function toClientShape(row: SettingsRow) {
     smsFooter: row.sms_footer,
     smsRequestReceived: row.sms_request_received,
     smsDenied: row.sms_denied,
+    aboutPhotos: row.about_photos,
   };
   // Only present at all when the row was fetched with ADMIN_COLUMNS -
   // a public caller's response simply never has these keys, rather than
@@ -93,6 +105,7 @@ interface UpdatesInput {
   smsFooter?: string;
   smsRequestReceived?: string;
   smsDenied?: string;
+  aboutPhotos?: AboutPhoto[];
   primaryManagerPhone?: string;
   secondaryManagerPhone?: string;
   defaultBroadcastMessage?: string;
@@ -178,6 +191,13 @@ function validateUpdates(updates: UpdatesInput): string[] {
   if (updates.defaultBroadcastMessage !== undefined && !updates.defaultBroadcastMessage?.trim()) {
     errors.push("defaultBroadcastMessage must not be blank");
   }
+  if (updates.aboutPhotos !== undefined) {
+    if (!Array.isArray(updates.aboutPhotos)) {
+      errors.push("aboutPhotos must be a list");
+    } else if (updates.aboutPhotos.some((p) => typeof p?.path !== "string" || !p.path.trim())) {
+      errors.push("aboutPhotos entries must each have a non-blank path");
+    }
+  }
   // Deliberately no non-blank check on the manager phone numbers - both
   // start blank right after the migration that added them, until admin
   // fills them in for the first time, and clearing one temporarily
@@ -227,6 +247,9 @@ export async function handleRequest(req: Request): Promise<Response> {
       if (updates.primaryManagerPhone !== undefined) patch.primary_manager_phone = updates.primaryManagerPhone.trim();
       if (updates.secondaryManagerPhone !== undefined) patch.secondary_manager_phone = updates.secondaryManagerPhone.trim();
       if (updates.defaultBroadcastMessage !== undefined) patch.default_broadcast_message = updates.defaultBroadcastMessage.trim();
+      if (updates.aboutPhotos !== undefined) {
+        patch.about_photos = updates.aboutPhotos.map((p) => ({ path: p.path.trim(), alt: (p.alt || "").trim() }));
+      }
       patch.updated_at = new Date().toISOString();
 
       // A write always comes from an authenticated admin - hand back the

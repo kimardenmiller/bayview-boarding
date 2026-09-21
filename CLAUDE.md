@@ -129,10 +129,15 @@ Kim Miller and Estee Fletter at 210 Bayview Drive, San Rafael, CA.
   "remove" below) alongside them, and a
   "📢 Testers" section (Sept 17 — see testers below) to maintain a
   tester list and broadcast a personally-greeted SMS to all of them,
-  then day rate/discount/holiday/vet-list/packing-list/SMS-template
-  settings (the packing list's items are editable in place and
-  reorderable via Up/Down buttons, not just add/remove - Sept 19, 2026;
-  the SMS Message Templates section now also holds the Text
+  then day rate/discount/holiday/vet-list/packing-list/about-photos/
+  SMS-template settings (the packing list's items are editable in place
+  and reorderable via Up/Down buttons, not just add/remove - Sept 19,
+  2026; "About Photos" - Sept 21, 2026 - is the same idea plus a
+  thumbnail and a file picker to upload a new one: Up/Down + alt-text
+  edits stay local until "Save Photo Order", but Upload/Remove are each
+  immediate - they touch real Supabase Storage files, not just this
+  list, so leaving one half-done behind an unclicked Save risked
+  orphaned files; the SMS Message Templates section now also holds the Text
   Message Footer editor and a "Manager 1/2 Phone" editor - relabeled
   Sept 19, 2026 from "Primary/Secondary Manager Phone" - for
   {primaryManagerPhone}/{secondaryManagerPhone} - renamed Sept 18, 2026
@@ -155,6 +160,10 @@ Kim Miller and Estee Fletter at 210 Bayview Drive, San Rafael, CA.
   "About Us" both scroll smoothly down to it (aboutSectionRef in App.js);
   from mid-booking, clicking the "Bayview Boarding" header wordmark
   returns to the landing page and then scrolls down to it the same way.
+  Its photo gallery is admin-manageable now (Sept 21, 2026 - see Data
+  model's settings.about_photos and Admin panel below), not a hardcoded
+  array - the actual image files live in Supabase Storage instead of
+  the git-tracked public/ folder.
 - Hamburger nav menu (every screen): Book a Stay, About Us, Contact Us,
   Submit Idea, Admin (Sept 16, 2026; Book a Stay moved to the top Sept 16 (9))
 - "Contact Us" page — relays a name/email-or-phone/message submission to
@@ -182,23 +191,34 @@ direct client insert — see supabase/functions/submit-booking/index.ts.
 `settings` (Sept 15 (4); packing_list/sms_confirmation/sms_reminder/
 sms_billing added Sept 16 (5); sms_footer/primary_manager_phone/
 secondary_manager_phone added Sept 18, 2026; default_broadcast_message
-added Sept 19, 2026; sms_request_received/sms_denied added Sept 21,
-2026) is a singleton row (day rate, multi-dog discount, holiday
-upcharge, vet clinic list, packing list, 6 SMS templates, the shared
-footer, 2 manager phone numbers, the tester broadcast's saved default
-message) - the admin-configurable values calcCost/the vet dropdown/
-send-confirmation actually use, replacing hardcoded constants (the SMS
-templates and packing list used to be duplicated - once as a "reference
-copy" in src/settings.js, once for real inside send-confirmation/
-index.ts - and had already started to drift; now there's one source of
-truth). supabase/functions/settings/index.ts splits its own column list
-in two: PUBLIC_COLUMNS (everything above except the phone numbers and
-the broadcast default) is what a plain, unauthenticated read returns -
-every visitor needs current pricing/vet-list/templates (sms_request_
-received/sms_denied included - the client's own browser builds the
-request-received/denial texts, same as the other 4) to use the booking
-form and complete their own SMS sends; ADMIN_COLUMNS (PUBLIC_COLUMNS +
-the phone numbers + default_broadcast_message) is returned only when
+added Sept 19, 2026; sms_request_received/sms_denied/about_photos added
+Sept 21, 2026) is a singleton row (day rate, multi-dog discount, holiday
+upcharge, vet clinic list, packing list, the About page's photo list,
+6 SMS templates, the shared footer, 2 manager phone numbers, the tester
+broadcast's saved default message) - the admin-configurable values
+calcCost/the vet dropdown/send-confirmation actually use, replacing
+hardcoded constants (the SMS templates and packing list used to be
+duplicated - once as a "reference copy" in src/settings.js, once for
+real inside send-confirmation/index.ts - and had already started to
+drift; now there's one source of truth). about_photos is a jsonb array
+of `{path, alt}` - `path` is a file's location within the "about-photos"
+Storage bucket, not the file itself (see Key files' about-photos entry
+for uploads/deletes, which go through Storage directly, not this
+column); App.js's `aboutPhotoSrc` resolves a path to an actual URL via
+`supabase.storage.from('about-photos').getPublicUrl(path)`, a pure
+string-construction call, not a network request. Unlike vets/
+packing_list, an empty about_photos list is a legitimate state (no
+non-empty-list validation on it in settings/index.ts). supabase/
+functions/settings/index.ts splits its own column list in two:
+PUBLIC_COLUMNS (everything above except the phone numbers and the
+broadcast default) is what a plain, unauthenticated read returns -
+every visitor needs current pricing/vet-list/templates/photos
+(sms_request_received/sms_denied/about_photos included - the client's
+own browser builds the request-received/denial texts same as the other
+4, and needs the current photo list to render the About page at all) to
+use the booking form and complete their own SMS sends; ADMIN_COLUMNS
+(PUBLIC_COLUMNS + the phone numbers + default_broadcast_message) is
+returned only when
 the request carries the correct admin password, whether that's a write
 (`updates` present) or a dedicated password-only read with no `updates`
 (new Sept 18, 2026 - this is what lets Admin populate the 2 manager-
@@ -418,7 +438,7 @@ something this pass changes.
 - src/App.js — main app
 - src/settings.js — all configurable values (rates, vets, messages, packing list)
 - src/waiver.js — full waiver text
-- src/App.test.js — 205 passing tests (TDD), Supabase mocked via src/__mocks__/supabase.js
+- src/App.test.js — 212 passing tests (TDD), Supabase mocked via src/__mocks__/supabase.js
 - src/supabase.js — creates the Supabase client from REACT_APP_SUPABASE_URL/_KEY (falling back to production's own public values) - see Staging environment above for how the staging build overrides these
 - src/index.js — app entry point; also where Google Analytics loads (production only) and staging's noindex meta tag gets injected - see SEO & Analytics above
 - supabase/functions/send-contact/index.ts — public Contact Us form handler: relays name/email-or-phone/message to Kim & Estee by SMS (reuses KIM_PHONE/ESTEE_PHONE). Deployed normally (no --no-verify-jwt) since it's called via the Supabase JS client like settings/lookup-client/submit-booking
@@ -427,7 +447,8 @@ something this pass changes.
 - supabase/functions/send-pickup-reminders/index.ts — daily cron target, the pickup-side counterpart to send-reminders: finds stays checking out tomorrow, texts each via send-confirmation (type "pickup"), marks pickup_reminder_sent_at. Deployed with `--no-verify-jwt` - same care needed on redeploy as send-reminders
 - public/img/about/ — the 6 numbered photos on the About page, served from the public folder (not bundled) and referenced via process.env.PUBLIC_URL since the app is hosted at a subpath
 - supabase/functions/send-reminders/index.ts — daily cron target (pg_cron + pg_net, see the migration): finds stays checking in tomorrow, fetches the current sms_reminder template + packing_list from `settings`, texts each via send-confirmation, marks reminder_sent_at. Deployed with `--no-verify-jwt`; checks its own CRON_SECRET instead (see Data model for how that secret is set up without ever being committed) - be careful to keep that flag on every redeploy (a plain `supabase functions deploy send-reminders` silently re-enables JWT verification and would break the cron, same bug class as the receive-sms incident)
-- supabase/functions/settings/index.ts — public read (PUBLIC_COLUMNS) / password-gated read or write (ADMIN_COLUMNS) of day rate, multi-dog discount, holiday upcharge, vet list, packing list, the 6 SMS templates (confirmation/drop-off reminder/pickup reminder/billing/request-received/denied - the last 2 added Sept 21, 2026), the shared sms_footer, and (admin-only) the 2 manager phone numbers plus the tester broadcast's default_broadcast_message
+- supabase/functions/settings/index.ts — public read (PUBLIC_COLUMNS) / password-gated read or write (ADMIN_COLUMNS) of day rate, multi-dog discount, holiday upcharge, vet list, packing list, the About page's photo list (about_photos - Sept 21, 2026, just `{path, alt}` pairs; the actual files live in Storage, see about-photos below), the 6 SMS templates (confirmation/drop-off reminder/pickup reminder/billing/request-received/denied - the last 2 added Sept 21, 2026), the shared sms_footer, and (admin-only) the 2 manager phone numbers plus the tester broadcast's default_broadcast_message
+- supabase/functions/about-photos/index.ts — manages the actual image files behind settings.about_photos (Sept 21, 2026); entirely admin-password-gated, 2 actions: upload (multipart/form-data: password, file, alt? - stores the file in the "about-photos" Storage bucket under a fresh random name, never the client's own filename, and appends {path, alt} to settings.about_photos) and delete (JSON: password, action 'delete', path - removes the file from Storage AND drops that entry from settings.about_photos in the same call). Reordering/alt-text edits for existing photos don't touch this function at all - they're just settings.about_photos array edits, saved through the settings function like everything else there
 - supabase/functions/submit-booking/index.ts — handles booking submission: find-or-create owner (by phone) and each dog (by owner+name), inserts the stay (incl. waiver_snapshot, approval_status 'pending' - Sept 21, 2026) + stay_dogs snapshot links (service role key)
 - supabase/functions/send-confirmation/index.ts — Twilio SMS function (outbound); accepts an optional message_template (the admin-edited settings text, with {placeholders} filled by fillTemplate, including {dogVerb} - "is"/"are" - {billingBreakdown} - the full cost math - and {denialReason} - Sept 21, 2026, resolves to "" when no reason was given, never a literal unfilled placeholder) + packing_list from the caller; falls back to its own hardcoded 6-message-type logic (confirmation/reminder/billing/pickup/request_received/denied) if no template is given. Every dollar placeholder ({finalCost}/{estimatedCost}) is run through formatDollars() first (whole dollars, comma-separated). Has its own direct DB read (service role, fetchFooterAndPhones) for sms_footer and the 2 manager phone numbers (Sept 18, 2026) - fills {primaryManagerPhone}/{secondaryManagerPhone} and appends the filled footer once to every message, and uses the same numbers as the destination for the Kim/Estee copy of every client send (notifyOwnersOfClientText). Called directly by the client at booking time (type request_received - Sept 21, 2026), and by send-reminders/send-pickup-reminders/the admin panel (confirmation on approve, denied on deny, billing, pickup) - has its own Deno test suite (index.test.ts), added Sept 16 (5)
 - supabase/functions/receive-sms/index.ts — inbound SMS webhook: auto-reply + relay to Kim/Estee. Deploy with `--no-verify-jwt` (see comment at top of file) or Twilio's webhook calls silently fail
