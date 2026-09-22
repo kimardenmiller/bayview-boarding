@@ -574,8 +574,8 @@ function StepDogPage({ data, onChange, index, onNext, onBack }) {
                 <img
                   src={p.previewUrl}
                   alt={`${dog.name || 'Dog'}'s photo ${i + 1}`}
-                  className="dog-photo-thumb"
-                  style={{ width: 80, height: 80, objectFit: 'cover', borderRadius: 8, display: 'block', opacity: p.uploading ? 0.6 : 1 }}
+                  className="dog-photo-thumb dog-photo-thumb--lg"
+                  style={{ opacity: p.uploading ? 0.6 : 1 }}
                 />
                 <button
                   type="button"
@@ -1632,7 +1632,6 @@ function AdminView({
                     src={p.photoUrl}
                     alt={`${p.name}'s photo ${p.photoIndex}`}
                     className="dog-photo-thumb"
-                    style={{ width: 64, height: 64, objectFit: 'cover', borderRadius: 8 }}
                   />
                 ))}
               </div>
@@ -1757,7 +1756,6 @@ function AdminView({
                     src={p.photoUrl}
                     alt={`${p.name}'s photo ${p.photoIndex}`}
                     className="dog-photo-thumb"
-                    style={{ width: 64, height: 64, objectFit: 'cover', borderRadius: 8 }}
                   />
                 ))}
               </div>

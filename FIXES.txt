@@ -1,6 +1,6 @@
 BAYVIEW BOARDING — FIX LIST
 ============================
-Last updated: September 22, 2026 (Dog photos: multiple per dog, plus hover-to-zoom on every thumbnail)
+Last updated: September 22, 2026 (2) (Hover-zoom now grows photos up to their own full resolution, not a small fixed multiplier)
 
 NEXT CHANGE LIST (v1.5)
 -----------------------
@@ -62,6 +62,39 @@ TWILIO STATUS
 
 COMPLETED
 ---------
+- Sept 22, 2026 (2): "Make the roll-over zoom result in a much larger
+  zoom, up to full size if that can be done reliably" - a follow-up on
+  the hover-zoom shipped earlier the same day (below), for both the
+  dog photo thumbnails AND the About page gallery. The earlier version
+  used a plain `transform: scale(2.2)`/`scale(1.7)` on the small
+  thumbnail itself - a fixed multiplier that (a) never approached the
+  photo's real resolution and (b) wasn't reliable near a screen edge,
+  since scaling a thumbnail up in place can push the enlarged image
+  partly off-screen depending on where it happened to sit on the page.
+  Replaced with a different technique on `:hover`: switch the image to
+  `position: fixed`, centered in the viewport via `top/left: 50%` +
+  `transform: translate(-50%, -50%)` (so it's centered on SCREEN, not
+  relative to the thumbnail's own position), and `width/height: auto`
+  with a `max-width: 92vw; max-height: 92vh` cap - the browser then
+  renders the image at its own natural/full resolution unless that
+  exceeds the cap, in which case it shrinks to fit the viewport instead
+  of spilling off it or blurring from being upscaled past its actual
+  resolution. Reliable regardless of the thumbnail's position on the
+  page or the photo's own dimensions. Applied identically to both
+  .dog-photo-thumb (dog photos) and .about-gallery-img (About page) in
+  App.css - width/height for the dog-photo-thumb base size moved out of
+  React inline styles and into the CSS class itself (a new
+  .dog-photo-thumb--lg modifier for the booking form's slightly larger
+  80px version) specifically so the :hover rule's higher CSS
+  specificity can cleanly override them; about-gallery-img's sizing was
+  already CSS-only.
+
+  No backend changes - pure CSS/JSX. 220 React + 192 Deno = 412/412
+  passing (same pre-existing, unrelated Deno flake as every other
+  entry this week). Verified live on both production and staging: the
+  deployed CSS bundle on both carries the new `position: fixed`/
+  `max-width: 92vw` hover rules for both classes.
+
 - Sept 22, 2026: Dog photos, two follow-on requests the day after they
   shipped (Sept 21 (11) below): "Allow multiple photos per dog" and
   "Expand the photos on mouse over."

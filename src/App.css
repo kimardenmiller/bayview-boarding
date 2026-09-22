@@ -39,9 +39,28 @@
 /* Same hover-zoom idea as .about-gallery-img below, reused for every dog
    photo thumbnail (Sept 22, 2026, on request) - both the owner's own
    picker on the booking form and every admin thumbnail row (Requests/
-   Unbilled Stays/Awaiting Payment/Past Stays). */
-.dog-photo-thumb { cursor: zoom-in; transition: transform .2s ease, box-shadow .2s ease; }
-.dog-photo-thumb:hover { transform: scale(2.2); position: relative; z-index: 5; box-shadow: 0 10px 28px rgba(0,0,0,.4); }
+   Unbilled Stays/Awaiting Payment/Past Stays). Grows up to the photo's
+   own full resolution on hover (Sept 22, 2026, on a follow-up request -
+   a plain transform: scale() couldn't do this reliably, since a large
+   enough multiplier on a thumbnail near a screen edge would just push
+   part of the zoomed image off-screen). Switching to position: fixed on
+   hover centers it in the viewport itself instead of relative to the
+   thumbnail's own spot on the page, and width/height: auto with a
+   max-width/max-height cap lets the browser render the image at its
+   natural size unless that's bigger than the cap - in which case it
+   shrinks to fit instead of spilling off the screen or blurring from
+   being upscaled past its own resolution. Width/height/object-fit for
+   the base (non-hover) size live here rather than as inline styles
+   specifically so this rule's higher-specificity :hover selector can
+   override them cleanly. */
+.dog-photo-thumb { width: 64px; height: 64px; object-fit: cover; border-radius: 8px; display: block; cursor: zoom-in; transition: box-shadow .15s ease; }
+.dog-photo-thumb--lg { width: 80px; height: 80px; }
+.dog-photo-thumb:hover {
+  position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+  width: auto; height: auto; max-width: 92vw; max-height: 92vh;
+  z-index: 1000; border-radius: 8px; background: #fff;
+  box-shadow: 0 16px 56px rgba(0,0,0,.55); cursor: zoom-out;
+}
 .stay-paid-badge { font-size: 0.72rem; font-weight: 600; color: #fff; background: #7D9B76; border-radius: 4px; padding: 2px 8px; }
 
 .about { min-height: 100vh; min-height: 100dvh; background: #fff; }
@@ -49,8 +68,17 @@
 .about-title { font-family: 'Playfair Display', serif; font-size: 1.7rem; font-weight: 600; color: #2C3E50; margin-bottom: 16px; }
 .about-title--center { text-align: center; }
 .about-gallery { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 24px; }
-.about-gallery-img { width: 100%; height: 110px; object-fit: cover; border-radius: 6px; display: block; cursor: zoom-in; transition: transform .2s ease, box-shadow .2s ease; }
-.about-gallery-img:hover { transform: scale(1.7); position: relative; z-index: 5; box-shadow: 0 10px 28px rgba(0,0,0,.4); }
+.about-gallery-img { width: 100%; height: 110px; object-fit: cover; border-radius: 6px; display: block; cursor: zoom-in; transition: box-shadow .15s ease; }
+/* Grows up to the photo's own full resolution on hover (Sept 22, 2026,
+   on request) - see .dog-photo-thumb:hover above for the full
+   rationale behind position: fixed + width/height: auto with a
+   max-width/max-height cap, the same technique applied here. */
+.about-gallery-img:hover {
+  position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+  width: auto; height: auto; max-width: 92vw; max-height: 92vh;
+  z-index: 1000; border-radius: 6px; background: #fff;
+  box-shadow: 0 16px 56px rgba(0,0,0,.55); cursor: zoom-out;
+}
 @media (min-width: 480px) { .about-gallery-img { height: 150px; } }
 .about-subhead { font-size: 1.05rem; font-weight: 600; color: #2C3E50; margin: 24px 0 10px; }
 .about-subhead--minor { font-size: 0.92rem; margin-top: 16px; }

@@ -31,9 +31,13 @@ Kim Miller and Estee Fletter at 210 Bayview Drive, San Rafael, CA.
   deferred to final submit - never required to advance, whether an
   upload is in flight or fails (a non-blocking per-photo error shows
   instead), with an individual remove button per photo before
-  submitting. Every thumbnail, here and in admin, expands on hover
-  (Sept 22, 2026, on request - `.dog-photo-thumb` in App.css, the same
-  pattern as the About page gallery). Visible to admin on the Requests
+  submitting. Every thumbnail, here and in admin, expands on hover up
+  to the photo's own full resolution, viewport-capped so it can never
+  spill off-screen (Sept 22, 2026, on request, enlarged further the
+  same day on a follow-up request - `.dog-photo-thumb` in App.css,
+  `position: fixed` + `width/height: auto` with a `max-width: 92vw;
+  max-height: 92vh` cap, the same pattern as the About page gallery's
+  `.about-gallery-img`). Visible to admin on the Requests
   card once submitted, and (since the underlying data is shared) on
   Unbilled Stays/Awaiting Payment/Past Stays too.
 - Aggression/health questions warn visibly if left blank (previously
