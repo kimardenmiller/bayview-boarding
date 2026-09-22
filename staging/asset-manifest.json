@@ -1,14 +1,14 @@
 {
   "files": {
-    "main.css": "https://kimardenmiller.github.io/bayview-boarding/staging/static/css/main.f1c3e666.css",
-    "main.js": "https://kimardenmiller.github.io/bayview-boarding/staging/static/js/main.18009b7e.js",
+    "main.css": "https://kimardenmiller.github.io/bayview-boarding/staging/static/css/main.caf74a4d.css",
+    "main.js": "https://kimardenmiller.github.io/bayview-boarding/staging/static/js/main.ef90f1da.js",
     "static/media/hero-dog.jpg": "https://kimardenmiller.github.io/bayview-boarding/staging/static/media/hero-dog.ab3873eaabe0371f06ef.jpg",
     "index.html": "https://kimardenmiller.github.io/bayview-boarding/staging/index.html",
-    "main.f1c3e666.css.map": "https://kimardenmiller.github.io/bayview-boarding/staging/static/css/main.f1c3e666.css.map",
-    "main.18009b7e.js.map": "https://kimardenmiller.github.io/bayview-boarding/staging/static/js/main.18009b7e.js.map"
+    "main.caf74a4d.css.map": "https://kimardenmiller.github.io/bayview-boarding/staging/static/css/main.caf74a4d.css.map",
+    "main.ef90f1da.js.map": "https://kimardenmiller.github.io/bayview-boarding/staging/static/js/main.ef90f1da.js.map"
   },
   "entrypoints": [
-    "static/css/main.f1c3e666.css",
-    "static/js/main.18009b7e.js"
+    "static/css/main.caf74a4d.css",
+    "static/js/main.ef90f1da.js"
   ]
 }
