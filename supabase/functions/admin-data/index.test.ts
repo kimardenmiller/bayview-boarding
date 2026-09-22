@@ -161,12 +161,12 @@ Deno.test('a dog with no stays gets an empty stays array, not an error', async (
   }
 });
 
-Deno.test('a stay with a photo_path gets a signed photoUrl (the "dog-photos" bucket is private)', async () => {
+Deno.test('a stay with multiple photo_paths gets signed photoUrls, in order (the "dog-photos" bucket is private, Sept 21-22, 2026)', async () => {
   const dogs = [{
     ...DOGS_FIXTURE[0],
     stay_dogs: [
-      { ...DOGS_FIXTURE[0].stay_dogs[0], photo_path: 'photo-abc.jpg' },
-      { ...DOGS_FIXTURE[0].stay_dogs[1], photo_path: null },
+      { ...DOGS_FIXTURE[0].stay_dogs[0], photo_paths: ['photo-abc.jpg', 'photo-def.jpg'] },
+      { ...DOGS_FIXTURE[0].stay_dogs[1], photo_paths: [] },
     ],
   }];
   const stub = stubSupabase({ dogs });
@@ -174,14 +174,17 @@ Deno.test('a stay with a photo_path gets a signed photoUrl (the "dog-photos" buc
     const res = await handleRequest(postRequest({ password: ADMIN_PASSWORD }));
     const data = await res.json();
     const stays = data.dogs[0].stays;
-    const withPhoto = stays.find((s: { id: string }) => s.id === 'stay-1');
-    const withoutPhoto = stays.find((s: { id: string }) => s.id === 'stay-2');
+    const withPhotos = stays.find((s: { id: string }) => s.id === 'stay-1');
+    const withoutPhotos = stays.find((s: { id: string }) => s.id === 'stay-2');
 
-    assertEquals(withPhoto.photoUrl, 'https://example.supabase.co/storage/v1/object/sign/dog-photos/photo-abc.jpg?token=fake');
-    assertEquals(withoutPhoto.photoUrl, null);
+    assertEquals(withPhotos.photoUrls, [
+      'https://example.supabase.co/storage/v1/object/sign/dog-photos/photo-abc.jpg?token=fake',
+      'https://example.supabase.co/storage/v1/object/sign/dog-photos/photo-def.jpg?token=fake',
+    ]);
+    assertEquals(withoutPhotos.photoUrls, []);
 
     const signCall = stub.calls.find((c) => c.table === 'storage-sign');
-    assertEquals((signCall?.body as { paths: string[] }).paths, ['photo-abc.jpg']);
+    assertEquals((signCall?.body as { paths: string[] }).paths, ['photo-abc.jpg', 'photo-def.jpg']);
   } finally {
     stub.restore();
   }
@@ -192,7 +195,7 @@ Deno.test('never calls the Storage sign endpoint when nothing has a photo', asyn
   try {
     const res = await handleRequest(postRequest({ password: ADMIN_PASSWORD }));
     const data = await res.json();
-    assertEquals(data.dogs[0].stays[0].photoUrl, null);
+    assertEquals(data.dogs[0].stays[0].photoUrls, []);
     assertEquals(stub.calls.some((c) => c.table === 'storage-sign'), false);
   } finally {
     stub.restore();

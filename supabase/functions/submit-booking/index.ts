@@ -57,12 +57,13 @@ interface DogInput {
   aggressionDetail?: string | null;
   healthConcerns?: string | null;
   healthDetail?: string | null;
-  // A Storage path from the dog-photos Edge Function's own upload
-  // response (Sept 21, 2026) - optional, unlike every other field here,
-  // so a returning dog's EXISTING photo is only overwritten when a new
-  // one was actually uploaded this time, never silently cleared just
-  // because this submission didn't include one.
-  photoPath?: string | null;
+  // Storage paths from the dog-photos Edge Function's own upload
+  // responses (Sept 21, 2026; multiple allowed since Sept 22, 2026) -
+  // optional, unlike every other field here, so a returning dog's
+  // EXISTING photo set is only replaced when at least one new photo was
+  // actually uploaded this time, never silently cleared just because
+  // this submission didn't include any.
+  photoPaths?: string[] | null;
 }
 
 interface BookingInput {
@@ -156,18 +157,18 @@ export async function handleRequest(req: Request): Promise<Response> {
     // Find-or-create each dog by (owner, case-insensitive name) - a
     // returning dog updates its existing profile rather than duplicating.
     const { data: existingDogs, error: dogsLookupErr } = await supabase
-      .from("dogs").select("id, name, photo_path").eq("owner_id", ownerId);
+      .from("dogs").select("id, name, photo_paths").eq("owner_id", ownerId);
     if (dogsLookupErr) throw dogsLookupErr;
 
     const dogIds: string[] = [];
     const dogNames: string[] = [];
-    // The photo actually on file for THIS booking, per dog - the fresh
-    // upload if one was given, else whatever a returning dog already
-    // had (never cleared just because this submission didn't include a
-    // new one), else null for a brand-new dog with no photo at all.
-    // Snapshotted onto stay_dogs below, same reasoning as every other
-    // frozen field there.
-    const photoPaths: (string | null)[] = [];
+    // The photo set actually on file for THIS booking, per dog - the
+    // freshly uploaded set if any were given, else whatever a returning
+    // dog already had (never cleared just because this submission
+    // didn't include any), else [] for a brand-new dog with no photos
+    // at all. Snapshotted onto stay_dogs below, same reasoning as every
+    // other frozen field there.
+    const photoPaths: string[][] = [];
     for (const d of body.dogs!) {
       const name = d.name!.trim();
       dogNames.push(name);
@@ -183,17 +184,17 @@ export async function handleRequest(req: Request): Promise<Response> {
         health_concerns: d.healthConcerns || null,
         health_detail: d.healthDetail || null,
       };
-      if (d.photoPath) dogFields.photo_path = d.photoPath;
+      if (d.photoPaths && d.photoPaths.length > 0) dogFields.photo_paths = d.photoPaths;
       if (match) {
         const { error: updErr } = await supabase.from("dogs").update(dogFields).eq("id", match.id);
         if (updErr) throw updErr;
         dogIds.push(match.id);
-        photoPaths.push(d.photoPath || match.photo_path || null);
+        photoPaths.push(d.photoPaths && d.photoPaths.length > 0 ? d.photoPaths : (match.photo_paths || []));
       } else {
         const { data: insertedDogs, error: insErr } = await supabase.from("dogs").insert(dogFields).select("id");
         if (insErr) throw insErr;
         dogIds.push(insertedDogs[0].id);
-        photoPaths.push(d.photoPath || null);
+        photoPaths.push(d.photoPaths || []);
       }
     }
 
@@ -233,7 +234,7 @@ export async function handleRequest(req: Request): Promise<Response> {
         aggression_detail: d.aggressionDetail || null,
         health_concerns: d.healthConcerns || null,
         health_detail: d.healthDetail || null,
-        photo_path: photoPaths[i],
+        photo_paths: photoPaths[i],
       }))
     );
     if (linkErr) throw linkErr;

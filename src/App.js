@@ -297,11 +297,19 @@ function emptyDog() {
     name: '', breed: '', dob: '', spayNeuter: '',
     aggressionHistory: '', aggressionDetail: '',
     healthConcerns: '', healthDetail: '',
-    // A Storage path from the dog-photos Edge Function's own upload
-    // response (Sept 21, 2026), set once the owner picks a file on this
-    // dog's page - optional, never required to advance (see
-    // dogIsComplete below, deliberately unchanged).
-    photoPath: null,
+    // Any number of photos (Sept 21, 2026, multiple since Sept 22,
+    // 2026), each tracking its own upload lifecycle - path (the
+    // dog-photos Edge Function's Storage path once uploaded),
+    // previewUrl (a local createObjectURL blob, shown immediately and
+    // kept around so re-opening this dog's Edit page later in the same
+    // session still shows a thumbnail - the bucket is private, so
+    // there's no signed URL a booking-form visitor could re-fetch),
+    // uploading, and error. Lives on the dog itself, not StepDogPage's
+    // own component state, so it survives the owner navigating to a
+    // different dog's page and back (StepDogPage remounts between
+    // dogs). Optional, never required to advance (see dogIsComplete
+    // below, deliberately unchanged).
+    photos: [],
   };
 }
 
@@ -485,9 +493,6 @@ function StepOwner({ data, onChange, onNext, vetOptions, multiDogDiscount }) {
 // owner page now (see StepOwner); only per-dog fields live here.
 function StepDogPage({ data, onChange, index, onNext, onBack }) {
   const [errors, setErrors] = useState({});
-  const [photoPreviewUrl, setPhotoPreviewUrl] = useState(null);
-  const [uploadingPhoto, setUploadingPhoto] = useState(false);
-  const [photoError, setPhotoError] = useState('');
   const dog = data.dogs[index];
   const age = calcAge(dog.dob);
 
@@ -495,29 +500,45 @@ function StepDogPage({ data, onChange, index, onNext, onBack }) {
     onChange('dogs', data.dogs.map((d, i) => i === index ? { ...d, [field]: value } : d));
   }
 
-  // Optional (Sept 21, 2026, on request) - never blocks Continue either
-  // way, whether the upload is still in flight or fails outright (see
-  // dogIsComplete/getErrors below, deliberately unchanged). The local
-  // preview (createObjectURL) shows immediately, independent of the
-  // upload actually finishing - no need to wait on a signed URL just to
-  // show the owner their own just-picked file, and it works even if the
-  // upload itself fails.
+  // Any number of photos (Sept 21, 2026, on request; multiple since
+  // Sept 22, 2026, also on request) - never blocks Continue either way,
+  // whether an upload is still in flight or fails outright (see
+  // dogIsComplete/getErrors below, deliberately unchanged). Each
+  // selected file gets an instant local preview (createObjectURL),
+  // independent of its own upload actually finishing - no need to wait
+  // on a signed URL just to show the owner their own just-picked files
+  // (the bucket is private anyway, so there's no signed URL to fetch
+  // even after upload completes), and it works even if the upload
+  // itself fails. Files upload one at a time (not in parallel) so each
+  // one's own updateDog call sees the previous one's result already
+  // applied, rather than racing on this closure's now-stale `dog.photos`.
   async function handlePhotoChange(e) {
-    const file = e.target.files?.[0];
+    const files = Array.from(e.target.files || []);
     e.target.value = '';
-    if (!file) return;
-    setPhotoPreviewUrl(URL.createObjectURL(file));
-    setUploadingPhoto(true);
-    setPhotoError('');
-    const form = new FormData();
-    form.append('file', file);
-    const { data: result, error: fnError } = await supabase.functions.invoke('dog-photos', { body: form });
-    setUploadingPhoto(false);
-    if (fnError || result?.error) {
-      setPhotoError("Couldn't upload the photo. You can still continue without it.");
-      return;
+    if (files.length === 0) return;
+
+    let photos = dog.photos.concat(files.map(file => ({
+      path: null, previewUrl: URL.createObjectURL(file), uploading: true, error: null,
+    })));
+    const startAt = dog.photos.length;
+    updateDog('photos', photos);
+
+    for (let i = 0; i < files.length; i++) {
+      const form = new FormData();
+      form.append('file', files[i]);
+      const { data: result, error: fnError } = await supabase.functions.invoke('dog-photos', { body: form });
+      const failed = fnError || result?.error;
+      photos = photos.map((p, j) => j !== startAt + i ? p : {
+        ...p, uploading: false,
+        path: failed ? null : result.path,
+        error: failed ? "Couldn't upload this photo." : null,
+      });
+      updateDog('photos', photos);
     }
-    updateDog('photoPath', result.path);
+  }
+
+  function removePhoto(i) {
+    updateDog('photos', dog.photos.filter((_, j) => j !== i));
   }
 
   function getErrors() {
@@ -545,20 +566,30 @@ function StepDogPage({ data, onChange, index, onNext, onBack }) {
       <Field label="Dog's Name" error={errors.name}>
         <input value={dog.name} onChange={e => updateDog('name', e.target.value)} placeholder="Buddy" />
       </Field>
-      <Field label="Photo (optional)">
-        {photoPreviewUrl && (
-          <img
-            src={photoPreviewUrl}
-            alt={`${dog.name || 'Dog'}'s photo`}
-            style={{ width: 88, height: 88, objectFit: 'cover', borderRadius: 8, display: 'block', marginBottom: 8 }}
-          />
+      <Field label="Photos (optional)">
+        {dog.photos.length > 0 && (
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 8 }}>
+            {dog.photos.map((p, i) => (
+              <div key={i} style={{ position: 'relative' }}>
+                <img
+                  src={p.previewUrl}
+                  alt={`${dog.name || 'Dog'}'s photo ${i + 1}`}
+                  className="dog-photo-thumb"
+                  style={{ width: 80, height: 80, objectFit: 'cover', borderRadius: 8, display: 'block', opacity: p.uploading ? 0.6 : 1 }}
+                />
+                <button
+                  type="button"
+                  aria-label={`Remove photo ${i + 1}`}
+                  onClick={() => removePhoto(i)}
+                  style={{ position: 'absolute', top: -7, right: -7, width: 20, height: 20, borderRadius: '50%', border: 'none', background: '#C0392B', color: '#fff', fontSize: '0.72rem', lineHeight: '20px', padding: 0, cursor: 'pointer' }}
+                >×</button>
+                {p.uploading && <div style={{ fontSize: '0.7rem', color: '#6B7A8A', marginTop: 2 }}>Uploading...</div>}
+                {p.error && <div className="field-error" style={{ fontSize: '0.72rem', marginTop: 2 }}>{p.error}</div>}
+              </div>
+            ))}
+          </div>
         )}
-        <input type="file" accept="image/*" aria-label="Photo (optional)" onChange={handlePhotoChange} disabled={uploadingPhoto} />
-        {uploadingPhoto && <div style={{ fontSize: '0.78rem', color: '#6B7A8A', marginTop: 4 }}>Uploading...</div>}
-        {!uploadingPhoto && dog.photoPath && !photoError && (
-          <div style={{ fontSize: '0.78rem', color: '#7D9B76', marginTop: 4 }}>✓ Photo added</div>
-        )}
-        {photoError && <div className="field-error">{photoError}</div>}
+        <input type="file" accept="image/*" multiple aria-label="Photos (optional)" onChange={handlePhotoChange} />
       </Field>
       <Field label="Breed" error={errors.breed}>
         <input value={dog.breed} onChange={e => updateDog('breed', e.target.value)} placeholder="Golden Retriever" />
@@ -1453,10 +1484,10 @@ function AdminView({
         if (pendingByStayId.has(s.id)) {
           const entry = pendingByStayId.get(s.id);
           entry.dogNames.push(d.name);
-          entry.photos.push({ name: d.name, photoUrl: s.photoUrl });
+          (s.photoUrls || []).forEach((url, pi) => entry.photos.push({ name: d.name, photoUrl: url, photoIndex: pi + 1 }));
         } else {
           pendingByStayId.set(s.id, {
-            ...s, dogNames: [d.name], photos: [{ name: d.name, photoUrl: s.photoUrl }],
+            ...s, dogNames: [d.name], photos: (s.photoUrls || []).map((url, pi) => ({ name: d.name, photoUrl: url, photoIndex: pi + 1 })),
             ownerName: d.owner?.name, ownerPhone: d.owner?.phone,
           });
         }
@@ -1481,10 +1512,10 @@ function AdminView({
         if (unbilledByStayId.has(s.id)) {
           const entry = unbilledByStayId.get(s.id);
           entry.dogNames.push(d.name);
-          entry.photos.push({ name: d.name, photoUrl: s.photoUrl });
+          (s.photoUrls || []).forEach((url, pi) => entry.photos.push({ name: d.name, photoUrl: url, photoIndex: pi + 1 }));
         } else {
           unbilledByStayId.set(s.id, {
-            ...s, dogNames: [d.name], photos: [{ name: d.name, photoUrl: s.photoUrl }],
+            ...s, dogNames: [d.name], photos: (s.photoUrls || []).map((url, pi) => ({ name: d.name, photoUrl: url, photoIndex: pi + 1 })),
             ownerName: d.owner?.name, ownerPhone: d.owner?.phone,
           });
         }
@@ -1506,10 +1537,10 @@ function AdminView({
         if (awaitingPaymentByStayId.has(s.id)) {
           const entry = awaitingPaymentByStayId.get(s.id);
           entry.dogNames.push(d.name);
-          entry.photos.push({ name: d.name, photoUrl: s.photoUrl });
+          (s.photoUrls || []).forEach((url, pi) => entry.photos.push({ name: d.name, photoUrl: url, photoIndex: pi + 1 }));
         } else {
           awaitingPaymentByStayId.set(s.id, {
-            ...s, dogNames: [d.name], photos: [{ name: d.name, photoUrl: s.photoUrl }],
+            ...s, dogNames: [d.name], photos: (s.photoUrls || []).map((url, pi) => ({ name: d.name, photoUrl: url, photoIndex: pi + 1 })),
             ownerName: d.owner?.name, ownerPhone: d.owner?.phone,
           });
         }
@@ -1545,7 +1576,7 @@ function AdminView({
         name: d.name, breed: s.breed, dob: s.dob,
         aggression_history: s.aggression_history, aggression_detail: s.aggression_detail,
         health_concerns: s.health_concerns, health_detail: s.health_detail,
-        photoUrl: s.photoUrl,
+        photoUrls: s.photoUrls || [],
       };
       const owner = pastStaysByOwnerPhone.get(phone);
       if (owner.staysById.has(s.id)) {
@@ -1599,7 +1630,8 @@ function AdminView({
                   <img
                     key={i}
                     src={p.photoUrl}
-                    alt={`${p.name}'s photo`}
+                    alt={`${p.name}'s photo ${p.photoIndex}`}
+                    className="dog-photo-thumb"
                     style={{ width: 64, height: 64, objectFit: 'cover', borderRadius: 8 }}
                   />
                 ))}
@@ -1680,6 +1712,13 @@ function AdminView({
     // the math behind "Estimated cost"/"Billed cost" is always visible
     // once a card is opened - not only after clicking into Edit.
     const breakdown = isExpanded ? costBreakdownFor(s) : null;
+    // s.perDog (Past Stays, one entry per dog with its own photoUrls
+    // array) and s.photos (Unbilled/Awaiting Payment, already one flat
+    // entry per photo) are two differently-shaped lists - flatten both
+    // down to the same {name, photoUrl, photoIndex} shape either way.
+    const photoEntries = s.perDog
+      ? s.perDog.flatMap(pd => (pd.photoUrls || []).map((url, pi) => ({ name: pd.name, photoUrl: url, photoIndex: pi + 1 })))
+      : (s.photos || []);
     return (
       <div key={s.id} className="stay-card">
         <div
@@ -1710,16 +1749,14 @@ function AdminView({
             {s.approval_status === 'denied' && s.denial_reason && (
               <div className="stay-notes">Reason given: "{s.denial_reason}"</div>
             )}
-            {/* s.perDog (Past Stays) and s.photos (Unbilled/Awaiting
-                Payment) are two differently-built lists that both happen
-                to carry a photoUrl per dog - either works here. */}
-            {(s.perDog || s.photos || []).some(p => p.photoUrl) && (
+            {photoEntries.length > 0 && (
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 6, marginBottom: 6 }}>
-                {(s.perDog || s.photos).filter(p => p.photoUrl).map((p, i) => (
+                {photoEntries.map((p, i) => (
                   <img
                     key={i}
                     src={p.photoUrl}
-                    alt={`${p.name}'s photo`}
+                    alt={`${p.name}'s photo ${p.photoIndex}`}
+                    className="dog-photo-thumb"
                     style={{ width: 64, height: 64, objectFit: 'cover', borderRadius: 8 }}
                   />
                 ))}
@@ -2854,7 +2891,7 @@ export default function App() {
         aggressionDetail: d.aggressionDetail,
         healthConcerns: d.healthConcerns,
         healthDetail: d.healthDetail,
-        photoPath: d.photoPath || null,
+        photoPaths: d.photos.filter(p => p.path).map(p => p.path),
       })),
       checkIn: form.checkIn,
       checkOut: form.checkOut,

@@ -1388,34 +1388,50 @@ describe('Dog pages', () => {
     expect(detail).toHaveValue('Mild arthritis');
   });
 
-  test('a photo is optional - Done still enables with every other required field answered and no photo picked (Sept 21, 2026)', async () => {
+  test('photos are optional - Done still enables with every other required field answered and no photo picked (Sept 21, 2026)', async () => {
     await goToOwnerStep();
     fireEvent.click(screen.getByText('Edit'));
     await fillDogPage({ name: 'Rex', breed: 'Labrador' });
     expect(await screen.findByText('Owner Information')).toBeInTheDocument(); // fillDogPage's own Done click already succeeded
   });
 
-  test('picking a photo shows an immediate local preview, uploads it, and confirms once done', async () => {
+  test('picking multiple photos at once shows an immediate local preview for each and uploads each one', async () => {
     await goToOwnerStep();
     fireEvent.click(screen.getByText('Edit'));
-    const file = new File(['fake-image-bytes'], 'rex.jpg', { type: 'image/jpeg' });
-    await userEvent.upload(screen.getByLabelText('Photo (optional)'), file);
+    const file1 = new File(['a'], 'rex1.jpg', { type: 'image/jpeg' });
+    const file2 = new File(['b'], 'rex2.jpg', { type: 'image/jpeg' });
+    await userEvent.upload(screen.getByLabelText('Photos (optional)'), [file1, file2]);
 
-    // Local preview (createObjectURL) shows immediately, independent of
-    // the upload call resolving.
-    expect(await screen.findByAltText(/'s photo/)).toBeInTheDocument();
-    await waitFor(() => expect(supabase.functions.invoke).toHaveBeenCalledWith('dog-photos', { body: expect.any(FormData) }));
-    expect(await screen.findByText('✓ Photo added')).toBeInTheDocument();
+    // Local previews (createObjectURL) show immediately, independent of
+    // either upload call resolving.
+    expect(await screen.findAllByAltText(/'s photo/)).toHaveLength(2);
+    await waitFor(() => {
+      const calls = supabase.functions.invoke.mock.calls.filter(c => c[0] === 'dog-photos');
+      expect(calls.length).toBe(2);
+    });
+    // Both uploads succeed (default mock) - neither preview shows an error.
+    expect(screen.queryByText("Couldn't upload this photo.")).not.toBeInTheDocument();
   });
 
-  test('shows an error but does not block Done if the photo upload fails', async () => {
+  test('a photo can be removed from the list before submitting', async () => {
+    await goToOwnerStep();
+    fireEvent.click(screen.getByText('Edit'));
+    const file = new File(['a'], 'rex.jpg', { type: 'image/jpeg' });
+    await userEvent.upload(screen.getByLabelText('Photos (optional)'), file);
+    await screen.findByAltText(/'s photo/);
+
+    fireEvent.click(screen.getByLabelText('Remove photo 1'));
+    expect(screen.queryByAltText(/'s photo/)).not.toBeInTheDocument();
+  });
+
+  test('shows an error but does not block Done if a photo upload fails', async () => {
     mockInvokeDefaults({ 'dog-photos': async () => ({ data: null, error: { message: 'Upload failed' } }) });
     await goToOwnerStep();
     fireEvent.click(screen.getByText('Edit'));
     const file = new File(['x'], 'rex.jpg', { type: 'image/jpeg' });
-    await userEvent.upload(screen.getByLabelText('Photo (optional)'), file);
+    await userEvent.upload(screen.getByLabelText('Photos (optional)'), file);
 
-    expect(await screen.findByText("Couldn't upload the photo. You can still continue without it.")).toBeInTheDocument();
+    expect(await screen.findByText("Couldn't upload this photo.")).toBeInTheDocument();
     await fillDogPage({ name: 'Rex', breed: 'Labrador' }); // Done still works
     expect(await screen.findByText('Owner Information')).toBeInTheDocument();
   });
@@ -1705,7 +1721,11 @@ describe('Step 5 — Signature', () => {
     expect(supabase.functions.invoke).toHaveBeenCalledWith('send-confirmation', expect.any(Object));
   });
 
-  test('an uploaded photo path is included in the submit-booking payload for that dog (Sept 21, 2026)', async () => {
+  test('uploaded photo paths are included in the submit-booking payload for that dog (Sept 21-22, 2026)', async () => {
+    let uploadCount = 0;
+    mockInvokeDefaults({
+      'dog-photos': async () => Promise.resolve({ data: { path: `mock-${++uploadCount}.jpg` }, error: null }),
+    });
     render(<App />);
     fireEvent.click(screen.getAllByText('Book My Stay')[0]);
     await userEvent.type(screen.getByPlaceholderText('(415) 555-0100'), '4155550100');
@@ -1713,9 +1733,10 @@ describe('Step 5 — Signature', () => {
     await userEvent.type(screen.getByPlaceholderText('jane@email.com'), 'kim@test.com');
     fireEvent.change(screen.getByDisplayValue('Select a Vet'), { target: { value: 'Marin Pet Hospital — (415) 479-8387' } });
     fireEvent.click(screen.getByText('Edit'));
-    const file = new File(['x'], 'rex.jpg', { type: 'image/jpeg' });
-    await userEvent.upload(screen.getByLabelText('Photo (optional)'), file);
-    await screen.findByText('✓ Photo added');
+    const file1 = new File(['x'], 'rex1.jpg', { type: 'image/jpeg' });
+    const file2 = new File(['y'], 'rex2.jpg', { type: 'image/jpeg' });
+    await userEvent.upload(screen.getByLabelText('Photos (optional)'), [file1, file2]);
+    await waitFor(() => expect(uploadCount).toBe(2));
     await fillDogPage();
     fireEvent.click(screen.getByText('Continue'));
     await screen.findByText('Stay Dates');
@@ -1729,12 +1750,12 @@ describe('Step 5 — Signature', () => {
     await screen.findByText('Request received, Kim!');
     expect(supabase.functions.invoke).toHaveBeenCalledWith('submit-booking', {
       body: expect.objectContaining({
-        dogs: [expect.objectContaining({ name: 'Rex', photoPath: 'mock-uuid.jpg' })],
+        dogs: [expect.objectContaining({ name: 'Rex', photoPaths: ['mock-1.jpg', 'mock-2.jpg'] })],
       }),
     });
   });
 
-  test('a dog with no photo submits with photoPath explicitly null, not undefined', async () => {
+  test('a dog with no photos submits with photoPaths as an empty array, not undefined', async () => {
     await fillThrough();
     fireEvent.click(screen.getByRole('checkbox'));
     await userEvent.type(screen.getByPlaceholderText('Kim Miller'), 'Kim Miller');
@@ -1742,7 +1763,7 @@ describe('Step 5 — Signature', () => {
 
     await screen.findByText('Request received, Kim!');
     const call = supabase.functions.invoke.mock.calls.find(c => c[0] === 'submit-booking');
-    expect(call[1].body.dogs[0].photoPath).toBeNull();
+    expect(call[1].body.dogs[0].photoPaths).toEqual([]);
   });
 
   test('the immediate text at submission is "request received", not the real confirmation - that now waits for admin approval', async () => {
@@ -1981,7 +2002,7 @@ const REQUESTS_DOGS = [
         id: 'stay-pending', check_in: daysFromToday(3), check_out: daysFromToday(5),
         drop_time: '09:00:00', pickup_time: '09:00:00', estimated_cost: 210,
         number_of_dogs: 1, submitted_at: '2026-01-01T00:00:00Z', approval_status: 'pending', billed_at: null,
-        photoUrl: 'https://mock-signed.test/dog-photos/photo-abc.jpg',
+        photoUrls: ['https://mock-signed.test/dog-photos/photo-abc.jpg', 'https://mock-signed.test/dog-photos/photo-def.jpg'],
       },
       // Already approved - should NOT show up in Requests (belongs in
       // Unbilled Stays instead, exercised in its own describe block).
@@ -2027,16 +2048,16 @@ describe('Admin — logged in — Requests', () => {
     expect(badge).toHaveTextContent('1');
   });
 
-  test('an expanded request card shows a photo thumbnail for a dog with a photo on file (Sept 21, 2026)', async () => {
+  test('an expanded request card shows a photo thumbnail per photo for a dog with multiple photos on file (Sept 21-22, 2026)', async () => {
     await loginAsAdminWithRequests();
     const card = within(document.querySelector('.requests-section')).getByText('Bud — Kim').closest('.stay-card');
     fireEvent.click(within(card).getByText('View'));
-    const img = within(card).getByAltText("Bud's photo");
-    expect(img).toHaveAttribute('src', 'https://mock-signed.test/dog-photos/photo-abc.jpg');
+    expect(within(card).getByAltText("Bud's photo 1")).toHaveAttribute('src', 'https://mock-signed.test/dog-photos/photo-abc.jpg');
+    expect(within(card).getByAltText("Bud's photo 2")).toHaveAttribute('src', 'https://mock-signed.test/dog-photos/photo-def.jpg');
   });
 
-  test('no thumbnail row shows on an expanded request with no photo on file', async () => {
-    const noPhotoDogs = [{ ...REQUESTS_DOGS[0], stays: [{ ...REQUESTS_DOGS[0].stays[0], photoUrl: null }] }];
+  test('no thumbnail row shows on an expanded request with no photos on file', async () => {
+    const noPhotoDogs = [{ ...REQUESTS_DOGS[0], stays: [{ ...REQUESTS_DOGS[0].stays[0], photoUrls: [] }] }];
     await loginAsAdminWithRequests(noPhotoDogs);
     const card = within(document.querySelector('.requests-section')).getByText('Bud — Kim').closest('.stay-card');
     fireEvent.click(within(card).getByText('View'));

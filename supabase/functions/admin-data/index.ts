@@ -37,7 +37,7 @@ interface RawStayLink {
   name: string; breed: string; dob: string | null; spay_neuter: string | null;
   aggression_history: string | null; aggression_detail: string | null;
   health_concerns: string | null; health_detail: string | null;
-  photo_path: string | null;
+  photo_paths: string[];
   stay: Record<string, unknown> | null;
 }
 interface RawDog {
@@ -56,7 +56,7 @@ function shapeDog(d: RawDog) {
       name: sd.name, breed: sd.breed, dob: sd.dob, spay_neuter: sd.spay_neuter,
       aggression_history: sd.aggression_history, aggression_detail: sd.aggression_detail,
       health_concerns: sd.health_concerns, health_detail: sd.health_detail,
-      photo_path: sd.photo_path,
+      photo_paths: sd.photo_paths || [],
       ...sd.stay,
     } as Record<string, unknown>))
     .sort((a, b) => String(b.check_in).localeCompare(String(a.check_in)));
@@ -64,15 +64,16 @@ function shapeDog(d: RawDog) {
 }
 
 const DOGS_SELECT =
-  "id, name, breed, dob, spay_neuter, aggression_history, aggression_detail, health_concerns, health_detail, owner:owners(name, phone, email), stay_dogs(name, breed, dob, spay_neuter, aggression_history, aggression_detail, health_concerns, health_detail, photo_path, stay:stays(id, check_in, check_out, drop_time, pickup_time, notes, estimated_cost, number_of_dogs, submitted_at, waiver_snapshot, billed_at, paid_at, approval_status, approved_at, denied_at, denial_reason))";
+  "id, name, breed, dob, spay_neuter, aggression_history, aggression_detail, health_concerns, health_detail, owner:owners(name, phone, email), stay_dogs(name, breed, dob, spay_neuter, aggression_history, aggression_detail, health_concerns, health_detail, photo_paths, stay:stays(id, check_in, check_out, drop_time, pickup_time, notes, estimated_cost, number_of_dogs, submitted_at, waiver_snapshot, billed_at, paid_at, approval_status, approved_at, denied_at, denial_reason))";
 
 const DOG_PHOTOS_BUCKET = "dog-photos";
 // A dog photo's Storage bucket is private (see the Sept 21, 2026
 // migration) - a raw path alone isn't viewable, so every stay entry's
-// photo_path gets resolved to a signed URL (photoUrl) before the
-// response goes out. 1 hour is plenty for one admin session; a fresh
-// one is generated on every fetchDogsAndTotals call (every login, and
-// after every action), so there's no need to track/renew expiry.
+// photo_paths (plural since Sept 22, 2026 - a dog can have more than
+// one) gets resolved to signed URLs (photoUrls) before the response
+// goes out. 1 hour is plenty for one admin session; a fresh batch is
+// generated on every fetchDogsAndTotals call (every login, and after
+// every action), so there's no need to track/renew expiry.
 const SIGNED_URL_TTL_SECONDS = 60 * 60;
 
 export async function handleRequest(req: Request): Promise<Response> {
@@ -115,8 +116,8 @@ export async function handleRequest(req: Request): Promise<Response> {
       const paths = new Set<string>();
       for (const dog of dogs) {
         for (const stay of dog.stays) {
-          const path = (stay as Record<string, unknown>).photo_path;
-          if (typeof path === "string" && path) paths.add(path);
+          const stayPaths = (stay as Record<string, unknown>).photo_paths;
+          if (Array.isArray(stayPaths)) for (const p of stayPaths) if (typeof p === "string" && p) paths.add(p);
         }
       }
       const urlByPath = new Map<string, string | null>();
@@ -127,13 +128,16 @@ export async function handleRequest(req: Request): Promise<Response> {
         if (signErr) throw signErr;
         for (const s of signed ?? []) urlByPath.set(s.path ?? "", s.signedUrl);
       }
-      // Always set photoUrl (defaulting null), on every stay, regardless
-      // of whether any photo exists anywhere - never left undefined.
+      // Always set photoUrls (defaulting []), on every stay, regardless
+      // of whether any photo exists anywhere - never left undefined. A
+      // path that failed to sign (shouldn't happen, but createSignedUrls
+      // can return an error per-path) is dropped rather than surfaced as
+      // a broken image.
       for (const dog of dogs) {
         for (const stay of dog.stays) {
           const s = stay as Record<string, unknown>;
-          const path = s.photo_path;
-          s.photoUrl = typeof path === "string" && path ? urlByPath.get(path) ?? null : null;
+          const stayPaths = Array.isArray(s.photo_paths) ? s.photo_paths as string[] : [];
+          s.photoUrls = stayPaths.map((p) => urlByPath.get(p)).filter((u): u is string => !!u);
         }
       }
 

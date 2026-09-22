@@ -1,6 +1,6 @@
 BAYVIEW BOARDING — FIX LIST
 ============================
-Last updated: September 21, 2026 (11) (Owners can now upload a photo of their dog during booking - visible to admin on the request)
+Last updated: September 22, 2026 (Dog photos: multiple per dog, plus hover-to-zoom on every thumbnail)
 
 NEXT CHANGE LIST (v1.5)
 -----------------------
@@ -62,6 +62,70 @@ TWILIO STATUS
 
 COMPLETED
 ---------
+- Sept 22, 2026: Dog photos, two follow-on requests the day after they
+  shipped (Sept 21 (11) below): "Allow multiple photos per dog" and
+  "Expand the photos on mouse over."
+  1. Replaced yesterday's single `photo_path` column on both `dogs` and
+     `stay_dogs` with an ORDERED `photo_paths` jsonb array (a migration
+     that adds the new column, backfills any existing single photo into
+     a one-element array, then drops the old column - safe either way
+     even though the feature had shipped less than a day earlier and
+     almost certainly had zero real photos on file yet). Same current-
+     profile-vs-frozen-snapshot split as before, just arrays now.
+  2. The dog-photos Edge Function itself didn't need to change - it
+     already uploaded one file per call; the owner's file picker now
+     just has the `multiple` attribute and the client loops through
+     however many files were selected, uploading them one at a time
+     (not in parallel, to avoid a race between two nearly-simultaneous
+     uploads' own state updates landing out of order) rather than all
+     at once.
+  3. Each dog's photo picker now shows a thumbnail row - one per
+     selected file, each tracking its own upload lifecycle (instant
+     local preview, in-flight, done, or a non-blocking per-photo error)
+     - with an individual "×" remove button per photo, and the local
+     preview blobs now live on the dog's own form state (not
+     StepDogPage's component state) specifically so they survive the
+     owner navigating to a different dog's page and back (StepDogPage
+     remounts between dogs) - the bucket is private, so there'd
+     otherwise be no way to show an already-uploaded photo again within
+     the same session.
+  4. admin-data batch-signs every distinct photo path across the whole
+     response same as before, now returning a `photoUrls` array per
+     stay instead of a single `photoUrl`; admin's Requests/Unbilled
+     Stays/Awaiting Payment/Past Stays thumbnail rows all show every
+     photo for every dog on the stay, not just one.
+  5. "Expand the photos on mouse over" - a new shared `.dog-photo-thumb`
+     CSS class (App.css), reusing the exact same hover-zoom pattern
+     already used for the About page's photo gallery (`.about-gallery-
+     img` - scale up + shadow on `:hover`, `cursor: zoom-in`), applied
+     to every dog photo thumbnail everywhere: the owner's own picker on
+     the booking form AND all four admin list views.
+
+  Tests: submit-booking's photo tests now cover a multi-photo upload,
+  a returning dog's whole photo set (not just one photo) being kept vs.
+  replaced, and an empty array (never null/undefined) when there are no
+  photos at all. admin-data's photo tests now cover multiple photos on
+  one stay resolving to multiple signed URLs, in order. App's Jest
+  suite now covers selecting several files at once (each gets its own
+  preview and upload call), removing one photo from the list before
+  submitting, a failed upload's non-blocking per-photo error, the
+  multi-path submit-booking payload, and multiple thumbnails rendering
+  on an expanded Requests card.
+  220 React + 192 Deno = 412/412 passing (the same one pre-existing,
+  order-dependent Deno flake as yesterday - still unrelated to this
+  change).
+
+  Verified live on both production and staging: migration applied,
+  columns confirmed swapped on both (old photo_path dropped, new
+  photo_paths jsonb present); submit-booking/admin-data redeployed to
+  both (dog-photos itself needed no changes); both frontend bundles
+  carry the new multi-photo UI and correctly isolate their own Supabase
+  project. A real end-to-end test against staging - 2 uploaded photos,
+  a real submit-booking call, then a direct read-only DB check -
+  confirmed both dogs.photo_paths and stay_dogs.photo_paths saved the
+  full ordered 2-photo array correctly; the test owner/dog/stay were
+  then deleted from staging (production was never touched).
+
 - Sept 21, 2026 (11): Owners can now upload a photo of their dog during
   booking, on request ("add the ability for owners to upload photos of
   their dog that can be seen on the booking request"):
