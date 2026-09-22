@@ -57,6 +57,12 @@ interface DogInput {
   aggressionDetail?: string | null;
   healthConcerns?: string | null;
   healthDetail?: string | null;
+  // A Storage path from the dog-photos Edge Function's own upload
+  // response (Sept 21, 2026) - optional, unlike every other field here,
+  // so a returning dog's EXISTING photo is only overwritten when a new
+  // one was actually uploaded this time, never silently cleared just
+  // because this submission didn't include one.
+  photoPath?: string | null;
 }
 
 interface BookingInput {
@@ -150,16 +156,23 @@ export async function handleRequest(req: Request): Promise<Response> {
     // Find-or-create each dog by (owner, case-insensitive name) - a
     // returning dog updates its existing profile rather than duplicating.
     const { data: existingDogs, error: dogsLookupErr } = await supabase
-      .from("dogs").select("id, name").eq("owner_id", ownerId);
+      .from("dogs").select("id, name, photo_path").eq("owner_id", ownerId);
     if (dogsLookupErr) throw dogsLookupErr;
 
     const dogIds: string[] = [];
     const dogNames: string[] = [];
+    // The photo actually on file for THIS booking, per dog - the fresh
+    // upload if one was given, else whatever a returning dog already
+    // had (never cleared just because this submission didn't include a
+    // new one), else null for a brand-new dog with no photo at all.
+    // Snapshotted onto stay_dogs below, same reasoning as every other
+    // frozen field there.
+    const photoPaths: (string | null)[] = [];
     for (const d of body.dogs!) {
       const name = d.name!.trim();
       dogNames.push(name);
       const match = (existingDogs || []).find((ed: { id: string; name: string }) => ed.name.toLowerCase() === name.toLowerCase());
-      const dogFields = {
+      const dogFields: Record<string, unknown> = {
         owner_id: ownerId,
         name,
         breed: d.breed!.trim(),
@@ -170,14 +183,17 @@ export async function handleRequest(req: Request): Promise<Response> {
         health_concerns: d.healthConcerns || null,
         health_detail: d.healthDetail || null,
       };
+      if (d.photoPath) dogFields.photo_path = d.photoPath;
       if (match) {
         const { error: updErr } = await supabase.from("dogs").update(dogFields).eq("id", match.id);
         if (updErr) throw updErr;
         dogIds.push(match.id);
+        photoPaths.push(d.photoPath || match.photo_path || null);
       } else {
         const { data: insertedDogs, error: insErr } = await supabase.from("dogs").insert(dogFields).select("id");
         if (insErr) throw insErr;
         dogIds.push(insertedDogs[0].id);
+        photoPaths.push(d.photoPath || null);
       }
     }
 
@@ -217,6 +233,7 @@ export async function handleRequest(req: Request): Promise<Response> {
         aggression_detail: d.aggressionDetail || null,
         health_concerns: d.healthConcerns || null,
         health_detail: d.healthDetail || null,
+        photo_path: photoPaths[i],
       }))
     );
     if (linkErr) throw linkErr;

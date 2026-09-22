@@ -297,6 +297,11 @@ function emptyDog() {
     name: '', breed: '', dob: '', spayNeuter: '',
     aggressionHistory: '', aggressionDetail: '',
     healthConcerns: '', healthDetail: '',
+    // A Storage path from the dog-photos Edge Function's own upload
+    // response (Sept 21, 2026), set once the owner picks a file on this
+    // dog's page - optional, never required to advance (see
+    // dogIsComplete below, deliberately unchanged).
+    photoPath: null,
   };
 }
 
@@ -480,11 +485,39 @@ function StepOwner({ data, onChange, onNext, vetOptions, multiDogDiscount }) {
 // owner page now (see StepOwner); only per-dog fields live here.
 function StepDogPage({ data, onChange, index, onNext, onBack }) {
   const [errors, setErrors] = useState({});
+  const [photoPreviewUrl, setPhotoPreviewUrl] = useState(null);
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
+  const [photoError, setPhotoError] = useState('');
   const dog = data.dogs[index];
   const age = calcAge(dog.dob);
 
   function updateDog(field, value) {
     onChange('dogs', data.dogs.map((d, i) => i === index ? { ...d, [field]: value } : d));
+  }
+
+  // Optional (Sept 21, 2026, on request) - never blocks Continue either
+  // way, whether the upload is still in flight or fails outright (see
+  // dogIsComplete/getErrors below, deliberately unchanged). The local
+  // preview (createObjectURL) shows immediately, independent of the
+  // upload actually finishing - no need to wait on a signed URL just to
+  // show the owner their own just-picked file, and it works even if the
+  // upload itself fails.
+  async function handlePhotoChange(e) {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    setPhotoPreviewUrl(URL.createObjectURL(file));
+    setUploadingPhoto(true);
+    setPhotoError('');
+    const form = new FormData();
+    form.append('file', file);
+    const { data: result, error: fnError } = await supabase.functions.invoke('dog-photos', { body: form });
+    setUploadingPhoto(false);
+    if (fnError || result?.error) {
+      setPhotoError("Couldn't upload the photo. You can still continue without it.");
+      return;
+    }
+    updateDog('photoPath', result.path);
   }
 
   function getErrors() {
@@ -511,6 +544,21 @@ function StepDogPage({ data, onChange, index, onNext, onBack }) {
       <h2 className="step-title">Dog {index + 1}</h2>
       <Field label="Dog's Name" error={errors.name}>
         <input value={dog.name} onChange={e => updateDog('name', e.target.value)} placeholder="Buddy" />
+      </Field>
+      <Field label="Photo (optional)">
+        {photoPreviewUrl && (
+          <img
+            src={photoPreviewUrl}
+            alt={`${dog.name || 'Dog'}'s photo`}
+            style={{ width: 88, height: 88, objectFit: 'cover', borderRadius: 8, display: 'block', marginBottom: 8 }}
+          />
+        )}
+        <input type="file" accept="image/*" aria-label="Photo (optional)" onChange={handlePhotoChange} disabled={uploadingPhoto} />
+        {uploadingPhoto && <div style={{ fontSize: '0.78rem', color: '#6B7A8A', marginTop: 4 }}>Uploading...</div>}
+        {!uploadingPhoto && dog.photoPath && !photoError && (
+          <div style={{ fontSize: '0.78rem', color: '#7D9B76', marginTop: 4 }}>✓ Photo added</div>
+        )}
+        {photoError && <div className="field-error">{photoError}</div>}
       </Field>
       <Field label="Breed" error={errors.breed}>
         <input value={dog.breed} onChange={e => updateDog('breed', e.target.value)} placeholder="Golden Retriever" />
@@ -1403,9 +1451,14 @@ function AdminView({
     (d.stays || []).forEach(s => {
       if (s.approval_status === 'pending') {
         if (pendingByStayId.has(s.id)) {
-          pendingByStayId.get(s.id).dogNames.push(d.name);
+          const entry = pendingByStayId.get(s.id);
+          entry.dogNames.push(d.name);
+          entry.photos.push({ name: d.name, photoUrl: s.photoUrl });
         } else {
-          pendingByStayId.set(s.id, { ...s, dogNames: [d.name], ownerName: d.owner?.name, ownerPhone: d.owner?.phone });
+          pendingByStayId.set(s.id, {
+            ...s, dogNames: [d.name], photos: [{ name: d.name, photoUrl: s.photoUrl }],
+            ownerName: d.owner?.name, ownerPhone: d.owner?.phone,
+          });
         }
       }
     });
@@ -1426,9 +1479,14 @@ function AdminView({
     (d.stays || []).forEach(s => {
       if (s.approval_status === 'approved' && !s.billed_at) {
         if (unbilledByStayId.has(s.id)) {
-          unbilledByStayId.get(s.id).dogNames.push(d.name);
+          const entry = unbilledByStayId.get(s.id);
+          entry.dogNames.push(d.name);
+          entry.photos.push({ name: d.name, photoUrl: s.photoUrl });
         } else {
-          unbilledByStayId.set(s.id, { ...s, dogNames: [d.name], ownerName: d.owner?.name, ownerPhone: d.owner?.phone });
+          unbilledByStayId.set(s.id, {
+            ...s, dogNames: [d.name], photos: [{ name: d.name, photoUrl: s.photoUrl }],
+            ownerName: d.owner?.name, ownerPhone: d.owner?.phone,
+          });
         }
       }
     });
@@ -1446,9 +1504,14 @@ function AdminView({
     (d.stays || []).forEach(s => {
       if (s.approval_status === 'approved' && s.billed_at && !s.paid_at) {
         if (awaitingPaymentByStayId.has(s.id)) {
-          awaitingPaymentByStayId.get(s.id).dogNames.push(d.name);
+          const entry = awaitingPaymentByStayId.get(s.id);
+          entry.dogNames.push(d.name);
+          entry.photos.push({ name: d.name, photoUrl: s.photoUrl });
         } else {
-          awaitingPaymentByStayId.set(s.id, { ...s, dogNames: [d.name], ownerName: d.owner?.name, ownerPhone: d.owner?.phone });
+          awaitingPaymentByStayId.set(s.id, {
+            ...s, dogNames: [d.name], photos: [{ name: d.name, photoUrl: s.photoUrl }],
+            ownerName: d.owner?.name, ownerPhone: d.owner?.phone,
+          });
         }
       }
     });
@@ -1482,6 +1545,7 @@ function AdminView({
         name: d.name, breed: s.breed, dob: s.dob,
         aggression_history: s.aggression_history, aggression_detail: s.aggression_detail,
         health_concerns: s.health_concerns, health_detail: s.health_detail,
+        photoUrl: s.photoUrl,
       };
       const owner = pastStaysByOwnerPhone.get(phone);
       if (owner.staysById.has(s.id)) {
@@ -1529,6 +1593,18 @@ function AdminView({
         {isExpanded && (
           <div style={{ marginTop: 8 }}>
             <div className="stay-meta">{s.ownerPhone}</div>
+            {s.photos.some(p => p.photoUrl) && (
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 6, marginBottom: 6 }}>
+                {s.photos.filter(p => p.photoUrl).map((p, i) => (
+                  <img
+                    key={i}
+                    src={p.photoUrl}
+                    alt={`${p.name}'s photo`}
+                    style={{ width: 64, height: 64, objectFit: 'cover', borderRadius: 8 }}
+                  />
+                ))}
+              </div>
+            )}
             <div className="stay-meta">
               Drop-off: {s.drop_time ? s.drop_time.slice(0, 5) : '—'} · Pickup: {s.pickup_time ? s.pickup_time.slice(0, 5) : '—'}
             </div>
@@ -1633,6 +1709,21 @@ function AdminView({
             <div className="stay-meta">{s.ownerPhone}</div>
             {s.approval_status === 'denied' && s.denial_reason && (
               <div className="stay-notes">Reason given: "{s.denial_reason}"</div>
+            )}
+            {/* s.perDog (Past Stays) and s.photos (Unbilled/Awaiting
+                Payment) are two differently-built lists that both happen
+                to carry a photoUrl per dog - either works here. */}
+            {(s.perDog || s.photos || []).some(p => p.photoUrl) && (
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 6, marginBottom: 6 }}>
+                {(s.perDog || s.photos).filter(p => p.photoUrl).map((p, i) => (
+                  <img
+                    key={i}
+                    src={p.photoUrl}
+                    alt={`${p.name}'s photo`}
+                    style={{ width: 64, height: 64, objectFit: 'cover', borderRadius: 8 }}
+                  />
+                ))}
+              </div>
             )}
             {!isEditing ? (
               <>
@@ -2763,6 +2854,7 @@ export default function App() {
         aggressionDetail: d.aggressionDetail,
         healthConcerns: d.healthConcerns,
         healthDetail: d.healthDetail,
+        photoPath: d.photoPath || null,
       })),
       checkIn: form.checkIn,
       checkOut: form.checkOut,

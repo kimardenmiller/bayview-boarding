@@ -46,7 +46,12 @@ interface AboutPhoto {
 // path is always a fresh random name (see handleRequest) so nothing
 // about what a client uploaded ever reaches the filesystem/URL as-is.
 function extensionFor(file: File): string {
-  const fromName = file.name?.split('.').pop()?.toLowerCase();
+  // Only trusts an extension from a filename that actually HAS a dot -
+  // a no-dot filename (e.g. "photo") would otherwise pass the character
+  // check below by pure coincidence and get treated as its own
+  // extension (found via a real test failure in dog-photos, its
+  // sibling function, Sept 21, 2026).
+  const fromName = file.name?.includes('.') ? file.name.split('.').pop()?.toLowerCase() : undefined;
   if (fromName && /^[a-z0-9]{2,5}$/.test(fromName)) return fromName;
   if (file.type === 'image/png') return 'png';
   if (file.type === 'image/webp') return 'webp';

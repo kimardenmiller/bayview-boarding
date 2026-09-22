@@ -37,6 +37,7 @@ interface RawStayLink {
   name: string; breed: string; dob: string | null; spay_neuter: string | null;
   aggression_history: string | null; aggression_detail: string | null;
   health_concerns: string | null; health_detail: string | null;
+  photo_path: string | null;
   stay: Record<string, unknown> | null;
 }
 interface RawDog {
@@ -55,6 +56,7 @@ function shapeDog(d: RawDog) {
       name: sd.name, breed: sd.breed, dob: sd.dob, spay_neuter: sd.spay_neuter,
       aggression_history: sd.aggression_history, aggression_detail: sd.aggression_detail,
       health_concerns: sd.health_concerns, health_detail: sd.health_detail,
+      photo_path: sd.photo_path,
       ...sd.stay,
     } as Record<string, unknown>))
     .sort((a, b) => String(b.check_in).localeCompare(String(a.check_in)));
@@ -62,7 +64,16 @@ function shapeDog(d: RawDog) {
 }
 
 const DOGS_SELECT =
-  "id, name, breed, dob, spay_neuter, aggression_history, aggression_detail, health_concerns, health_detail, owner:owners(name, phone, email), stay_dogs(name, breed, dob, spay_neuter, aggression_history, aggression_detail, health_concerns, health_detail, stay:stays(id, check_in, check_out, drop_time, pickup_time, notes, estimated_cost, number_of_dogs, submitted_at, waiver_snapshot, billed_at, paid_at, approval_status, approved_at, denied_at, denial_reason))";
+  "id, name, breed, dob, spay_neuter, aggression_history, aggression_detail, health_concerns, health_detail, owner:owners(name, phone, email), stay_dogs(name, breed, dob, spay_neuter, aggression_history, aggression_detail, health_concerns, health_detail, photo_path, stay:stays(id, check_in, check_out, drop_time, pickup_time, notes, estimated_cost, number_of_dogs, submitted_at, waiver_snapshot, billed_at, paid_at, approval_status, approved_at, denied_at, denial_reason))";
+
+const DOG_PHOTOS_BUCKET = "dog-photos";
+// A dog photo's Storage bucket is private (see the Sept 21, 2026
+// migration) - a raw path alone isn't viewable, so every stay entry's
+// photo_path gets resolved to a signed URL (photoUrl) before the
+// response goes out. 1 hour is plenty for one admin session; a fresh
+// one is generated on every fetchDogsAndTotals call (every login, and
+// after every action), so there's no need to track/renew expiry.
+const SIGNED_URL_TTL_SECONDS = 60 * 60;
 
 export async function handleRequest(req: Request): Promise<Response> {
   if (req.method === "OPTIONS") {
@@ -98,6 +109,34 @@ export async function handleRequest(req: Request): Promise<Response> {
       if (dogsResult.error) throw dogsResult.error;
       if (staysResult.error) throw staysResult.error;
       const dogs = (dogsResult.data as unknown as RawDog[]).map(shapeDog);
+
+      // Batch-sign every distinct photo referenced anywhere in the
+      // response in one call, rather than one round-trip per photo.
+      const paths = new Set<string>();
+      for (const dog of dogs) {
+        for (const stay of dog.stays) {
+          const path = (stay as Record<string, unknown>).photo_path;
+          if (typeof path === "string" && path) paths.add(path);
+        }
+      }
+      const urlByPath = new Map<string, string | null>();
+      if (paths.size > 0) {
+        const { data: signed, error: signErr } = await supabase.storage
+          .from(DOG_PHOTOS_BUCKET)
+          .createSignedUrls([...paths], SIGNED_URL_TTL_SECONDS);
+        if (signErr) throw signErr;
+        for (const s of signed ?? []) urlByPath.set(s.path ?? "", s.signedUrl);
+      }
+      // Always set photoUrl (defaulting null), on every stay, regardless
+      // of whether any photo exists anywhere - never left undefined.
+      for (const dog of dogs) {
+        for (const stay of dog.stays) {
+          const s = stay as Record<string, unknown>;
+          const path = s.photo_path;
+          s.photoUrl = typeof path === "string" && path ? urlByPath.get(path) ?? null : null;
+        }
+      }
+
       return { dogs, totalStays: staysResult.count ?? 0 };
     }
 

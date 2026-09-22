@@ -44,6 +44,18 @@ function stubSupabase(opts: { dogs?: unknown[]; totalStays?: number } = {}) {
   globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
     const url = new URL(String(input instanceof Request ? input.url : input));
     const method = (init?.method || 'GET').toUpperCase();
+
+    if (url.pathname.startsWith('/storage/v1/object/sign/')) {
+      const body = init?.body ? JSON.parse(String(init.body)) : { paths: [] };
+      calls.push({ method, table: 'storage-sign', body, search: url.search });
+      // storage-js's client prepends "{SUPABASE_URL}/storage/v1" itself -
+      // the raw REST response's signedURL only has the path after that.
+      const signed = (body.paths as string[]).map((path) => ({
+        path, signedURL: `/object/sign/dog-photos/${path}?token=fake`, error: null,
+      }));
+      return new Response(JSON.stringify(signed), { status: 200 });
+    }
+
     const table = url.pathname.split('/').pop()!;
     const body = init?.body ? JSON.parse(String(init.body)) : undefined;
     calls.push({ method, table, body, search: url.search });
@@ -144,6 +156,44 @@ Deno.test('a dog with no stays gets an empty stays array, not an error', async (
     const res = await handleRequest(postRequest({ password: ADMIN_PASSWORD }));
     const data = await res.json();
     assertEquals(data.dogs[0].stays, []);
+  } finally {
+    stub.restore();
+  }
+});
+
+Deno.test('a stay with a photo_path gets a signed photoUrl (the "dog-photos" bucket is private)', async () => {
+  const dogs = [{
+    ...DOGS_FIXTURE[0],
+    stay_dogs: [
+      { ...DOGS_FIXTURE[0].stay_dogs[0], photo_path: 'photo-abc.jpg' },
+      { ...DOGS_FIXTURE[0].stay_dogs[1], photo_path: null },
+    ],
+  }];
+  const stub = stubSupabase({ dogs });
+  try {
+    const res = await handleRequest(postRequest({ password: ADMIN_PASSWORD }));
+    const data = await res.json();
+    const stays = data.dogs[0].stays;
+    const withPhoto = stays.find((s: { id: string }) => s.id === 'stay-1');
+    const withoutPhoto = stays.find((s: { id: string }) => s.id === 'stay-2');
+
+    assertEquals(withPhoto.photoUrl, 'https://example.supabase.co/storage/v1/object/sign/dog-photos/photo-abc.jpg?token=fake');
+    assertEquals(withoutPhoto.photoUrl, null);
+
+    const signCall = stub.calls.find((c) => c.table === 'storage-sign');
+    assertEquals((signCall?.body as { paths: string[] }).paths, ['photo-abc.jpg']);
+  } finally {
+    stub.restore();
+  }
+});
+
+Deno.test('never calls the Storage sign endpoint when nothing has a photo', async () => {
+  const stub = stubSupabase();
+  try {
+    const res = await handleRequest(postRequest({ password: ADMIN_PASSWORD }));
+    const data = await res.json();
+    assertEquals(data.dogs[0].stays[0].photoUrl, null);
+    assertEquals(stub.calls.some((c) => c.table === 'storage-sign'), false);
   } finally {
     stub.restore();
   }

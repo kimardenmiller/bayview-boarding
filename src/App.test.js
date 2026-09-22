@@ -11,6 +11,14 @@ jest.mock('./supabase');
 // care that it was called, never about actual scroll position.
 Element.prototype.scrollIntoView = jest.fn();
 
+// jsdom doesn't implement createObjectURL either (needed once the dog
+// photo picker started using it for an instant local preview, Sept 21,
+// 2026 - see StepDogPage's handlePhotoChange in App.js). Declared here so
+// it exists as a jest.fn() at all, but resetMocks (see mockInvokeDefaults'
+// own comment) wipes its implementation before every test too, so the
+// actual return value is re-established in mockInvokeDefaults below.
+global.URL.createObjectURL = jest.fn();
+
 // The booking flow now calls three different Edge Functions through the
 // same supabase.functions.invoke() - lookup-client (StepOwner's manual
 // button + StepDog's on-mount check), submit-booking (final submit), and
@@ -57,6 +65,7 @@ function mockInvokeDefaults(overrides = {}) {
   supabase.storage.from.mockImplementation((bucket) => ({
     getPublicUrl: (path) => ({ data: { publicUrl: `https://mock-storage.test/${bucket}/${path}` } }),
   }));
+  global.URL.createObjectURL.mockReturnValue('blob:mock-preview-url');
   supabase.functions.invoke.mockImplementation((fn, opts) => {
     if (overrides[fn]) return overrides[fn](opts);
     if (fn === 'lookup-client') return Promise.resolve({ data: { found: false }, error: null });
@@ -64,6 +73,7 @@ function mockInvokeDefaults(overrides = {}) {
     if (fn === 'send-confirmation') return Promise.resolve({ data: {}, error: null });
     if (fn === 'admin-data') return Promise.resolve({ data: null, error: { message: 'not mocked in this test' } });
     if (fn === 'send-contact') return Promise.resolve({ data: { success: true }, error: null });
+    if (fn === 'dog-photos') return Promise.resolve({ data: { path: 'mock-uuid.jpg' }, error: null });
     // Mimics the real feedback function: no password -> public submit
     // (appends to an in-memory list); password + id -> update that
     // submission's status; password alone -> list everything + open count.
@@ -1378,6 +1388,38 @@ describe('Dog pages', () => {
     expect(detail).toHaveValue('Mild arthritis');
   });
 
+  test('a photo is optional - Done still enables with every other required field answered and no photo picked (Sept 21, 2026)', async () => {
+    await goToOwnerStep();
+    fireEvent.click(screen.getByText('Edit'));
+    await fillDogPage({ name: 'Rex', breed: 'Labrador' });
+    expect(await screen.findByText('Owner Information')).toBeInTheDocument(); // fillDogPage's own Done click already succeeded
+  });
+
+  test('picking a photo shows an immediate local preview, uploads it, and confirms once done', async () => {
+    await goToOwnerStep();
+    fireEvent.click(screen.getByText('Edit'));
+    const file = new File(['fake-image-bytes'], 'rex.jpg', { type: 'image/jpeg' });
+    await userEvent.upload(screen.getByLabelText('Photo (optional)'), file);
+
+    // Local preview (createObjectURL) shows immediately, independent of
+    // the upload call resolving.
+    expect(await screen.findByAltText(/'s photo/)).toBeInTheDocument();
+    await waitFor(() => expect(supabase.functions.invoke).toHaveBeenCalledWith('dog-photos', { body: expect.any(FormData) }));
+    expect(await screen.findByText('✓ Photo added')).toBeInTheDocument();
+  });
+
+  test('shows an error but does not block Done if the photo upload fails', async () => {
+    mockInvokeDefaults({ 'dog-photos': async () => ({ data: null, error: { message: 'Upload failed' } }) });
+    await goToOwnerStep();
+    fireEvent.click(screen.getByText('Edit'));
+    const file = new File(['x'], 'rex.jpg', { type: 'image/jpeg' });
+    await userEvent.upload(screen.getByLabelText('Photo (optional)'), file);
+
+    expect(await screen.findByText("Couldn't upload the photo. You can still continue without it.")).toBeInTheDocument();
+    await fillDogPage({ name: 'Rex', breed: 'Labrador' }); // Done still works
+    expect(await screen.findByText('Owner Information')).toBeInTheDocument();
+  });
+
   test('← Back to Dogs returns to the owner page with owner info preserved', async () => {
     await goToOwnerStep();
     await userEvent.type(screen.getByPlaceholderText('Jane Smith'), 'Kim Miller');
@@ -1663,6 +1705,46 @@ describe('Step 5 — Signature', () => {
     expect(supabase.functions.invoke).toHaveBeenCalledWith('send-confirmation', expect.any(Object));
   });
 
+  test('an uploaded photo path is included in the submit-booking payload for that dog (Sept 21, 2026)', async () => {
+    render(<App />);
+    fireEvent.click(screen.getAllByText('Book My Stay')[0]);
+    await userEvent.type(screen.getByPlaceholderText('(415) 555-0100'), '4155550100');
+    await userEvent.type(screen.getByPlaceholderText('Jane Smith'), 'Kim Miller');
+    await userEvent.type(screen.getByPlaceholderText('jane@email.com'), 'kim@test.com');
+    fireEvent.change(screen.getByDisplayValue('Select a Vet'), { target: { value: 'Marin Pet Hospital — (415) 479-8387' } });
+    fireEvent.click(screen.getByText('Edit'));
+    const file = new File(['x'], 'rex.jpg', { type: 'image/jpeg' });
+    await userEvent.upload(screen.getByLabelText('Photo (optional)'), file);
+    await screen.findByText('✓ Photo added');
+    await fillDogPage();
+    fireEvent.click(screen.getByText('Continue'));
+    await screen.findByText('Stay Dates');
+    await fillStep2();
+    await fillStep3();
+    await fillStep4();
+    fireEvent.click(screen.getByRole('checkbox'));
+    await userEvent.type(screen.getByPlaceholderText('Kim Miller'), 'Kim Miller');
+    fireEvent.click(screen.getByText('Submit Agreement'));
+
+    await screen.findByText('Request received, Kim!');
+    expect(supabase.functions.invoke).toHaveBeenCalledWith('submit-booking', {
+      body: expect.objectContaining({
+        dogs: [expect.objectContaining({ name: 'Rex', photoPath: 'mock-uuid.jpg' })],
+      }),
+    });
+  });
+
+  test('a dog with no photo submits with photoPath explicitly null, not undefined', async () => {
+    await fillThrough();
+    fireEvent.click(screen.getByRole('checkbox'));
+    await userEvent.type(screen.getByPlaceholderText('Kim Miller'), 'Kim Miller');
+    fireEvent.click(screen.getByText('Submit Agreement'));
+
+    await screen.findByText('Request received, Kim!');
+    const call = supabase.functions.invoke.mock.calls.find(c => c[0] === 'submit-booking');
+    expect(call[1].body.dogs[0].photoPath).toBeNull();
+  });
+
   test('the immediate text at submission is "request received", not the real confirmation - that now waits for admin approval', async () => {
     await fillThrough();
     fireEvent.click(screen.getByRole('checkbox'));
@@ -1899,6 +1981,7 @@ const REQUESTS_DOGS = [
         id: 'stay-pending', check_in: daysFromToday(3), check_out: daysFromToday(5),
         drop_time: '09:00:00', pickup_time: '09:00:00', estimated_cost: 210,
         number_of_dogs: 1, submitted_at: '2026-01-01T00:00:00Z', approval_status: 'pending', billed_at: null,
+        photoUrl: 'https://mock-signed.test/dog-photos/photo-abc.jpg',
       },
       // Already approved - should NOT show up in Requests (belongs in
       // Unbilled Stays instead, exercised in its own describe block).
@@ -1942,6 +2025,22 @@ describe('Admin — logged in — Requests', () => {
     expect(within(cards[0]).getByText('Bud — Kim')).toBeInTheDocument();
     const badge = document.querySelector('.requests-section .feedback-badge');
     expect(badge).toHaveTextContent('1');
+  });
+
+  test('an expanded request card shows a photo thumbnail for a dog with a photo on file (Sept 21, 2026)', async () => {
+    await loginAsAdminWithRequests();
+    const card = within(document.querySelector('.requests-section')).getByText('Bud — Kim').closest('.stay-card');
+    fireEvent.click(within(card).getByText('View'));
+    const img = within(card).getByAltText("Bud's photo");
+    expect(img).toHaveAttribute('src', 'https://mock-signed.test/dog-photos/photo-abc.jpg');
+  });
+
+  test('no thumbnail row shows on an expanded request with no photo on file', async () => {
+    const noPhotoDogs = [{ ...REQUESTS_DOGS[0], stays: [{ ...REQUESTS_DOGS[0].stays[0], photoUrl: null }] }];
+    await loginAsAdminWithRequests(noPhotoDogs);
+    const card = within(document.querySelector('.requests-section')).getByText('Bud — Kim').closest('.stay-card');
+    fireEvent.click(within(card).getByText('View'));
+    expect(within(card).queryByAltText(/'s photo/)).not.toBeInTheDocument();
   });
 
   test('a friendly empty state shows when there are no pending requests', async () => {

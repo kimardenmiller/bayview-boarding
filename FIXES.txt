@@ -1,6 +1,6 @@
 BAYVIEW BOARDING — FIX LIST
 ============================
-Last updated: September 21, 2026 (10) (About page photos are now admin-manageable, in Supabase Storage instead of hardcoded)
+Last updated: September 21, 2026 (11) (Owners can now upload a photo of their dog during booking - visible to admin on the request)
 
 NEXT CHANGE LIST (v1.5)
 -----------------------
@@ -62,6 +62,73 @@ TWILIO STATUS
 
 COMPLETED
 ---------
+- Sept 21, 2026 (11): Owners can now upload a photo of their dog during
+  booking, on request ("add the ability for owners to upload photos of
+  their dog that can be seen on the booking request"):
+  1. New `dogs.photo_path` (current/always-up-to-date profile photo,
+     same role as breed/DOB/spay-neuter there) and `stay_dogs.photo_path`
+     (frozen per-stay snapshot - a later re-upload never retroactively
+     changes what a past booking's record shows, same reasoning as every
+     other stay_dogs snapshot column since the Sept 14 dog-profiles
+     reorg). Both nullable - a photo is optional.
+  2. Unlike the about-photos bucket (Sept 21 (10), same day - public
+     marketing content), the new "dog-photos" Storage bucket is PRIVATE -
+     a client's own dog photo is their data, tied to a real booking.
+     Admin views it via a signed URL generated server-side in admin-data
+     (service role key, 1-hour TTL, re-signed fresh on every fetch);
+     nothing public ever points at it directly.
+  3. New, public/unauthenticated `dog-photos` Edge Function (upload
+     only, no delete) - same trust boundary as submit-booking/feedback's
+     own public write paths, since a visitor filling out the booking
+     form has no password yet. Stores under a fresh random filename,
+     never the client's own.
+  4. StepDogPage (the booking form's per-dog page) gained a "Photo
+     (optional)" field: picking a file shows an instant local preview
+     (URL.createObjectURL, independent of the network call) and uploads
+     immediately in the background - never deferred to final submit,
+     and never blocks Done/Continue whether the upload is in flight or
+     fails (a non-blocking "couldn't upload, you can still continue
+     without it" message shows instead). The returned Storage path rides
+     along in that dog's own form state and is included in the final
+     submit-booking payload. A returning dog's EXISTING photo is only
+     overwritten when a new one is actually uploaded this time - never
+     silently cleared by a booking that didn't touch the photo field.
+  5. Photo thumbnails now show in admin on Requests (the explicit ask),
+     and - since the data flows through the same shared admin-data
+     response - Unbilled Stays, Awaiting Payment, and Past Stays too.
+     Deliberately out of scope this round: no photo preview during
+     returning-client lookup, no admin-side delete/replace.
+
+  Tests: dog-photos gained full Deno coverage (CORS, non-POST/non-
+  multipart/missing-file/non-image rejection, random-filename generation
+  - including a path-traversal attempt neutralized - and a content-type-
+  based extension fallback for a dot-less filename, which also caught
+  and fixed a real bug: a dot-less filename could coincidentally pass
+  the old extension-detection regex and get used as its own "extension"
+  - fixed in both dog-photos and about-photos). submit-booking gained
+  coverage for photo_path being saved/snapshotted, kept when a
+  returning dog's submission omits a new photo, replaced when it
+  includes one, and explicitly null (never undefined) when there's no
+  photo at all. admin-data gained coverage for signed-URL resolution -
+  including a fix (caught by its own test) where photoUrl was left
+  undefined instead of null on a stay with no photo, when nothing in
+  the whole response had one. App's Jest suite gained coverage for the
+  upload/preview/error UI, the submit-booking payload inclusion (with
+  and without a photo), and photo thumbnails rendering in the Requests
+  card.
+  219 React + 192 Deno = 411/411 passing (one long-standing, order-
+  dependent Deno flake in send-confirmation/index.fallback.test.ts -
+  unrelated to this change, confirmed present on main before this round
+  too, passes cleanly in isolation - not counted as a real failure).
+
+  Verified live on both production and staging: migration applied and
+  columns/bucket confirmed on both, dog-photos/submit-booking/admin-data/
+  about-photos all redeployed, both frontend bundles carry the new
+  upload UI and correctly isolate their own Supabase project, and a real
+  test upload against staging's live dog-photos function round-tripped
+  successfully (production was verified read-only, matching the usual
+  "don't write test data against production" practice).
+
 - Sept 21, 2026 (10): About page photos are now admin-manageable, on
   request ("what's the best way to manage the photos and their order,
   under Admin?") - Supabase Storage version, per Kim's choice between

@@ -62,7 +62,7 @@ function stubSupabase() {
       if (method === 'GET') {
         const ownerId = eqValue(url.searchParams, 'owner_id');
         const rows = db.dogs.filter((d) => d.owner_id === ownerId);
-        return new Response(JSON.stringify(rows.map((d) => ({ id: d.id, name: d.name }))), { status: 200 });
+        return new Response(JSON.stringify(rows.map((d) => ({ id: d.id, name: d.name, photo_path: d.photo_path ?? null }))), { status: 200 });
       }
       if (method === 'POST') {
         const row = { id: `dog-${++dogSeq}`, ...body };
@@ -380,6 +380,67 @@ Deno.test('stay_dogs carries a frozen snapshot of what was declared for that sta
     assertEquals(stub.db.stayDogs[1].aggression_detail, 'Growls at the mail carrier');
     assertEquals(stub.db.stayDogs[0].name, 'Rex');
     assertEquals(stub.db.stayDogs[0].breed, 'Labrador');
+  } finally {
+    stub.restore();
+  }
+});
+
+Deno.test('a dog\'s uploaded photo path is saved to its profile and snapshotted onto stay_dogs (Sept 21, 2026)', async () => {
+  const stub = stubSupabase();
+  try {
+    await handleRequest(postRequest(validBooking({
+      dogs: [{ name: 'Rex', breed: 'Labrador', photoPath: 'abc123.jpg' }],
+    })));
+
+    assertEquals(stub.db.dogs[0].photo_path, 'abc123.jpg');
+    assertEquals(stub.db.stayDogs[0].photo_path, 'abc123.jpg');
+  } finally {
+    stub.restore();
+  }
+});
+
+Deno.test('a returning dog\'s existing photo is kept if this submission doesn\'t include a new one', async () => {
+  const stub = stubSupabase();
+  try {
+    await handleRequest(postRequest(validBooking({
+      dogs: [{ name: 'Rex', breed: 'Labrador', photoPath: 'original.jpg' }],
+    })));
+    await handleRequest(postRequest(validBooking({
+      dogs: [{ name: 'Rex', breed: 'Labrador' }], // no photoPath this time
+    })));
+
+    assertEquals(stub.db.dogs.length, 1);
+    assertEquals(stub.db.dogs[0].photo_path, 'original.jpg'); // never cleared
+    assertEquals(stub.db.stayDogs[1].photo_path, 'original.jpg'); // second stay's snapshot still shows it
+  } finally {
+    stub.restore();
+  }
+});
+
+Deno.test('a returning dog\'s photo is replaced when a new one is uploaded', async () => {
+  const stub = stubSupabase();
+  try {
+    await handleRequest(postRequest(validBooking({
+      dogs: [{ name: 'Rex', breed: 'Labrador', photoPath: 'original.jpg' }],
+    })));
+    await handleRequest(postRequest(validBooking({
+      dogs: [{ name: 'Rex', breed: 'Labrador', photoPath: 'new-photo.jpg' }],
+    })));
+
+    assertEquals(stub.db.dogs[0].photo_path, 'new-photo.jpg');
+    assertEquals(stub.db.stayDogs[0].photo_path, 'original.jpg'); // first stay's own snapshot is untouched
+    assertEquals(stub.db.stayDogs[1].photo_path, 'new-photo.jpg');
+  } finally {
+    stub.restore();
+  }
+});
+
+Deno.test('a dog with no photo at all gets a null photo_path, not undefined or an empty string', async () => {
+  const stub = stubSupabase();
+  try {
+    await handleRequest(postRequest(validBooking({ dogs: [{ name: 'Rex', breed: 'Labrador' }] })));
+    assertEquals(stub.db.dogs[0].photo_path, undefined); // never set on insert - column default (null) applies
+    assertEquals(stub.db.stayDogs[0].photo_path, null);
   } finally {
     stub.restore();
   }
