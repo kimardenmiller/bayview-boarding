@@ -21,3 +21,7 @@
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+
+# local-only exports of real client data (names, phone, email, health/
+# aggression notes, signatures, waiver text) - never committed
+/backups

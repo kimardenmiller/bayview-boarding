@@ -1,6 +1,6 @@
 BAYVIEW BOARDING — FIX LIST
 ============================
-Last updated: September 22, 2026 (2) (Hover-zoom now grows photos up to their own full resolution, not a small fixed multiplier)
+Last updated: September 22, 2026 (3) (Production database cleared of all owners/dogs/stays, on request)
 
 NEXT CHANGE LIST (v1.5)
 -----------------------
@@ -27,41 +27,27 @@ DEFERRED (revisit only if it actually blocks something)
   preemptively. Revisit if a Node/dependency upgrade actually breaks,
   not before.
 
-TWILIO STATUS
--------------
-- A2P 10DLC registration submitted September 12, 2026
-- Rejected three times, all error 30908 (privacy policy / message_flow
-  couldn't be verified), each traced to a real gap rather than just
-  wording — see COMPLETED for the full history. Root cause across all
-  three: the site is a JS-rendered SPA (empty <div id="root"> to any
-  non-JS crawler), so Twilio's vetting repeatedly couldn't verify
-  claims made in message_flow by visiting the live site, even when the
-  text itself was correct.
-- 3rd fix (September 13, 2026): the evidence page (sms-consent.html)
-  had zero incoming links from anywhere crawlable — not the homepage,
-  not privacy.html. Added real links in the raw (non-JS) HTML via
-  public/index.html's <noscript> block, cross-linked privacy.html /
-  terms.html / sms-consent.html to each other, fixed terms.html's SMS
-  section (had a looser paraphrase instead of the exact required
-  statement — Twilio has that URL registered too), and made
-  message_flow itself directly cite the evidence page URL as text, so
-  it doesn't depend on any link-following at all. Confirmed via
-  Twilio's API: this 3rd rejection was a genuine new failure (errors
-  populated, not just a stale duplicate email) from vetting that ran
-  before these fixes were live. Resubmitted after — confirmed
-  campaign_status: IN_PROGRESS, errors: [] as of September 13, 2026.
-- ✅ APPROVED, September 16, 2026 - confirmed via the Messaging
-  Compliance API: campaign_status VERIFIED (errors: []), brand status
-  APPROVED, identity_status VERIFIED. Real SMS sends (confirmation,
-  reminder, billing) should now actually go through to clients - this
-  was the last blocker (previously silently failing with error 30034
-  while the campaign was pending carrier review).
-- Twilio account: see src/settings.js PHONE
-- Confirmation, reminder, and billing SMS are wired up, tested, and (as
-  of today) no longer blocked on A2P approval
-
 COMPLETED
 ---------
+- Sept 22, 2026 (3): Production database cleared of all owners/dogs/
+  stays/stay_dogs, on request ("let's clear the production database of
+  stays"), confirmed to mean a full reset of every client record, not
+  just stays - staging was NOT touched, this was production only.
+  Exported every row from all 4 tables to local JSON files first
+  (backups/pre_clear_20260922/ - gitignored, since it holds real client
+  PII: names, phone/email, health/aggression notes, signatures, full
+  waiver text) as a safety net before deleting anything, confirmed the
+  file for each table has the same row count as the live table (4
+  owners, 7 dogs, 13 stays, 19 stay_dogs), then deleted in FK-safe
+  order (stay_dogs, stays, dogs, owners) inside a single transaction
+  and re-verified all 4 tables read back empty afterward. No code
+  changed - production's schema/functions/frontend are exactly as they
+  were, only the data is gone. Not reversible from within the app;
+  only the local export above, or whatever backup/point-in-time-
+  recovery Supabase itself may have configured (not something this
+  project controls or has confirmed either way).
+
+
 - Sept 22, 2026 (2): "Make the roll-over zoom result in a much larger
   zoom, up to full size if that can be done reliably" - a follow-up on
   the hover-zoom shipped earlier the same day (below), for both the
@@ -1827,6 +1813,39 @@ COMPLETED
 - v1.1: Supabase database integration
 - v1.1: Returning client auto-fill by email
 - v1.0: Initial app build
+
+TWILIO STATUS
+-------------
+- A2P 10DLC registration submitted September 12, 2026
+- Rejected three times, all error 30908 (privacy policy / message_flow
+  couldn't be verified), each traced to a real gap rather than just
+  wording — see COMPLETED for the full history. Root cause across all
+  three: the site is a JS-rendered SPA (empty <div id="root"> to any
+  non-JS crawler), so Twilio's vetting repeatedly couldn't verify
+  claims made in message_flow by visiting the live site, even when the
+  text itself was correct.
+- 3rd fix (September 13, 2026): the evidence page (sms-consent.html)
+  had zero incoming links from anywhere crawlable — not the homepage,
+  not privacy.html. Added real links in the raw (non-JS) HTML via
+  public/index.html's <noscript> block, cross-linked privacy.html /
+  terms.html / sms-consent.html to each other, fixed terms.html's SMS
+  section (had a looser paraphrase instead of the exact required
+  statement — Twilio has that URL registered too), and made
+  message_flow itself directly cite the evidence page URL as text, so
+  it doesn't depend on any link-following at all. Confirmed via
+  Twilio's API: this 3rd rejection was a genuine new failure (errors
+  populated, not just a stale duplicate email) from vetting that ran
+  before these fixes were live. Resubmitted after — confirmed
+  campaign_status: IN_PROGRESS, errors: [] as of September 13, 2026.
+- ✅ APPROVED, September 16, 2026 - confirmed via the Messaging
+  Compliance API: campaign_status VERIFIED (errors: []), brand status
+  APPROVED, identity_status VERIFIED. Real SMS sends (confirmation,
+  reminder, billing) should now actually go through to clients - this
+  was the last blocker (previously silently failing with error 30034
+  while the campaign was pending carrier review).
+- Twilio account: see src/settings.js PHONE
+- Confirmation, reminder, and billing SMS are wired up, tested, and (as
+  of today) no longer blocked on A2P approval
 
 TECH STACK
 ==========
