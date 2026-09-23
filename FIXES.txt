@@ -1,6 +1,6 @@
 BAYVIEW BOARDING — FIX LIST
 ============================
-Last updated: September 23, 2026 (LocalBusiness structured data + a local-search tagline on the About page)
+Last updated: September 23, 2026 (2) (Custom domain bayviewboarding.com associated with GitHub Pages - DNS live, HTTPS cert pending)
 
 NEXT CHANGE LIST (v1.5)
 -----------------------
@@ -16,6 +16,20 @@ NEXT CHANGE LIST (v1.5)
    was submitted.
    This item itself never gets "done" - it's a recurring habit, not a
    one-time task.
+2. Finish the bayviewboarding.com custom-domain cutover once GitHub
+   finishes issuing its HTTPS certificate (status as of Sept 23, 2026:
+   DNS live and confirmed correct, GitHub Pages has the domain
+   associated and is serving over plain HTTP, but
+   https_certificate.state is still "new" - GitHub does this
+   automatically, no action needed but the wait). Once it's live
+   (check via `gh api repos/kimardenmiller/bayview-boarding/pages`):
+   switch PUBLIC_URL/homepage (package.json) from the github.io path to
+   https://bayviewboarding.com, update the canonical/og/twitter meta
+   tags and sitemap.xml/robots.txt to match, confirm "Enforce HTTPS" is
+   on, then verify live. Decide then whether staging should move too
+   (currently unaffected - still reachable at its own github.io/
+   staging/ path, and also now redirects through the new domain
+   harmlessly) or stay put.
 
 DEFERRED (revisit only if it actually blocks something)
 ---------------------------------------------------------
@@ -29,6 +43,43 @@ DEFERRED (revisit only if it actually blocks something)
 
 COMPLETED
 ---------
+- Sept 23, 2026 (2): Registered and associated a custom domain,
+  bayviewboarding.com (Kim's follow-up to the SEO pass below - asked
+  about a stable domain, registered it on Namecheap). Real DNS set up
+  at Namecheap (4 A records for the apex → GitHub Pages' 4 IPs, a
+  CNAME for www → kimardenmiller.github.io., after removing Namecheap's
+  default parking redirect/CNAME which would have conflicted), then
+  public/CNAME added to the repo so every future build/deploy carries
+  the association.
+
+  INCIDENT, for the record: pushed public/CNAME the first time BEFORE
+  DNS was live. GitHub Pages starts 301-redirecting the old github.io
+  URL to the custom domain the INSTANT it sees a CNAME file, regardless
+  of whether DNS actually resolves yet - this took the live production
+  site down (redirected to a domain with no A records) for a few
+  minutes. Caught on the very next verification check and reverted
+  directly on the gh-pages branch (a `git worktree add ... gh-pages`,
+  remove CNAME, push - faster and more surgical than a `gh-pages`
+  CLI redeploy, which wouldn't even have removed the file since
+  `--add` mode never deletes anything). Confirmed both production and
+  staging fully restored before doing anything else. Correct order,
+  used for the actual cutover afterward: DNS records live and
+  confirmed resolving (checked against 2 independent public resolvers,
+  not just local cache) FIRST, only then push the CNAME file - and
+  even then, watched closely (polled both the new domain and the old
+  URL every 10s) until both came back healthy, about 2.5 minutes.
+
+  Current state: DNS fully live, GitHub Pages has the domain
+  associated and serving correctly (confirmed via `gh api repos/.../
+  pages`: status "built"), but https_certificate.state is still "new" -
+  GitHub issues this automatically and it hadn't started after several
+  minutes of checking, so left to finish on its own rather than kept
+  polling. The app's own PUBLIC_URL/meta tags/sitemap were deliberately
+  NOT changed yet - see NEXT CHANGE LIST item 2 for the follow-up once
+  the certificate is live. No code/test changes this round - purely a
+  domain/infra operation, plus the one intentionally-reverted CNAME
+  commit.
+
 - Sept 23, 2026: SEO pass, on request ("are you able to perform SEO for
   the site?" → "let's do both" - structured data + on-page copy):
   1. LocalBusiness structured data (JSON-LD) - injected client-side via
