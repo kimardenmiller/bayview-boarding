@@ -1,6 +1,6 @@
 BAYVIEW BOARDING — FIX LIST
 ============================
-Last updated: September 22, 2026 (3) (Production database cleared of all owners/dogs/stays, on request)
+Last updated: September 23, 2026 (LocalBusiness structured data + a local-search tagline on the About page)
 
 NEXT CHANGE LIST (v1.5)
 -----------------------
@@ -29,6 +29,59 @@ DEFERRED (revisit only if it actually blocks something)
 
 COMPLETED
 ---------
+- Sept 23, 2026: SEO pass, on request ("are you able to perform SEO for
+  the site?" → "let's do both" - structured data + on-page copy):
+  1. LocalBusiness structured data (JSON-LD) - injected client-side via
+     a useEffect in AboutContent (src/App.js), not a static <script> in
+     public/index.html, so its aggregateRating (5.0 / 21 reviews) and
+     address can never drift out of sync with the same numbers already
+     shown on the visible About page - Google's structured-data
+     guidelines require the two to match, and deriving one from the
+     other is the only way to guarantee that instead of hand-keeping
+     two copies in sync. geo uses the exact same already-fuzzed map
+     point (~300 yards off the real address) the Location section's map
+     already uses - never the real street address, same privacy stance
+     kept everywhere else on this page. Relies on Google rendering JS
+     before reading structured data (true since ~2019) - a non-JS
+     crawler won't see it, same limitation as everything else in this
+     SPA (see CLAUDE.md's SEO & Analytics section).
+  2. A one-line tagline under the About title ("Home-based dog boarding
+     in San Rafael, CA, in Marin County's Loch Lomond neighborhood,
+     right at the China Camp State Park trailhead") - puts the primary
+     local-search keyword phrase (San Rafael + Marin County + dog
+     boarding) directly in the page's own visible text, at the very top
+     of the largest block of real content on the site, rather than only
+     in meta tags a visitor never reads. Deliberately a single added
+     sentence, not a rewrite of Kim's existing Rover-profile-derived
+     bio copy, which was left untouched.
+  3. Also looked into a custom domain (Kim asked whether one would help
+     and whether a stable one could be found) - a real, meaningful SEO
+     lever this pass didn't touch: the site currently lives at a
+     subpath of the shared kimardenmiller.github.io domain, not its own
+     domain, which dilutes domain authority and reads as less
+     professional/trustworthy for local search than a dedicated
+     bayviewboarding.com would. bayviewboarding.com, bayviewdog
+     boarding.com, and bayviewboardingmarin.com all currently fail DNS
+     resolution (no site loads at any of them), a reasonable but NOT
+     definitive signal they may be unregistered - actual availability/
+     purchase requires checking a real registrar (e.g. Namecheap,
+     Porkbun, GoDaddy) directly, which needs an account/payment this
+     tooling has no access to. No domain was purchased or reserved this
+     round - advisory only.
+
+  Tests: 3 new Jest tests (the structured-data script's fields match
+  what's visibly on the page, no duplicate script tag after navigating
+  away from and back to the landing page, the new tagline text is
+  present). No backend/Deno changes.
+  223 React + 192 Deno = 415/415 passing (same pre-existing, unrelated
+  Deno flake as every other entry this week).
+
+  Verified live on both production and staging: both deployed JS
+  bundles carry the LocalBusiness/aggregateRating structured data and
+  the new tagline text, and correctly isolate their own Supabase
+  project.
+
+
 - Sept 22, 2026 (3): Production database cleared of all owners/dogs/
   stays/stay_dogs, on request ("let's clear the production database of
   stays"), confirmed to mean a full reset of every client record, not

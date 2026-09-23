@@ -2483,15 +2483,61 @@ const ABOUT_MAP_COORDS = '37.980802,-122.484319';
 const ABOUT_MAP_EMBED_URL = `https://maps.google.com/maps?q=${ABOUT_MAP_COORDS}&z=16&output=embed`;
 const ABOUT_MAP_LINK_URL = 'https://maps.app.goo.gl/xWg4sCFVpevDCKd16';
 
+// The base profile URL, reused as-is by both the visible "21 ratings on
+// Rover" link below (with its own #:~:text= scroll-to-review fragment
+// appended) and the LocalBusiness structured data's sameAs (Sept 23,
+// 2026) - kept as one constant so the two can't drift apart.
+const ROVER_PROFILE_URL = 'https://www.rover.com/members/kim-m-dog-paradise-above-loch-lomond/';
+
 // Content adapted from the Bayview Boarding Rover profile - embedded
 // directly on the Landing page (see Landing above) rather than behind
 // its own "Learn more" tap, so first-time visitors can see who they're
 // trusting with their dog just by scrolling, before they commit to
 // starting the booking flow.
 function AboutContent({ onStart, aboutPhotos }) {
+  // Injects LocalBusiness structured data (Sept 23, 2026, on request) -
+  // every field here mirrors something already visibly on this page
+  // (name, phone, city/state, the same already-fuzzed map point used by
+  // the Location section below - never the exact address, same privacy
+  // stance - and the 5.0/21-ratings figures shown just below the
+  // gallery), which is what Google's structured-data guidelines
+  // actually require: it must match visible content, not add anything
+  // new. AboutContent only renders as part of Landing, so this only
+  // mounts once per visit to the landing page - but Landing itself
+  // unmounts/remounts when navigating mid-booking back to it via the
+  // header wordmark (see that test), so cleanup on unmount matters here
+  // to avoid piling up duplicate <script> tags in <head> each time.
+  useEffect(() => {
+    const [latitude, longitude] = ABOUT_MAP_COORDS.split(',').map(Number);
+    const script = document.createElement('script');
+    script.type = 'application/ld+json';
+    script.textContent = JSON.stringify({
+      '@context': 'https://schema.org',
+      '@type': 'LocalBusiness',
+      name: 'Bayview Boarding',
+      // Kept in sync by hand with public/index.html's meta description -
+      // same duplication trade-off already accepted there for og:image
+      // (see CLAUDE.md's SEO & Analytics section).
+      description: 'Home-based dog boarding in San Rafael, CA, run by Kim Miller and Estee Fletter. Book a stay, see photos and reviews, and get an instant cost estimate.',
+      image: `${window.location.origin}${process.env.PUBLIC_URL}/img/hero-dog.jpg`,
+      url: `${window.location.origin}${process.env.PUBLIC_URL}/`,
+      telephone: SETTINGS.PHONE,
+      address: { '@type': 'PostalAddress', addressLocality: 'San Rafael', addressRegion: 'CA', addressCountry: 'US' },
+      geo: { '@type': 'GeoCoordinates', latitude, longitude },
+      sameAs: [ROVER_PROFILE_URL],
+      aggregateRating: { '@type': 'AggregateRating', ratingValue: '5.0', reviewCount: '21', bestRating: '5' },
+    });
+    document.head.appendChild(script);
+    return () => script.remove();
+  }, []);
+
   return (
     <>
       <h1 className="about-title about-title--center">Dog Paradise <br />Above <br />Loch Lomond</h1>
+      <p className="about-tagline">
+        Home-based dog boarding in San Rafael, CA, in Marin County's Loch
+        Lomond neighborhood, right at the China Camp State Park trailhead.
+      </p>
       <p>
           We specialize in providing a consistent family experience for your
           dog to come back to time and again. Our home sits on the China Camp
@@ -2573,7 +2619,7 @@ function AboutContent({ onStart, aboutPhotos }) {
           <span className="stars-inline">★★★★★</span> <strong>5.0</strong> ·{' '}
           <a
             className="link-blue"
-            href="https://www.rover.com/members/kim-m-dog-paradise-above-loch-lomond/#:~:text=be%20cared%20for.-,View,-all"
+            href={`${ROVER_PROFILE_URL}#:~:text=be%20cared%20for.-,View,-all`}
             target="_blank"
             rel="noopener noreferrer"
           >

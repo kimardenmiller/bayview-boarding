@@ -67,6 +67,10 @@
 .about-content { max-width: 560px; margin: 0 auto; padding: 28px 20px 48px; }
 .about-title { font-family: 'Playfair Display', serif; font-size: 1.7rem; font-weight: 600; color: #2C3E50; margin-bottom: 16px; }
 .about-title--center { text-align: center; }
+/* A local-search keyword line under the About title (Sept 23, 2026, on
+   request) - styled quieter than the body copy so it reads as a
+   location tagline, not another sentence of the bio itself. */
+.about-content p.about-tagline { text-align: center; font-size: 0.82rem; color: #6B7A8A; margin-top: -8px; margin-bottom: 18px; }
 .about-gallery { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 24px; }
 .about-gallery-img { width: 100%; height: 110px; object-fit: cover; border-radius: 6px; display: block; cursor: zoom-in; transition: box-shadow .15s ease; }
 /* Grows up to the photo's own full resolution on hover (Sept 22, 2026,

@@ -2,6 +2,7 @@ import { render, screen, fireEvent, waitFor, within } from '@testing-library/rea
 import userEvent from '@testing-library/user-event';
 import App, { formatDate, calcAge, calcCost, calcCostBreakdown, formatCostBreakdownText, isHolidayNight, getHolidayWindows, todayISO, formatMoney } from './App';
 import { supabase } from './supabase';
+import { SETTINGS } from './settings';
 
 jest.mock('./supabase');
 
@@ -859,6 +860,39 @@ describe('Landing — About Us, embedded on the home page', () => {
     const starRows = document.querySelectorAll('.about-review-stars');
     expect(starRows.length).toBe(17);
     starRows.forEach(row => expect(row.textContent).toBe('★★★★★'));
+  });
+
+  test('shows a keyword-bearing tagline under the About title, for local search (Sept 23, 2026, on request)', () => {
+    render(<App />);
+    expect(screen.getByText(/Home-based dog boarding in San Rafael, CA/)).toBeInTheDocument();
+    expect(screen.getByText(/Marin County/)).toBeInTheDocument();
+  });
+
+  test('injects LocalBusiness structured data (JSON-LD) matching what\'s visibly on the page (Sept 23, 2026, on request)', () => {
+    render(<App />);
+    const script = document.querySelector('script[type="application/ld+json"]');
+    expect(script).toBeInTheDocument();
+    const data = JSON.parse(script.textContent);
+    expect(data['@type']).toBe('LocalBusiness');
+    expect(data.name).toBe('Bayview Boarding');
+    expect(data.telephone).toBe(SETTINGS.PHONE);
+    expect(data.address.addressLocality).toBe('San Rafael');
+    expect(data.address.addressRegion).toBe('CA');
+    // the same already-fuzzed point the map uses (~300 yards off the
+    // real address) - never the exact address, same privacy stance.
+    expect(data.geo.latitude).toBeCloseTo(37.980802);
+    expect(data.geo.longitude).toBeCloseTo(-122.484319);
+    // must match what's already visibly shown ("5.0", "21 ratings on Rover")
+    expect(data.aggregateRating.ratingValue).toBe('5.0');
+    expect(data.aggregateRating.reviewCount).toBe('21');
+    expect(data.sameAs).toContain('https://www.rover.com/members/kim-m-dog-paradise-above-loch-lomond/');
+  });
+
+  test('does not duplicate the structured-data script when navigating away from and back to the landing page', async () => {
+    await fillStep1();
+    fireEvent.click(screen.getByText('Bayview Boarding')); // back to landing, re-mounting About
+    await screen.findByText('Dog Paradise Above Loch Lomond');
+    expect(document.querySelectorAll('script[type="application/ld+json"]').length).toBe(1);
   });
 
   test('the "Book My Stay" button at the bottom of the About section starts the booking flow directly (JK\'s suggestion)', async () => {

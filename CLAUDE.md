@@ -472,11 +472,30 @@ server-side rendering, so a crawler that doesn't execute JS still sees
 only an empty shell - true SEO here is inherently limited by that, not
 something this pass changes.
 
+`LocalBusiness` structured data (JSON-LD, Sept 23, 2026, on request) is
+injected client-side (a `useEffect` in AboutContent, src/App.js) rather
+than as a static `<script>` in public/index.html, for the same
+one-source-of-truth reason as everything else in this section: its
+`aggregateRating` (5.0 / 21 reviews) and address have to stay in sync
+with what's already visibly on the About page (Google's own guideline
+is that structured data must match visible content), and that's easiest
+to guarantee by deriving it from the same render, not hand-duplicating
+numbers into a second static block. This only works because Google
+itself renders JS before reading structured data (true since ~2019); a
+non-JS crawler won't see it, same limitation as the paragraph above.
+`geo` uses the SAME already-fuzzed point (~300 yards off the real
+address) the Location section's map already uses - never the real
+address. The About section also gained a one-line tagline right under
+its title ("Home-based dog boarding in San Rafael, CA, in Marin
+County's...") specifically to put the primary local-search keyword
+phrase in the page's actual visible text, not just in meta tags a
+visitor never reads.
+
 ## Key files
 - src/App.js — main app
 - src/settings.js — all configurable values (rates, vets, messages, packing list)
 - src/waiver.js — full waiver text
-- src/App.test.js — 220 passing tests (TDD), Supabase mocked via src/__mocks__/supabase.js
+- src/App.test.js — 223 passing tests (TDD), Supabase mocked via src/__mocks__/supabase.js
 - src/supabase.js — creates the Supabase client from REACT_APP_SUPABASE_URL/_KEY (falling back to production's own public values) - see Staging environment above for how the staging build overrides these
 - src/index.js — app entry point; also where Google Analytics loads (production only) and staging's noindex meta tag gets injected - see SEO & Analytics above
 - supabase/functions/send-contact/index.ts — public Contact Us form handler: relays name/email-or-phone/message to Kim & Estee by SMS (reuses KIM_PHONE/ESTEE_PHONE). Deployed normally (no --no-verify-jwt) since it's called via the Supabase JS client like settings/lookup-client/submit-booking
