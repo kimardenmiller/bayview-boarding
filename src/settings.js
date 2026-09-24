@@ -5,7 +5,15 @@ export const SETTINGS = {
 
   // ── Pricing ───────────────────────────────────────────────────────────────
   DEFAULT_DAY_RATE: 105,         // $ per 24 hours
-  MIN_HOURS: 24,                 // minimum billable hours
+  // Fallback default only (Sept 24, 2026) - the real, admin-editable
+  // value now lives in Supabase's `settings` table (minimum_stay
+  // column), same pattern as day rate. Replaces a MIN_HOURS constant
+  // that lived here but was never actually wired into calcCostBreakdown
+  // (App.js) - a stay shorter than 24 hours billed at its exact
+  // fractional length, with no floor at all (Suggested by Estee via
+  // Submit Idea, Sept 23, 2026: "24 hour minimum needs updating. It's
+  // now prorating for less than 24 hour stay").
+  DEFAULT_MINIMUM_STAY: 1,       // days - the shortest a stay is ever billed as
   MULTI_DOG_DISCOUNT: 0.10,      // 10% off the per-night rate for each additional dog (uncapped)
   HOLIDAY_UPCHARGE: 0.30,        // +30% on any night inside a holiday window (see calcHolidayWindows)
 

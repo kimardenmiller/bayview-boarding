@@ -37,6 +37,7 @@ interface AboutPhoto {
 
 interface SettingsRow {
   day_rate: number;
+  minimum_stay: number;
   multi_dog_discount: number;
   holiday_upcharge: number;
   vets: string[];
@@ -62,13 +63,14 @@ interface SettingsRow {
 // that must never reach a public read, since those are the actual phone
 // numbers those placeholders get filled with.
 const PUBLIC_COLUMNS =
-  "day_rate, multi_dog_discount, holiday_upcharge, vets, packing_list, sms_confirmation, sms_reminder, sms_billing, sms_pickup_reminder, sms_footer, sms_request_received, sms_denied, about_photos";
+  "day_rate, minimum_stay, multi_dog_discount, holiday_upcharge, vets, packing_list, sms_confirmation, sms_reminder, sms_billing, sms_pickup_reminder, sms_footer, sms_request_received, sms_denied, about_photos";
 const ADMIN_ONLY_COLUMNS = "primary_manager_phone, secondary_manager_phone, default_broadcast_message";
 const ADMIN_COLUMNS = `${PUBLIC_COLUMNS}, ${ADMIN_ONLY_COLUMNS}`;
 
 function toClientShape(row: SettingsRow) {
   const shape: Record<string, unknown> = {
     dayRate: row.day_rate,
+    minimumStay: row.minimum_stay,
     multiDogDiscount: row.multi_dog_discount,
     holidayUpcharge: row.holiday_upcharge,
     vets: row.vets,
@@ -94,6 +96,7 @@ function toClientShape(row: SettingsRow) {
 
 interface UpdatesInput {
   dayRate?: number;
+  minimumStay?: number;
   multiDogDiscount?: number;
   holidayUpcharge?: number;
   vets?: string[];
@@ -143,6 +146,11 @@ function validateUpdates(updates: UpdatesInput): string[] {
   if (updates.dayRate !== undefined) {
     if (typeof updates.dayRate !== "number" || !Number.isFinite(updates.dayRate) || updates.dayRate <= 0) {
       errors.push("dayRate must be a positive number");
+    }
+  }
+  if (updates.minimumStay !== undefined) {
+    if (typeof updates.minimumStay !== "number" || !Number.isFinite(updates.minimumStay) || updates.minimumStay <= 0) {
+      errors.push("minimumStay must be a positive number");
     }
   }
   if (updates.multiDogDiscount !== undefined) {
@@ -233,6 +241,7 @@ export async function handleRequest(req: Request): Promise<Response> {
 
       const patch: Record<string, unknown> = {};
       if (updates.dayRate !== undefined) patch.day_rate = updates.dayRate;
+      if (updates.minimumStay !== undefined) patch.minimum_stay = updates.minimumStay;
       if (updates.multiDogDiscount !== undefined) patch.multi_dog_discount = updates.multiDogDiscount;
       if (updates.holidayUpcharge !== undefined) patch.holiday_upcharge = updates.holidayUpcharge;
       if (updates.vets !== undefined) patch.vets = updates.vets.map((v) => v.trim());

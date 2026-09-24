@@ -9,6 +9,7 @@ const { handleRequest } = await import('./index.ts');
 
 const DEFAULT_ROW = {
   day_rate: 105,
+  minimum_stay: 1,
   multi_dog_discount: 0.10,
   holiday_upcharge: 0.30,
   vets: ['Marin Pet Hospital — (415) 479-8387', 'VCA Marin Animal Hospital — (415) 454-5225'],
@@ -93,7 +94,7 @@ Deno.test('a plain read requires no password (public) and never includes the man
     assertEquals(res.status, 200);
     const data = await res.json();
     assertEquals(data, {
-      dayRate: 105, multiDogDiscount: 0.10, holidayUpcharge: 0.30,
+      dayRate: 105, minimumStay: 1, multiDogDiscount: 0.10, holidayUpcharge: 0.30,
       vets: DEFAULT_ROW.vets,
       packingList: DEFAULT_ROW.packing_list,
       smsConfirmation: DEFAULT_ROW.sms_confirmation,
@@ -171,6 +172,33 @@ Deno.test('updates just the day rate, leaving other fields untouched', async () 
     assertEquals(data.dayRate, 120);
     assertEquals(data.multiDogDiscount, 0.10); // unchanged
     assertEquals(stub.db.settings.day_rate, 120);
+  } finally {
+    stub.restore();
+  }
+});
+
+Deno.test('updates the minimum stay, leaving other fields untouched (Sept 24, 2026)', async () => {
+  const stub = stubSupabase();
+  try {
+    const res = await handleRequest(postRequest({ password: ADMIN_PASSWORD, updates: { minimumStay: 2 } }));
+    assertEquals(res.status, 200);
+    const data = await res.json();
+    assertEquals(data.minimumStay, 2);
+    assertEquals(data.dayRate, 105); // unchanged
+    assertEquals(stub.db.settings.minimum_stay, 2);
+  } finally {
+    stub.restore();
+  }
+});
+
+Deno.test('rejects a non-positive minimum stay, without touching the database', async () => {
+  const stub = stubSupabase();
+  try {
+    const zero = await handleRequest(postRequest({ password: ADMIN_PASSWORD, updates: { minimumStay: 0 } }));
+    assertEquals(zero.status, 400);
+    const negative = await handleRequest(postRequest({ password: ADMIN_PASSWORD, updates: { minimumStay: -1 } }));
+    assertEquals(negative.status, 400);
+    assertEquals(stub.calls.length, 0);
   } finally {
     stub.restore();
   }

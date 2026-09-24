@@ -48,12 +48,16 @@ Kim Miller and Estee Fletter at 210 Bayview Drive, San Rafael, CA.
   button) — autofills name/email/vet and every known dog on file, growing
   the dog-page count to match
 - Cost estimate based on drop-off/pick-up times at an admin-configurable
-  day rate (default $105/day), holiday upcharge (default +30%), and
+  day rate (default $105/day), holiday upcharge (default +30%),
   multi-dog discount (default 10% off each additional dog's nightly rate,
-  uncapped) — all three, plus the vet clinic list, the packing list, and
-  the 3 SMS message templates, are loaded from Supabase on every page load
-  (public read) and editable in the admin panel (Sept 15 (4), packing
-  list/SMS templates added Sept 16 (5) — see Data model below)
+  uncapped), and minimum stay (default 1 day - Sept 24, 2026, on
+  request: a stay shorter than this bills as exactly this many days, a
+  FLOOR on the total, not rounding every partial day up - see
+  calcCostBreakdown) — all four, plus the vet clinic list, the packing
+  list, and the 3 SMS message templates, are loaded from Supabase on
+  every page load (public read) and editable in the admin panel (Sept
+  15 (4), packing list/SMS templates added Sept 16 (5) — see Data model
+  below)
 - Past check-in dates are rejected, client-side (StepDates) and
   server-side (submit-booking, the actual boundary); a same-day stay's
   pick-up must be after its drop-off (no such constraint across days)
@@ -100,12 +104,20 @@ Kim Miller and Estee Fletter at 210 Bayview Drive, San Rafael, CA.
   Sept 18; "Requests" added above everything else Sept 21, 2026): a
   "Requests" section — every pending stay (a submission admin hasn't
   approved or denied yet), sorted earliest check-in first; each card
-  expands to show the request's details (view-only - no Edit/billing
-  fields, since it isn't a real booking yet) plus "Approve" (sends the
-  real booking confirmation text, then marks it approved) and "Deny"
-  (an optional typed reason, folded into a decline text sent before the
-  stay is marked denied - same "text first, then persist" ordering as
-  billing below). Then an "Unbilled Stays" review list — every approved-
+  expands to show the request's details, including each dog's own
+  breed/DOB/aggression/health flags and photos (Sept 24, 2026 - every
+  admin list shows this now, not just Past Stays, see below), plus an
+  "Edit" toggle (Sept 24, 2026, on request - correctable dates/times/
+  estimated cost, the same Daily Rate/Holiday Upcharge %/Recalculate
+  machinery Unbilled Stays' own Edit already had; "Save" persists via
+  admin-data's editStay action - deliberately never touches billed_at
+  or approval_status, since correcting a request isn't a decision;
+  "Cancel" discards), "Approve" (sends the real booking confirmation
+  text, then marks it approved) and "Deny" (an optional typed reason,
+  folded into a decline text sent before the stay is marked denied -
+  same "text first, then persist" ordering as billing below; Edit
+  replaces Approve/Deny with Save/Cancel while active, rather than
+  showing both at once). Then an "Unbilled Stays" review list — every approved-
   but-never-billed stay, past, in-progress, or future, sorted earliest
   check-in first (previously limited to already-checked-out stays); each
   card is a
@@ -136,7 +148,10 @@ Kim Miller and Estee Fletter at 210 Bayview Drive, San Rafael, CA.
   click-to-expand card Unbilled Stays/Awaiting Payment use (each card
   has an explicit "View"/"Hide" button - Sept 21, 2026 - previously the
   whole row was clickable with no visible sign of it) - a shared
-  multi-dog stay shows as one card naming every dog. A "Site
+  multi-dog stay shows as one card naming every dog. Every dog's own
+  breed/DOB/aggression/health snapshot and photos show here too, same
+  as every other list now (Sept 24, 2026 - previously only Past Stays
+  actually showed this, see perDogEntryFor in App.js). A "Site
   Settings" header (Sept 18, 2026) then separates those day-to-day
   lookup sections (Requests/Unbilled Stays/Awaiting Payment/Past Stays)
   from everything below: a "💡 Ideas & Bugs" section
@@ -146,7 +161,7 @@ Kim Miller and Estee Fletter at 210 Bayview Drive, San Rafael, CA.
   "remove" below) alongside them, and a
   "📢 Testers" section (Sept 17 — see testers below) to maintain a
   tester list and broadcast a personally-greeted SMS to all of them,
-  then day rate/discount/holiday/vet-list/packing-list/about-photos/
+  then day rate/minimum-stay (Sept 24, 2026)/discount/holiday/vet-list/packing-list/about-photos/
   SMS-template settings (the packing list's items are editable in place
   and reorderable via Up/Down buttons, not just add/remove - Sept 19,
   2026; "About Photos" - Sept 21, 2026 - is the same idea plus a
@@ -209,7 +224,8 @@ direct client insert — see supabase/functions/submit-booking/index.ts.
 sms_billing added Sept 16 (5); sms_footer/primary_manager_phone/
 secondary_manager_phone added Sept 18, 2026; default_broadcast_message
 added Sept 19, 2026; sms_request_received/sms_denied/about_photos added
-Sept 21, 2026) is a singleton row (day rate, multi-dog discount, holiday
+Sept 21, 2026; minimum_stay added Sept 24, 2026) is a singleton row (day
+rate, minimum stay in days, multi-dog discount, holiday
 upcharge, vet clinic list, packing list, the About page's photo list,
 6 SMS templates, the shared footer, 2 manager phone numbers, the tester
 broadcast's saved default message) - the admin-configurable values
@@ -495,7 +511,7 @@ visitor never reads.
 - src/App.js — main app
 - src/settings.js — all configurable values (rates, vets, messages, packing list)
 - src/waiver.js — full waiver text
-- src/App.test.js — 223 passing tests (TDD), Supabase mocked via src/__mocks__/supabase.js
+- src/App.test.js — 233 passing tests (TDD), Supabase mocked via src/__mocks__/supabase.js
 - src/supabase.js — creates the Supabase client from REACT_APP_SUPABASE_URL/_KEY (falling back to production's own public values) - see Staging environment above for how the staging build overrides these
 - src/index.js — app entry point; also where Google Analytics loads (production only) and staging's noindex meta tag gets injected - see SEO & Analytics above
 - supabase/functions/send-contact/index.ts — public Contact Us form handler: relays name/email-or-phone/message to Kim & Estee by SMS (reuses KIM_PHONE/ESTEE_PHONE). Deployed normally (no --no-verify-jwt) since it's called via the Supabase JS client like settings/lookup-client/submit-booking
@@ -504,14 +520,14 @@ visitor never reads.
 - supabase/functions/send-pickup-reminders/index.ts — daily cron target, the pickup-side counterpart to send-reminders: finds stays checking out tomorrow, texts each via send-confirmation (type "pickup"), marks pickup_reminder_sent_at. Deployed with `--no-verify-jwt` - same care needed on redeploy as send-reminders
 - public/img/about/ — the 6 numbered photos on the About page, served from the public folder (not bundled) and referenced via process.env.PUBLIC_URL since the app is hosted at a subpath
 - supabase/functions/send-reminders/index.ts — daily cron target (pg_cron + pg_net, see the migration): finds stays checking in tomorrow, fetches the current sms_reminder template + packing_list from `settings`, texts each via send-confirmation, marks reminder_sent_at. Deployed with `--no-verify-jwt`; checks its own CRON_SECRET instead (see Data model for how that secret is set up without ever being committed) - be careful to keep that flag on every redeploy (a plain `supabase functions deploy send-reminders` silently re-enables JWT verification and would break the cron, same bug class as the receive-sms incident)
-- supabase/functions/settings/index.ts — public read (PUBLIC_COLUMNS) / password-gated read or write (ADMIN_COLUMNS) of day rate, multi-dog discount, holiday upcharge, vet list, packing list, the About page's photo list (about_photos - Sept 21, 2026, just `{path, alt}` pairs; the actual files live in Storage, see about-photos below), the 6 SMS templates (confirmation/drop-off reminder/pickup reminder/billing/request-received/denied - the last 2 added Sept 21, 2026), the shared sms_footer, and (admin-only) the 2 manager phone numbers plus the tester broadcast's default_broadcast_message
+- supabase/functions/settings/index.ts — public read (PUBLIC_COLUMNS) / password-gated read or write (ADMIN_COLUMNS) of day rate, minimum stay in days (Sept 24, 2026, must be positive), multi-dog discount, holiday upcharge, vet list, packing list, the About page's photo list (about_photos - Sept 21, 2026, just `{path, alt}` pairs; the actual files live in Storage, see about-photos below), the 6 SMS templates (confirmation/drop-off reminder/pickup reminder/billing/request-received/denied - the last 2 added Sept 21, 2026), the shared sms_footer, and (admin-only) the 2 manager phone numbers plus the tester broadcast's default_broadcast_message
 - supabase/functions/about-photos/index.ts — manages the actual image files behind settings.about_photos (Sept 21, 2026); entirely admin-password-gated, 2 actions: upload (multipart/form-data: password, file, alt? - stores the file in the "about-photos" Storage bucket under a fresh random name, never the client's own filename, and appends {path, alt} to settings.about_photos) and delete (JSON: password, action 'delete', path - removes the file from Storage AND drops that entry from settings.about_photos in the same call). Reordering/alt-text edits for existing photos don't touch this function at all - they're just settings.about_photos array edits, saved through the settings function like everything else there
 - supabase/functions/submit-booking/index.ts — handles booking submission: find-or-create owner (by phone) and each dog (by owner+name), inserts the stay (incl. waiver_snapshot, approval_status 'pending' - Sept 21, 2026) + stay_dogs snapshot links (service role key). Each dog's optional photoPaths (Sept 21, 2026 as photoPath; array since Sept 22, 2026, from the dog-photos function's own upload responses, one call per file) is saved to dogs.photo_paths ONLY when at least one new one is given - a returning dog's existing photo set is never silently cleared - and snapshotted onto stay_dogs.photo_paths either way (falling back to whatever's currently on the dog's profile if none came with this submission)
 - supabase/functions/dog-photos/index.ts — lets an owner upload a photo of their dog during booking (Sept 21, 2026; multiple per dog since Sept 22, 2026 - this function itself is unchanged, since it already handled one file per call, the client just calls it once per selected file now); public/unauthenticated (no password - a first-time visitor has none yet), same trust boundary as submit-booking/feedback's own public writes. One action: upload (multipart/form-data: file) - stores it in the private "dog-photos" Storage bucket under a fresh random name, never the client's own filename, and returns {path}, which the client then adds to that dog's photoPaths array in the submit-booking payload. No delete action (out of scope, see FIXES.txt)
 - supabase/functions/send-confirmation/index.ts — Twilio SMS function (outbound); accepts an optional message_template (the admin-edited settings text, with {placeholders} filled by fillTemplate, including {dogVerb} - "is"/"are" - {billingBreakdown} - the full cost math - and {denialReason} - Sept 21, 2026, resolves to "" when no reason was given, never a literal unfilled placeholder) + packing_list from the caller; falls back to its own hardcoded 6-message-type logic (confirmation/reminder/billing/pickup/request_received/denied) if no template is given. Every dollar placeholder ({finalCost}/{estimatedCost}) is run through formatDollars() first (whole dollars, comma-separated). Has its own direct DB read (service role, fetchFooterAndPhones) for sms_footer and the 2 manager phone numbers (Sept 18, 2026) - fills {primaryManagerPhone}/{secondaryManagerPhone} and appends the filled footer once to every message, and uses the same numbers as the destination for the Kim/Estee copy of every client send (notifyOwnersOfClientText). Called directly by the client at booking time (type request_received - Sept 21, 2026), and by send-reminders/send-pickup-reminders/the admin panel (confirmation on approve, denied on deny, billing, pickup) - has its own Deno test suite (index.test.ts), added Sept 16 (5)
 - supabase/functions/receive-sms/index.ts — inbound SMS webhook: auto-reply + relay to Kim/Estee. Deploy with `--no-verify-jwt` (see comment at top of file) or Twilio's webhook calls silently fail
 - supabase/functions/_shared/contact.ts — pure text builders + Twilio signature validator, shared by send-confirmation and receive-sms, unit-tested via `deno test`
-- supabase/functions/admin-data/index.ts — server-side admin password check + every dog (profile + owner + stay history, incl. approval_status/approved_at/denied_at/denial_reason/paid_at - Sept 21, 2026) (service role key, never exposed to client). Also handles billStay (Sept 17, 2026): saves corrected check-in/out/drop/pickup/cost and marks billed_at; approveStay/denyStay (Sept 21, 2026): mark a stay approved or denied (denyStay also saves an optional trimmed denial_reason) - both patch the DB and return the refreshed dog list, the actual SMS send is always a separate client-side send-confirmation call first (App.js), same "text actually went out" ordering as billStay; markPaid (Sept 21, 2026): just sets paid_at, no text send involved at all - there's no client-facing message this action is confirming went out. Every stay's photo_paths (if any) are also resolved to signed photoUrls (Sept 21, 2026 for one photo; array since Sept 22, 2026) before the response goes out, since the "dog-photos" bucket is private - a raw path alone isn't viewable; every distinct path across the WHOLE response is batch-signed once per fetch (1-hour TTL), and every stay always gets an explicit photoUrls array (empty when there are no photos), never left undefined
+- supabase/functions/admin-data/index.ts — server-side admin password check + every dog (profile + owner + stay history, incl. approval_status/approved_at/denied_at/denial_reason/paid_at - Sept 21, 2026) (service role key, never exposed to client). Also handles billStay (Sept 17, 2026): saves corrected check-in/out/drop/pickup/cost and marks billed_at; editStay (Sept 24, 2026, on request): the same field patch as billStay but never touches billed_at or approval_status - lets admin correct a still-pending request's details without that implying any decision was made; approveStay/denyStay (Sept 21, 2026): mark a stay approved or denied (denyStay also saves an optional trimmed denial_reason) - both patch the DB and return the refreshed dog list, the actual SMS send is always a separate client-side send-confirmation call first (App.js), same "text actually went out" ordering as billStay; markPaid (Sept 21, 2026): just sets paid_at, no text send involved at all - there's no client-facing message this action is confirming went out. Every stay's photo_paths (if any) are also resolved to signed photoUrls (Sept 21, 2026 for one photo; array since Sept 22, 2026) before the response goes out, since the "dog-photos" bucket is private - a raw path alone isn't viewable; every distinct path across the WHOLE response is batch-signed once per fetch (1-hour TTL), and every stay always gets an explicit photoUrls array (empty when there are no photos), never left undefined
 - supabase/functions/lookup-client/index.ts — returning-client autofill by phone: vet + every dog on file (returns only safe fields, never aggression/health)
 - supabase/migrations/ — schema history, including the Sept 14 dog-profiles reorg (owners/dogs/stays/stay_dogs) and the RLS lockdown history for the old flat `stays` table
 - FIXES.txt — current fix list and backlog

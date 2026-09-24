@@ -1,6 +1,6 @@
 BAYVIEW BOARDING — FIX LIST
 ============================
-Last updated: September 23, 2026 (2) (Custom domain bayviewboarding.com associated with GitHub Pages - DNS live, HTTPS cert pending)
+Last updated: September 24, 2026 (Admin-configurable minimum stay, editable requests, and full dog detail on every admin list)
 
 NEXT CHANGE LIST (v1.5)
 -----------------------
@@ -43,6 +43,67 @@ DEFERRED (revisit only if it actually blocks something)
 
 COMPLETED
 ---------
+- Sept 24, 2026: Three requests together - checked the Submit Idea queue
+  (standing habit), found "24 hour minimum needs updating. It's now
+  prorating for less than 24 hour stay" (Estee) and "Would be nice to
+  have a photo for each dog" (Estee, already shipped Sept 21-22 - marked
+  Done, was just never updated in Admin), then on request:
+  1. Admin-configurable Minimum Stay (days), default 1. There was never
+     actually a minimum-stay rule wired up - src/settings.js had a
+     vestigial, never-referenced MIN_HOURS constant, but
+     calcCostBreakdown (App.js) always billed the exact fractional
+     number of hours booked with nothing to floor it (a real regression
+     from the Sept 18, 2026 change that deliberately removed the OLD
+     minimum - rounding every partial day up via Math.ceil - without
+     leaving a real floor in its place). New `settings.minimum_stay`
+     column (migration), public settings read/write same pattern as
+     day_rate, a new admin Site Settings field, and calcCostBreakdown's
+     own 9th parameter (minimumStay, defaulting to
+     DEFAULT_MINIMUM_STAY = 1) - a FLOOR on the total, not the old
+     Sept 18 ceiling-every-day behavior: a 30-hour stay still bills 1.25
+     days at minimumStay 1, never rounded to 2. Threaded through the
+     booking form's own live estimate (with a "{N}-day minimum" note),
+     submit-booking's stored estimate, and admin's billing recalculation.
+  2. "Allow editing of the stay while it is still in the request stage."
+     New admin-data action, editStay - deliberately separate from
+     billStay/approveStay/denyStay: patches check-in/out/drop/pickup/
+     estimated-cost only, never touches billed_at or approval_status,
+     since correcting a request's details isn't a decision or a bill.
+     Requests gained its own Edit toggle (reusing the same
+     editingStayId/billingFieldFor/costBreakdownFor machinery Unbilled
+     Stays already had) - Save persists via editStay and returns to the
+     normal Approve/Deny view; Cancel discards without saving.
+  3. "Show the dogs with the stays in the admin panel." Previously only
+     Past Stays actually showed each dog's breed/DOB/aggression/health -
+     Requests/Unbilled Stays/Awaiting Payment only showed photos and
+     names, which meant a pending REQUEST, of all things, showed admin
+     the LEAST detail to decide whether to approve. All four admin list
+     views now build the same shared perDogEntryFor shape (breed/DOB/
+     aggression/health/photos per dog) and share the same rendering,
+     replacing the old photos-only array that only 3 of the 4 views used.
+
+  Tests: calcCostBreakdown/calcCost gained a dedicated minimum-stay
+  describe block (a short stay floors to minimumStay; an already-longer
+  stay is unaffected, never rounded up; minimumStay: 0 restores pure
+  fractional billing, preserving the pre-Sept-24 test cases as explicit
+  opt-outs rather than deleting that coverage) - several existing tests
+  using sub-1-day stays were updated to either reflect the new default
+  floor or pass an explicit override, since they were written to prove
+  the old "no minimum" design this round partially reverses. New tests
+  for the admin Minimum Stay editor, the Requests Edit/Save/Cancel flow,
+  and breed/aggression/health now showing on Requests and Unbilled Stays.
+  settings gained coverage for minimumStay validation/updates; admin-data
+  gained coverage for editStay.
+  233 React + 197 Deno = 430/430 passing (the same pre-existing,
+  unrelated Deno flake as every other entry this week).
+
+  Verified live on both production and staging (now via bayviewboarding.
+  com - see below): migration applied, minimum_stay confirmed serializing
+  as a real number (not a string) through the live settings function
+  identically to day_rate on both; settings/admin-data redeployed to
+  both; both frontend bundles carry the new minimum-stay/editStay code
+  and correctly isolate their own Supabase project.
+
 - Sept 23, 2026 (2): Registered and associated a custom domain,
   bayviewboarding.com (Kim's follow-up to the SEO pass below - asked
   about a stable domain, registered it on Namecheap). Real DNS set up

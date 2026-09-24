@@ -160,6 +160,24 @@ export async function handleRequest(req: Request): Promise<Response> {
 
       const { error: updateErr } = await supabase.from("stays").update(patch).eq("id", stayId);
       if (updateErr) throw updateErr;
+    } else if (action === "editStay") {
+      // Lets admin correct a request's dates/times/estimated cost before
+      // deciding to approve or deny it (Sept 24, 2026, on request -
+      // "allow editing of the stay while it is still in the request
+      // stage"). Deliberately never touches billed_at or approval_status
+      // - unlike billStay above, this is a plain field correction, not a
+      // decision or a bill; the stay stays exactly as pending/approved/
+      // whatever it already was afterward.
+      if (!stayId) return json({ error: "stayId is required" }, 400);
+      const patch: Record<string, unknown> = {};
+      if (checkIn !== undefined) patch.check_in = checkIn;
+      if (checkOut !== undefined) patch.check_out = checkOut;
+      if (dropTime !== undefined) patch.drop_time = dropTime;
+      if (pickupTime !== undefined) patch.pickup_time = pickupTime;
+      if (estimatedCost !== undefined) patch.estimated_cost = estimatedCost;
+
+      const { error: updateErr } = await supabase.from("stays").update(patch).eq("id", stayId);
+      if (updateErr) throw updateErr;
     } else if (action === "approveStay") {
       // The client-side flow (App.js) sends the real confirmation text
       // FIRST, then calls this - same "action means it actually went

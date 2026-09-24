@@ -11,6 +11,7 @@ import './App.css';
 // admin-configurable values come from Supabase - see the settings table
 // migration and supabase/functions/settings/index.ts.
 const DEFAULT_RATE = SETTINGS.DEFAULT_DAY_RATE;
+const DEFAULT_MINIMUM_STAY = SETTINGS.DEFAULT_MINIMUM_STAY;
 const DEFAULT_MULTI_DOG_DISCOUNT = SETTINGS.MULTI_DOG_DISCOUNT;
 const DEFAULT_HOLIDAY_UPCHARGE = SETTINGS.HOLIDAY_UPCHARGE;
 // The editable vet clinic list, without the structural placeholder/"Other"
@@ -191,17 +192,27 @@ function isHolidayNight(dateISO) {
 // day via Math.ceil, with a 1-day minimum even for a same-day stay of a
 // few hours). A stay of exactly N whole days still bills N full days;
 // anything in between bills the exact fraction (e.g. 36 hours = 1.5
-// days = 1.5x the daily rate). No minimum charge is applied.
+// days = 1.5x the daily rate) - EXCEPT the stay is shorter than
+// minimumStay, in which case it's billed as exactly minimumStay days,
+// no more (Sept 24, 2026, on request from Estee via Submit Idea: "24
+// hour minimum needs updating. It's now prorating for less than 24
+// hour stay" - the Sept 18 change above removed a minimum entirely
+// rather than actually leaving one properly in place, so a 6-hour
+// same-day stay was billing at 25% of a full day's rate with nothing
+// to catch it). This is deliberately a FLOOR on the total, not the old
+// Sept 18 behavior of rounding every partial day up - a 30-hour stay
+// still bills 1.25 days, not 2, when minimumStay is 1.
 function calcCostBreakdown(
   checkIn, checkOut, dropTime, pickupTime, rate, numberOfDogs = 1,
-  multiDogDiscount = DEFAULT_MULTI_DOG_DISCOUNT, holidayUpcharge = DEFAULT_HOLIDAY_UPCHARGE
+  multiDogDiscount = DEFAULT_MULTI_DOG_DISCOUNT, holidayUpcharge = DEFAULT_HOLIDAY_UPCHARGE,
+  minimumStay = DEFAULT_MINIMUM_STAY
 ) {
   if (!checkIn || !checkOut || !dropTime || !pickupTime) return null;
   const drop = new Date(`${checkIn}T${dropTime}`);
   const pickup = new Date(`${checkOut}T${pickupTime}`);
   const hours = (pickup - drop) / 3600000;
   if (hours <= 0) return null;
-  const nights = hours / 24; // fractional number of days billed
+  const nights = Math.max(hours / 24, minimumStay); // fractional number of days billed, floored at minimumStay
   // Float-safe: an exact multiple of 24h (e.g. 48.00000000000001 due to
   // DST-free millisecond math) must still count as whole days, not spill
   // a near-zero fraction into an extra billed day.
@@ -240,9 +251,10 @@ function calcCostBreakdown(
 // separate export since most call sites only need the number.
 function calcCost(
   checkIn, checkOut, dropTime, pickupTime, rate, numberOfDogs = 1,
-  multiDogDiscount = DEFAULT_MULTI_DOG_DISCOUNT, holidayUpcharge = DEFAULT_HOLIDAY_UPCHARGE
+  multiDogDiscount = DEFAULT_MULTI_DOG_DISCOUNT, holidayUpcharge = DEFAULT_HOLIDAY_UPCHARGE,
+  minimumStay = DEFAULT_MINIMUM_STAY
 ) {
-  const breakdown = calcCostBreakdown(checkIn, checkOut, dropTime, pickupTime, rate, numberOfDogs, multiDogDiscount, holidayUpcharge);
+  const breakdown = calcCostBreakdown(checkIn, checkOut, dropTime, pickupTime, rate, numberOfDogs, multiDogDiscount, holidayUpcharge, minimumStay);
   return breakdown ? breakdown.total.toFixed(2) : null;
 }
 
@@ -693,7 +705,7 @@ function formatCostBreakdownText(breakdown, multiDogDiscount) {
   return lines.join('\n');
 }
 
-function StepDates({ data, onChange, onNext, onBack, rate, multiDogDiscount, holidayUpcharge }) {
+function StepDates({ data, onChange, onNext, onBack, rate, minimumStay, multiDogDiscount, holidayUpcharge }) {
   const [errors, setErrors] = useState({});
 
   function getErrors() {
@@ -731,7 +743,7 @@ function StepDates({ data, onChange, onNext, onBack, rate, multiDogDiscount, hol
   // unexplained grey button once every field has *something* in it.
   const isComplete = !!(data.checkIn && data.checkOut && data.dropTime && data.pickupTime);
 
-  const breakdown = calcCostBreakdown(data.checkIn, data.checkOut, data.dropTime, data.pickupTime, rate, data.dogs.length, multiDogDiscount, holidayUpcharge);
+  const breakdown = calcCostBreakdown(data.checkIn, data.checkOut, data.dropTime, data.pickupTime, rate, data.dogs.length, multiDogDiscount, holidayUpcharge, minimumStay);
 
   return (
     <div className="step">
@@ -758,7 +770,7 @@ function StepDates({ data, onChange, onNext, onBack, rate, multiDogDiscount, hol
           <strong>${formatMoney(breakdown.total)}</strong>
           <CostBreakdown breakdown={breakdown} multiDogDiscount={multiDogDiscount} />
           <div className="cost-note">
-            Based on ${formatMoney(rate)}/day, billed for the actual length of your dog's stay · +{holidayUpcharge * 100}% on holidays
+            Based on ${formatMoney(rate)}/day, billed for the actual length of your dog's stay ({minimumStay}-day minimum) · +{holidayUpcharge * 100}% on holidays
             {data.dogs.length > 1 && ` · ${multiDogDiscount * 100}% off each additional dog`}
             {' '}· Final invoice at pickup
           </div>
@@ -880,7 +892,7 @@ function Confirmation({ stay, onNewBooking }) {
 }
 
 function AdminView({
-  onClose, rate, setRate, multiDogDiscount, setMultiDogDiscount,
+  onClose, rate, setRate, minimumStay, setMinimumStay, multiDogDiscount, setMultiDogDiscount,
   holidayUpcharge, setHolidayUpcharge, vets, setVets,
   packingList, setPackingList, aboutPhotos, setAboutPhotos,
   smsTemplates, setSmsTemplates,
@@ -896,6 +908,7 @@ function AdminView({
   const [selectedOwnerPhone, setSelectedOwnerPhone] = useState(null);
   const [loading, setLoading] = useState(false);
   const [editRate, setEditRate] = useState(rate);
+  const [editMinimumStay, setEditMinimumStay] = useState(String(minimumStay));
   const [editMultiDogDiscount, setEditMultiDogDiscount] = useState(String(multiDogDiscount * 100));
   const [editHolidayUpcharge, setEditHolidayUpcharge] = useState(String(holidayUpcharge * 100));
   const [editVets, setEditVets] = useState(vets);
@@ -969,6 +982,13 @@ function AdminView({
   const [sendingRequestId, setSendingRequestId] = useState(null);
   const [requestActionStatus, setRequestActionStatus] = useState({});
   const [denyReasonDrafts, setDenyReasonDrafts] = useState({});
+  // Editing a request's own dates/times/estimated cost before deciding
+  // (Sept 24, 2026, on request) - separate from sendingRequestId (that
+  // one specifically gates Approve/Deny, which send an SMS first; saving
+  // an edit here never does). Reuses editingStayId/billingEdits/
+  // billingFieldFor/costBreakdownFor - all already keyed by stay id and
+  // generic, same as Unbilled Stays' own Edit.
+  const [savingRequestEditId, setSavingRequestEditId] = useState(null);
   // Payment tracking (Sept 21, 2026, on request) - "billed" alone never
   // answered "has this actually been paid?"; marking paid is a plain
   // admin decision, not tied to any text send (unlike approve/deny/bill,
@@ -1033,6 +1053,7 @@ function AdminView({
     // visible, rather than on every prop change (which would risk
     // clobbering an admin's in-progress, unsaved edits).
     setEditRate(rate);
+    setEditMinimumStay(String(minimumStay));
     setEditMultiDogDiscount(String(multiDogDiscount * 100));
     setEditHolidayUpcharge(String(holidayUpcharge * 100));
     setEditVets(vets);
@@ -1058,10 +1079,12 @@ function AdminView({
       return false;
     }
     setRate(data.dayRate);
+    setMinimumStay(data.minimumStay);
     setMultiDogDiscount(data.multiDogDiscount);
     setHolidayUpcharge(data.holidayUpcharge);
     setVets(data.vets);
     setEditRate(data.dayRate);
+    setEditMinimumStay(String(data.minimumStay));
     setEditMultiDogDiscount(String(data.multiDogDiscount * 100));
     setEditHolidayUpcharge(String(data.holidayUpcharge * 100));
     setEditVets(data.vets);
@@ -1307,7 +1330,7 @@ function AdminView({
     const dayRate = Number(billingFieldFor(stay, 'dayRate', String(rate)));
     const holidayPct = Number(billingFieldFor(stay, 'holidayUpchargePct', String(holidayUpcharge * 100)));
     const numberOfDogs = stay.number_of_dogs || (stay.dogNames ? stay.dogNames.length : 1);
-    return calcCostBreakdown(checkIn, checkOut, dropTime, pickupTime, dayRate, numberOfDogs, multiDogDiscount, holidayPct / 100);
+    return calcCostBreakdown(checkIn, checkOut, dropTime, pickupTime, dayRate, numberOfDogs, multiDogDiscount, holidayPct / 100, minimumStay);
   }
 
   // Recomputes a suggested total from the (possibly-just-edited)
@@ -1376,6 +1399,38 @@ function AdminView({
     }
     setDogs(data.dogs);
     setTotalStays(data.totalStays);
+  }
+
+  // Saves a request's corrected dates/times/estimated cost (Sept 24,
+  // 2026, on request - "allow editing of the stay while it is still in
+  // the request stage") via admin-data's editStay action - unlike
+  // billStay/approveRequest/denyRequest below, this never sends any SMS
+  // and never touches approval_status - it's a plain field correction,
+  // still fully pending afterward, so admin can review the corrected
+  // numbers before actually deciding.
+  async function saveRequestEdits(stay) {
+    const checkIn = billingFieldFor(stay, 'checkIn', stay.check_in);
+    const checkOut = billingFieldFor(stay, 'checkOut', stay.check_out);
+    const dropTime = billingFieldFor(stay, 'dropTime', stay.drop_time ? stay.drop_time.slice(0, 5) : '');
+    const pickupTime = billingFieldFor(stay, 'pickupTime', stay.pickup_time ? stay.pickup_time.slice(0, 5) : '');
+    const estimatedCostRaw = billingFieldFor(stay, 'finalCost', stay.estimated_cost != null ? String(stay.estimated_cost) : '');
+    setSavingRequestEditId(stay.id);
+    setRequestActionStatus(prev => ({ ...prev, [stay.id]: null }));
+    const { data, error: fnError } = await supabase.functions.invoke('admin-data', {
+      body: {
+        password: pw, action: 'editStay', stayId: stay.id,
+        checkIn, checkOut, dropTime: dropTime || null, pickupTime: pickupTime || null,
+        estimatedCost: estimatedCostRaw ? Number(estimatedCostRaw) : null,
+      },
+    });
+    setSavingRequestEditId(null);
+    if (fnError || data?.error) {
+      setRequestActionStatus(prev => ({ ...prev, [stay.id]: 'Failed to save. Please try again.' }));
+      return;
+    }
+    setDogs(data.dogs);
+    setTotalStays(data.totalStays);
+    setEditingStayId(null);
   }
 
   // Approve/deny a pending request (Sept 21, 2026) - same "send the text
@@ -1473,6 +1528,24 @@ function AdminView({
 
   const feedbackOpenCount = feedback.filter(f => f.status === 'open').length;
 
+  // Each dog's own frozen breed/DOB/aggression/health snapshot for a
+  // specific stay, plus its photos - shared by every admin list below
+  // (Requests/Unbilled Stays/Awaiting Payment/Past Stays) so admin sees
+  // the same dog detail no matter which list a stay happens to be in
+  // right now (Sept 24, 2026, on request - "show the dogs with the
+  // stays in the admin panel" - previously only Past Stays actually
+  // showed breed/DOB/aggression/health, which meant a pending REQUEST,
+  // of all things, showed the least detail admin has to decide whether
+  // to approve).
+  function perDogEntryFor(d, s) {
+    return {
+      name: d.name, breed: s.breed, dob: s.dob,
+      aggression_history: s.aggression_history, aggression_detail: s.aggression_detail,
+      health_concerns: s.health_concerns, health_detail: s.health_detail,
+      photoUrls: s.photoUrls || [],
+    };
+  }
+
   // Every never-decided stay, across all dogs, deduped by stay id (a
   // shared multi-dog booking otherwise appears once per dog) - the new
   // top-of-panel Requests section (Sept 21, 2026). Sorted earliest
@@ -1484,10 +1557,10 @@ function AdminView({
         if (pendingByStayId.has(s.id)) {
           const entry = pendingByStayId.get(s.id);
           entry.dogNames.push(d.name);
-          (s.photoUrls || []).forEach((url, pi) => entry.photos.push({ name: d.name, photoUrl: url, photoIndex: pi + 1 }));
+          entry.perDog.push(perDogEntryFor(d, s));
         } else {
           pendingByStayId.set(s.id, {
-            ...s, dogNames: [d.name], photos: (s.photoUrls || []).map((url, pi) => ({ name: d.name, photoUrl: url, photoIndex: pi + 1 })),
+            ...s, dogNames: [d.name], perDog: [perDogEntryFor(d, s)],
             ownerName: d.owner?.name, ownerPhone: d.owner?.phone,
           });
         }
@@ -1512,10 +1585,10 @@ function AdminView({
         if (unbilledByStayId.has(s.id)) {
           const entry = unbilledByStayId.get(s.id);
           entry.dogNames.push(d.name);
-          (s.photoUrls || []).forEach((url, pi) => entry.photos.push({ name: d.name, photoUrl: url, photoIndex: pi + 1 }));
+          entry.perDog.push(perDogEntryFor(d, s));
         } else {
           unbilledByStayId.set(s.id, {
-            ...s, dogNames: [d.name], photos: (s.photoUrls || []).map((url, pi) => ({ name: d.name, photoUrl: url, photoIndex: pi + 1 })),
+            ...s, dogNames: [d.name], perDog: [perDogEntryFor(d, s)],
             ownerName: d.owner?.name, ownerPhone: d.owner?.phone,
           });
         }
@@ -1537,10 +1610,10 @@ function AdminView({
         if (awaitingPaymentByStayId.has(s.id)) {
           const entry = awaitingPaymentByStayId.get(s.id);
           entry.dogNames.push(d.name);
-          (s.photoUrls || []).forEach((url, pi) => entry.photos.push({ name: d.name, photoUrl: url, photoIndex: pi + 1 }));
+          entry.perDog.push(perDogEntryFor(d, s));
         } else {
           awaitingPaymentByStayId.set(s.id, {
-            ...s, dogNames: [d.name], photos: (s.photoUrls || []).map((url, pi) => ({ name: d.name, photoUrl: url, photoIndex: pi + 1 })),
+            ...s, dogNames: [d.name], perDog: [perDogEntryFor(d, s)],
             ownerName: d.owner?.name, ownerPhone: d.owner?.phone,
           });
         }
@@ -1572,12 +1645,7 @@ function AdminView({
       if (!pastStaysByOwnerPhone.has(phone)) {
         pastStaysByOwnerPhone.set(phone, { ownerName: d.owner?.name, ownerPhone: phone, staysById: new Map() });
       }
-      const perDogEntry = {
-        name: d.name, breed: s.breed, dob: s.dob,
-        aggression_history: s.aggression_history, aggression_detail: s.aggression_detail,
-        health_concerns: s.health_concerns, health_detail: s.health_detail,
-        photoUrls: s.photoUrls || [],
-      };
+      const perDogEntry = perDogEntryFor(d, s);
       const owner = pastStaysByOwnerPhone.get(phone);
       if (owner.staysById.has(s.id)) {
         const existing = owner.staysById.get(s.id);
@@ -1601,13 +1669,21 @@ function AdminView({
   const selectedOwner = pastStaysOwners.find(o => o.ownerPhone === selectedOwnerPhone) || null;
 
   // The Requests section (Sept 21, 2026) - a simpler sibling of
-  // renderStayCard below: view-only details (no Edit/billing fields,
-  // nothing to correct on a stay that isn't a real booking yet) plus
-  // Approve/Deny. Shares expandedStayId/expandedWaiver with the other
-  // stay lists - a stay id can only appear in one section at a time
-  // (pending vs. approved), so there's no collision risk.
+  // renderStayCard below: view-only details plus Approve/Deny, and (Sept
+  // 24, 2026, on request - "allow editing of the stay while it is still
+  // in the request stage") its own Edit toggle for correcting dates/
+  // times/estimated cost before deciding, via admin-data's editStay
+  // action (see saveRequestEdits - deliberately separate from
+  // billStay/approveRequest/denyRequest: never sends any SMS, never
+  // touches approval_status). Shares expandedStayId/expandedWaiver/
+  // editingStayId/billingEdits with the other stay lists - a stay id
+  // can only appear in one section at a time (pending vs. approved), so
+  // there's no collision risk.
   function renderRequestCard(s) {
     const isExpanded = expandedStayId === s.id;
+    const isEditingRequest = editingStayId === s.id;
+    // Same shape/flattening as renderStayCard's photoEntries below.
+    const photoEntries = s.perDog.flatMap(pd => (pd.photoUrls || []).map((url, pi) => ({ name: pd.name, photoUrl: url, photoIndex: pi + 1 })));
     return (
       <div key={s.id} className="stay-card">
         <div
@@ -1624,9 +1700,9 @@ function AdminView({
         {isExpanded && (
           <div style={{ marginTop: 8 }}>
             <div className="stay-meta">{s.ownerPhone}</div>
-            {s.photos.some(p => p.photoUrl) && (
+            {photoEntries.length > 0 && (
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 6, marginBottom: 6 }}>
-                {s.photos.filter(p => p.photoUrl).map((p, i) => (
+                {photoEntries.map((p, i) => (
                   <img
                     key={i}
                     src={p.photoUrl}
@@ -1636,63 +1712,128 @@ function AdminView({
                 ))}
               </div>
             )}
-            <div className="stay-meta">
-              Drop-off: {s.drop_time ? s.drop_time.slice(0, 5) : '—'} · Pickup: {s.pickup_time ? s.pickup_time.slice(0, 5) : '—'}
-            </div>
-            <div className="stay-meta">
-              Estimated cost: {s.estimated_cost != null ? `$${formatMoney(s.estimated_cost)}` : '—'}
-            </div>
-            {s.notes && <div className="stay-notes">"{s.notes}"</div>}
-            {Array.isArray(s.waiver_snapshot) && s.waiver_snapshot.length > 0 && (
-              <div style={{ marginTop: 6 }}>
-                <button
-                  className="back-btn"
-                  style={{ fontSize: '0.78rem' }}
-                  onClick={() => setExpandedWaiver(w => (w === s.id ? null : s.id))}
-                >
-                  {expandedWaiver === s.id ? 'Hide waiver as signed' : 'View waiver as signed'}
-                </button>
-                {expandedWaiver === s.id && (
-                  <div className="waiver-scroll" style={{ marginTop: 8, maxHeight: 260 }}>
-                    {s.waiver_snapshot.map((section, si) => (
-                      <div className="waiver-section" key={si}>
-                        <div className="waiver-section-title">{section.title}</div>
-                        <p>{section.body}</p>
+            {!isEditingRequest ? (
+              <>
+                <div className="stay-meta">
+                  Drop-off: {s.drop_time ? s.drop_time.slice(0, 5) : '—'} · Pickup: {s.pickup_time ? s.pickup_time.slice(0, 5) : '—'}
+                </div>
+                <div className="stay-meta">
+                  Estimated cost: {s.estimated_cost != null ? `$${formatMoney(s.estimated_cost)}` : '—'}
+                </div>
+                {s.perDog.map((pd, i) => (
+                  <div key={i}>
+                    {pd.breed && (
+                      <div className="stay-meta">
+                        {s.perDog.length > 1 ? `${pd.name} — ` : ''}{pd.breed}
+                        {pd.dob && ` · DOB: ${formatDate(pd.dob)} · Age: ${calcAge(pd.dob)}`}
                       </div>
-                    ))}
+                    )}
+                    {pd.aggression_history === 'yes' && <div className="stay-flag">⚠ {s.perDog.length > 1 ? `${pd.name}: ` : ''}Aggression noted: {pd.aggression_detail}</div>}
+                    {pd.health_concerns === 'yes' && <div className="stay-flag">⚕ {s.perDog.length > 1 ? `${pd.name}: ` : ''}Health note: {pd.health_detail}</div>}
+                  </div>
+                ))}
+                {s.notes && <div className="stay-notes">"{s.notes}"</div>}
+                {Array.isArray(s.waiver_snapshot) && s.waiver_snapshot.length > 0 && (
+                  <div style={{ marginTop: 6 }}>
+                    <button
+                      className="back-btn"
+                      style={{ fontSize: '0.78rem' }}
+                      onClick={() => setExpandedWaiver(w => (w === s.id ? null : s.id))}
+                    >
+                      {expandedWaiver === s.id ? 'Hide waiver as signed' : 'View waiver as signed'}
+                    </button>
+                    {expandedWaiver === s.id && (
+                      <div className="waiver-scroll" style={{ marginTop: 8, maxHeight: 260 }}>
+                        {s.waiver_snapshot.map((section, si) => (
+                          <div className="waiver-section" key={si}>
+                            <div className="waiver-section-title">{section.title}</div>
+                            <p>{section.body}</p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 )}
-              </div>
+                <div style={{ marginTop: 8 }}>
+                  <input
+                    placeholder="Reason for declining (optional, included in the text if you deny)"
+                    value={denyReasonDrafts[s.id] || ''}
+                    onChange={e => setDenyReasonDrafts(prev => ({ ...prev, [s.id]: e.target.value }))}
+                    style={{ width: '100%', padding: '6px 10px', border: '1.5px solid #D5D9DE', borderRadius: 6, fontSize: '0.85rem' }}
+                  />
+                </div>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 8, flexWrap: 'wrap' }}>
+                  <button className="btn-secondary" style={{ padding: '4px 10px', fontSize: '0.78rem' }} onClick={() => setEditingStayId(s.id)}>
+                    Edit
+                  </button>
+                  <button
+                    className="btn-primary"
+                    style={{ padding: '4px 10px', fontSize: '0.78rem' }}
+                    disabled={sendingRequestId === s.id}
+                    onClick={() => approveRequest(s)}
+                  >
+                    {sendingRequestId === s.id ? 'Sending...' : 'Approve'}
+                  </button>
+                  <button
+                    className="btn-secondary"
+                    style={{ padding: '4px 10px', fontSize: '0.78rem', color: '#C0392B', borderColor: '#C0392B' }}
+                    disabled={sendingRequestId === s.id}
+                    onClick={() => denyRequest(s)}
+                  >
+                    Deny
+                  </button>
+                  {requestActionStatus[s.id] && (
+                    <span className="field-error" style={{ fontSize: '0.78rem' }}>{requestActionStatus[s.id]}</span>
+                  )}
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="field-row" style={{ marginTop: 8 }}>
+                  <Field label="Check-in">
+                    <input type="date" value={billingFieldFor(s, 'checkIn', s.check_in)} onChange={e => updateBillingField(s.id, 'checkIn', e.target.value)} />
+                  </Field>
+                  <Field label="Check-out">
+                    <input type="date" value={billingFieldFor(s, 'checkOut', s.check_out)} onChange={e => updateBillingField(s.id, 'checkOut', e.target.value)} />
+                  </Field>
+                </div>
+                <div className="field-row">
+                  <Field label="Drop-off time">
+                    <input type="time" value={billingFieldFor(s, 'dropTime', s.drop_time ? s.drop_time.slice(0, 5) : '')} onChange={e => updateBillingField(s.id, 'dropTime', e.target.value)} />
+                  </Field>
+                  <Field label="Pickup time">
+                    <input type="time" value={billingFieldFor(s, 'pickupTime', s.pickup_time ? s.pickup_time.slice(0, 5) : '')} onChange={e => updateBillingField(s.id, 'pickupTime', e.target.value)} />
+                  </Field>
+                </div>
+                <CostBreakdown breakdown={costBreakdownFor(s)} multiDogDiscount={multiDogDiscount} />
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 8, flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: '0.85rem' }}>$</span>
+                  <input
+                    type="number"
+                    value={billingFieldFor(s, 'finalCost', s.estimated_cost != null ? String(s.estimated_cost) : '')}
+                    onChange={e => updateBillingField(s.id, 'finalCost', e.target.value)}
+                    style={{ width: 80, padding: '6px 10px', border: '1.5px solid #D5D9DE', borderRadius: 6, fontSize: '0.85rem' }}
+                  />
+                  <button className="btn-secondary" style={{ padding: '4px 10px', fontSize: '0.78rem' }} onClick={() => recalculateBilling(s)}>Recalculate</button>
+                </div>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 8, flexWrap: 'wrap' }}>
+                  <button
+                    className="btn-primary"
+                    style={{ padding: '4px 10px', fontSize: '0.78rem' }}
+                    disabled={savingRequestEditId === s.id}
+                    onClick={() => saveRequestEdits(s)}
+                  >
+                    {savingRequestEditId === s.id ? 'Saving...' : 'Save'}
+                  </button>
+                  <button className="btn-secondary" style={{ padding: '4px 10px', fontSize: '0.78rem' }} onClick={() => setEditingStayId(null)}>
+                    Cancel
+                  </button>
+                  {requestActionStatus[s.id] && (
+                    <span className="field-error" style={{ fontSize: '0.78rem' }}>{requestActionStatus[s.id]}</span>
+                  )}
+                </div>
+              </>
             )}
-            <div style={{ marginTop: 8 }}>
-              <input
-                placeholder="Reason for declining (optional, included in the text if you deny)"
-                value={denyReasonDrafts[s.id] || ''}
-                onChange={e => setDenyReasonDrafts(prev => ({ ...prev, [s.id]: e.target.value }))}
-                style={{ width: '100%', padding: '6px 10px', border: '1.5px solid #D5D9DE', borderRadius: 6, fontSize: '0.85rem' }}
-              />
-            </div>
-            <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 8, flexWrap: 'wrap' }}>
-              <button
-                className="btn-primary"
-                style={{ padding: '4px 10px', fontSize: '0.78rem' }}
-                disabled={sendingRequestId === s.id}
-                onClick={() => approveRequest(s)}
-              >
-                {sendingRequestId === s.id ? 'Sending...' : 'Approve'}
-              </button>
-              <button
-                className="btn-secondary"
-                style={{ padding: '4px 10px', fontSize: '0.78rem', color: '#C0392B', borderColor: '#C0392B' }}
-                disabled={sendingRequestId === s.id}
-                onClick={() => denyRequest(s)}
-              >
-                Deny
-              </button>
-              {requestActionStatus[s.id] && (
-                <span className="field-error" style={{ fontSize: '0.78rem' }}>{requestActionStatus[s.id]}</span>
-              )}
-            </div>
           </div>
         )}
       </div>
@@ -1711,13 +1852,11 @@ function AdminView({
     // the math behind "Estimated cost"/"Billed cost" is always visible
     // once a card is opened - not only after clicking into Edit.
     const breakdown = isExpanded ? costBreakdownFor(s) : null;
-    // s.perDog (Past Stays, one entry per dog with its own photoUrls
-    // array) and s.photos (Unbilled/Awaiting Payment, already one flat
-    // entry per photo) are two differently-shaped lists - flatten both
-    // down to the same {name, photoUrl, photoIndex} shape either way.
-    const photoEntries = s.perDog
-      ? s.perDog.flatMap(pd => (pd.photoUrls || []).map((url, pi) => ({ name: pd.name, photoUrl: url, photoIndex: pi + 1 })))
-      : (s.photos || []);
+    // s.perDog (Requests/Unbilled Stays/Awaiting Payment/Past Stays all
+    // build this now - Sept 24, 2026) is one entry per dog, each with
+    // its own photoUrls array - flatten to the {name, photoUrl,
+    // photoIndex} shape the thumbnail row below wants.
+    const photoEntries = s.perDog.flatMap(pd => (pd.photoUrls || []).map((url, pi) => ({ name: pd.name, photoUrl: url, photoIndex: pi + 1 })));
     return (
       <div key={s.id} className="stay-card">
         <div
@@ -1772,11 +1911,12 @@ function AdminView({
                   })()}
                 </div>
                 <CostBreakdown breakdown={breakdown} multiDogDiscount={multiDogDiscount} />
-                {s.perDog && s.perDog.map((pd, i) => (
+                {s.perDog.map((pd, i) => (
                   <div key={i}>
-                    {pd.dob && (
+                    {(pd.breed || pd.dob) && (
                       <div className="stay-meta">
-                        {s.perDog.length > 1 ? `${pd.name} — ` : ''}DOB: {formatDate(pd.dob)} · Age at stay: {calcAge(pd.dob)}
+                        {s.perDog.length > 1 ? `${pd.name} — ` : ''}{pd.breed}
+                        {pd.dob && `${pd.breed ? ' · ' : ''}DOB: ${formatDate(pd.dob)} · Age at stay: ${calcAge(pd.dob)}`}
                       </div>
                     )}
                     {pd.aggression_history === 'yes' && <div className="stay-flag">⚠ {s.perDog.length > 1 ? `${pd.name}: ` : ''}Aggression noted: {pd.aggression_detail}</div>}
@@ -2107,6 +2247,15 @@ function AdminView({
             <button className="btn-primary" style={{ padding: '6px 14px' }} disabled={savingSettings} onClick={() => saveSettings({ dayRate: Number(editRate) })}>Save</button>
           </div>
           <div style={{ fontSize: '0.75rem', color: '#6B7A8A', marginTop: 4 }}>Billed by the fraction of a day · Current rate: ${formatMoney(rate)}/day</div>
+        </div>
+
+        <div className="rate-setting minimum-stay-editor">
+          <label className="field-label">Minimum Stay (days)</label>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <input type="number" value={editMinimumStay} onChange={e => setEditMinimumStay(e.target.value)} style={{ width: 80, padding: '6px 10px', border: '1.5px solid #D5D9DE', borderRadius: 6, fontSize: '0.95rem' }} />
+            <button className="btn-primary" style={{ padding: '6px 14px' }} disabled={savingSettings} onClick={() => saveSettings({ minimumStay: Number(editMinimumStay) })}>Save</button>
+          </div>
+          <div style={{ fontSize: '0.75rem', color: '#6B7A8A', marginTop: 4 }}>The shortest a stay is ever billed as, even for a same-day drop-in · Current: {minimumStay}-day minimum</div>
         </div>
 
         <div className="rate-setting discount-editor">
@@ -2859,6 +3008,7 @@ export default function App() {
   const [submitting, setSubmitting] = useState(false);
   const [currentStay, setCurrentStay] = useState(null);
   const [rate, setRate] = useState(DEFAULT_RATE);
+  const [minimumStay, setMinimumStay] = useState(DEFAULT_MINIMUM_STAY);
   const [multiDogDiscount, setMultiDogDiscount] = useState(DEFAULT_MULTI_DOG_DISCOUNT);
   const [holidayUpcharge, setHolidayUpcharge] = useState(DEFAULT_HOLIDAY_UPCHARGE);
   const [vets, setVets] = useState(DEFAULT_VETS);
@@ -2879,6 +3029,7 @@ export default function App() {
     supabase.functions.invoke('settings', { body: {} }).then(({ data, error }) => {
       if (error || !data || data.error) return; // keep the defaults
       if (typeof data.dayRate === 'number') setRate(data.dayRate);
+      if (typeof data.minimumStay === 'number') setMinimumStay(data.minimumStay);
       if (typeof data.multiDogDiscount === 'number') setMultiDogDiscount(data.multiDogDiscount);
       if (typeof data.holidayUpcharge === 'number') setHolidayUpcharge(data.holidayUpcharge);
       if (Array.isArray(data.vets)) setVets(data.vets);
@@ -2918,7 +3069,7 @@ export default function App() {
 
   async function handleSubmit() {
     setSubmitting(true);
-    const breakdown = calcCostBreakdown(form.checkIn, form.checkOut, form.dropTime, form.pickupTime, rate, form.dogs.length, multiDogDiscount, holidayUpcharge);
+    const breakdown = calcCostBreakdown(form.checkIn, form.checkOut, form.dropTime, form.pickupTime, rate, form.dogs.length, multiDogDiscount, holidayUpcharge, minimumStay);
     const payload = {
       owner: {
         name: form.ownerName,
@@ -3004,6 +3155,7 @@ export default function App() {
   const adminProps = {
     onClose: () => setShowAdmin(false),
     rate, setRate,
+    minimumStay, setMinimumStay,
     multiDogDiscount, setMultiDogDiscount,
     holidayUpcharge, setHolidayUpcharge,
     vets, setVets,
@@ -3079,6 +3231,7 @@ export default function App() {
                   onNext={() => setStep(step + 1)}
                   onBack={() => setStep(0)}
                   rate={rate}
+                  minimumStay={minimumStay}
                   multiDogDiscount={multiDogDiscount}
                   holidayUpcharge={holidayUpcharge}
                 />

@@ -248,6 +248,53 @@ Deno.test('billStay: marks billed_at even with no date/cost corrections', async 
   }
 });
 
+Deno.test('editStay: requires stayId', async () => {
+  const stub = stubSupabase();
+  try {
+    const res = await handleRequest(postRequest({ password: ADMIN_PASSWORD, action: 'editStay' }));
+    assertEquals(res.status, 400);
+  } finally {
+    stub.restore();
+  }
+});
+
+Deno.test('editStay: patches only the fields given, and never touches billed_at or approval_status (Sept 24, 2026)', async () => {
+  const stub = stubSupabase();
+  try {
+    const res = await handleRequest(postRequest({
+      password: ADMIN_PASSWORD, action: 'editStay', stayId: 'stay-2',
+      checkOut: '2026-10-04', pickupTime: '11:00:00', estimatedCost: 250,
+    }));
+    assertEquals(res.status, 200);
+    const data = await res.json();
+    assertEquals(data.dogs.length, 1); // still returns the normal dogs+totalStays shape
+
+    const patchCall = stub.calls.find((c) => c.table === 'stays' && c.method === 'PATCH')!;
+    assertEquals(patchCall.search, '?id=eq.stay-2');
+    const body = patchCall.body as Record<string, unknown>;
+    assertEquals(body.check_out, '2026-10-04');
+    assertEquals(body.pickup_time, '11:00:00');
+    assertEquals(body.estimated_cost, 250);
+    assertEquals('check_in' in body, false); // not sent, not touched
+    assertEquals('billed_at' in body, false);
+    assertEquals('approval_status' in body, false);
+  } finally {
+    stub.restore();
+  }
+});
+
+Deno.test('editStay: with no fields given, patches nothing at all', async () => {
+  const stub = stubSupabase();
+  try {
+    await handleRequest(postRequest({ password: ADMIN_PASSWORD, action: 'editStay', stayId: 'stay-2' }));
+    const patchCall = stub.calls.find((c) => c.table === 'stays' && c.method === 'PATCH')!;
+    const body = patchCall.body as Record<string, unknown>;
+    assertEquals(Object.keys(body), []);
+  } finally {
+    stub.restore();
+  }
+});
+
 Deno.test('approveStay: requires stayId', async () => {
   const stub = stubSupabase();
   try {

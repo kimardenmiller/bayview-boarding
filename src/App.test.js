@@ -37,7 +37,7 @@ const DEFAULT_STAY = {
 };
 
 const DEFAULT_SETTINGS = {
-  dayRate: 105, multiDogDiscount: 0.10, holidayUpcharge: 0.30,
+  dayRate: 105, minimumStay: 1, multiDogDiscount: 0.10, holidayUpcharge: 0.30,
   vets: ['Marin Pet Hospital — (415) 479-8387'],
   packingList: ['Food', 'Leash & doggy bags'],
   smsConfirmation: 'Hi {firstName}! confirmed.',
@@ -424,20 +424,22 @@ describe('calcCost', () => {
     expect(calcCost('2026-03-11', '2026-03-10', '09:00', '09:00', 100)).toBeNull();
   });
 
-  test('charges the exact fraction of a day for a short same-day stay', () => {
-    // 6 hrs = 0.25 day -> $25, no minimum charge
-    expect(calcCost('2026-03-10', '2026-03-10', '09:00', '15:00', 100)).toBe('25.00');
+  test('a short same-day stay bills the default 1-day minimum, not the exact fraction (Sept 24, 2026)', () => {
+    // 6 hrs = 0.25 day, but the default minimumStay (1) floors it to $100 -
+    // see the "minimum stay" describe block below for the pre-Sept-24
+    // fractional-billing behavior, still available with minimumStay: 0.
+    expect(calcCost('2026-03-10', '2026-03-10', '09:00', '15:00', 100)).toBe('100.00');
   });
 
-  test('bills a precise fraction of a day, never rounded up', () => {
+  test('bills a precise fraction of a day once past the minimum, never rounded up', () => {
     expect(calcCost('2026-03-10', '2026-03-11', '09:00', '10:00', 100)).toBe('104.17'); // 25 hrs -> 25/24 days
   });
 
-  test('a half day bills at exactly half the daily rate', () => {
-    expect(calcCost('2026-03-10', '2026-03-10', '09:00', '21:00', 100)).toBe('50.00'); // 12 hrs = 0.5 day
+  test('a half day still bills the default 1-day minimum (Sept 24, 2026)', () => {
+    expect(calcCost('2026-03-10', '2026-03-10', '09:00', '21:00', 100)).toBe('100.00'); // 12 hrs = 0.5 day, floored to 1
   });
 
-  test('1.5 days bills at exactly 1.5x the daily rate', () => {
+  test('1.5 days bills at exactly 1.5x the daily rate - already past the 1-day minimum', () => {
     expect(calcCost('2026-03-10', '2026-03-11', '09:00', '21:00', 100)).toBe('150.00'); // 36 hrs = 1.5 days
   });
 
@@ -446,7 +448,10 @@ describe('calcCost', () => {
   });
 
   test('defaults to 1 dog when numberOfDogs is omitted', () => {
-    expect(calcCost('2026-03-10', '2026-03-10', '09:00', '15:00', 100)).toBe('25.00');
+    // A 2-day stay - deliberately past the 1-day minimum, so this test's
+    // number stays about the dog-count default, not entangled with
+    // minimum-stay clamping.
+    expect(calcCost('2026-03-10', '2026-03-12', '09:00', '09:00', 100)).toBe('200.00');
   });
 });
 
@@ -508,14 +513,71 @@ describe('calcCostBreakdown', () => {
     expect(b.total).toBe(150);
   });
 
-  test('prorates the holiday portion of a fractional day', () => {
-    // check-in Jan 1 (holiday) 09:00 -> check-out Jan 1 15:00 = 6 hrs = 0.25 day
+  test('a fractional day still floors to the default 1-day minimum, including the holiday portion (Sept 24, 2026)', () => {
+    // check-in Jan 1 (holiday) 09:00 -> check-out Jan 1 15:00 = 6 hrs = 0.25
+    // day, but the default minimumStay (1) floors it to a full billed day.
     const b = calcCostBreakdown('2026-01-01', '2026-01-01', '09:00', '15:00', 100);
-    expect(b.nights).toBe(0.25);
-    expect(b.holidayNights).toBe(0.25);
-    expect(b.subtotal).toBe(25);
-    expect(b.holidayExtra).toBe(7.5);
-    expect(b.total).toBe(32.5);
+    expect(b.nights).toBe(1);
+    expect(b.holidayNights).toBe(1);
+    expect(b.subtotal).toBe(100);
+    expect(b.holidayExtra).toBe(30);
+    expect(b.total).toBe(130);
+  });
+});
+
+describe('calcCostBreakdown/calcCost — minimum stay (Sept 24, 2026, on request)', () => {
+  // Suggested by Estee via Submit Idea: "24 hour minimum needs updating.
+  // It's now prorating for less than 24 hour stay" - there was never
+  // actually a minimum-stay rule wired up (see the Sept 18, 2026 code
+  // comment above calcCostBreakdown in App.js), just an unused MIN_HOURS
+  // constant in settings.js. minimumStay is now a real, admin-configurable
+  // floor on the total, applied via calcCostBreakdown's own 9th
+  // parameter (defaulting to DEFAULT_MINIMUM_STAY = 1 when omitted, same
+  // pattern as multiDogDiscount/holidayUpcharge).
+
+  test('a stay shorter than minimumStay bills as exactly minimumStay days, at whatever value admin configured', () => {
+    // 6 hrs, but minimumStay explicitly set to 2 - proves this is a real
+    // configurable floor, not just the hardcoded default of 1.
+    const b = calcCostBreakdown('2026-03-10', '2026-03-10', '09:00', '15:00', 100, 1, 0.10, 0.30, 2);
+    expect(b.nights).toBe(2);
+    expect(b.subtotal).toBe(200);
+    expect(b.total).toBe(200);
+  });
+
+  test('a stay already at or past minimumStay is completely unaffected - still bills the exact fraction, never rounded up', () => {
+    // 36 hrs = 1.5 days, minimumStay 1 - the floor doesn't apply since
+    // 1.5 > 1; this must NOT round up to 2 days (that was the old,
+    // deliberately-removed Sept 18, 2026 behavior - a floor, not a
+    // ceiling on every partial day).
+    const b = calcCostBreakdown('2026-03-10', '2026-03-11', '09:00', '21:00', 100, 1, 0.10, 0.30, 1);
+    expect(b.nights).toBe(1.5);
+    expect(b.total).toBe(150);
+  });
+
+  test('minimumStay: 0 restores pure fractional billing with no floor at all', () => {
+    // The exact pre-Sept-24 scenarios, preserved here with an explicit
+    // override rather than deleted - a business could legitimately want
+    // no minimum at all, and this also documents that the floor is
+    // opt-outable, not hardcoded.
+    const sixHours = calcCostBreakdown('2026-03-10', '2026-03-10', '09:00', '15:00', 100, 1, 0.10, 0.30, 0);
+    expect(sixHours.nights).toBe(0.25);
+    expect(sixHours.total).toBe(25);
+
+    const halfDay = calcCostBreakdown('2026-03-10', '2026-03-10', '09:00', '21:00', 100, 1, 0.10, 0.30, 0);
+    expect(halfDay.nights).toBe(0.5);
+    expect(halfDay.total).toBe(50);
+
+    // Holiday portion still prorates correctly with no floor applied.
+    const holidayFraction = calcCostBreakdown('2026-01-01', '2026-01-01', '09:00', '15:00', 100, 1, 0.10, 0.30, 0);
+    expect(holidayFraction.nights).toBe(0.25);
+    expect(holidayFraction.holidayNights).toBe(0.25);
+    expect(holidayFraction.subtotal).toBe(25);
+    expect(holidayFraction.holidayExtra).toBe(7.5);
+    expect(holidayFraction.total).toBe(32.5);
+  });
+
+  test('calcCost applies the same minimum-stay floor as calcCostBreakdown', () => {
+    expect(calcCost('2026-03-10', '2026-03-10', '09:00', '15:00', 100, 1, 0.10, 0.30, 3)).toBe('300.00');
   });
 });
 
@@ -550,41 +612,50 @@ describe('formatCostBreakdownText', () => {
 });
 
 describe('calcCost — multi-dog discount', () => {
+  // These deliberately pass minimumStay: 0 (the trailing arg on the
+  // 0.25-day/6-hour calls below) so the illustrative fractional-day
+  // numbers here stay exactly as designed, isolated from the separate
+  // minimum-stay floor (Sept 24, 2026) covered in its own describe
+  // block above - otherwise every one of these would now clamp to a
+  // full billed day and no longer demonstrate the discount math cleanly.
   test('charges the 2nd dog at 90% of the daily rate (10% discount)', () => {
     // 0.25 day @ $100: dog 1 = $25, dog 2 = $25 * 0.9 = $22.50 -> $47.50
-    expect(calcCost('2026-03-10', '2026-03-10', '09:00', '15:00', 100, 2)).toBe('47.50');
+    expect(calcCost('2026-03-10', '2026-03-10', '09:00', '15:00', 100, 2, 0.10, 0.30, 0)).toBe('47.50');
   });
 
   test('discount is uncapped - applies to every additional dog', () => {
     // 0.25 day: dog 1 = $25, dogs 2 & 3 = $22.50 each -> $70
-    expect(calcCost('2026-03-10', '2026-03-10', '09:00', '15:00', 100, 3)).toBe('70.00');
+    expect(calcCost('2026-03-10', '2026-03-10', '09:00', '15:00', 100, 3, 0.10, 0.30, 0)).toBe('70.00');
   });
 
   test('treats 0 or invalid dog counts as 1 dog', () => {
-    expect(calcCost('2026-03-10', '2026-03-10', '09:00', '15:00', 100, 0)).toBe('25.00');
-    expect(calcCost('2026-03-10', '2026-03-10', '09:00', '15:00', 100, null)).toBe('25.00');
+    expect(calcCost('2026-03-10', '2026-03-10', '09:00', '15:00', 100, 0, 0.10, 0.30, 0)).toBe('25.00');
+    expect(calcCost('2026-03-10', '2026-03-10', '09:00', '15:00', 100, null, 0.10, 0.30, 0)).toBe('25.00');
   });
 
   test('applies across a fractional number of days', () => {
-    // 25 hrs = 25/24 days, 2 dogs @ $100/day -> ($100 + $90) * 25/24 = $197.92
+    // 25 hrs = 25/24 days, already past the default 1-day minimum, so
+    // unaffected by it either way.
+    // 2 dogs @ $100/day -> ($100 + $90) * 25/24 = $197.92
     expect(calcCost('2026-03-10', '2026-03-11', '09:00', '10:00', 100, 2)).toBe('197.92');
   });
 });
 
 describe('calcCost — holiday upcharge', () => {
+  // Same minimumStay: 0 reasoning as the multi-dog discount block above.
   test('adds 30% on New Year\'s Day', () => {
     // 0.25 day @ $100 * 1.3 = $32.50
-    expect(calcCost('2026-01-01', '2026-01-01', '09:00', '15:00', 100)).toBe('32.50');
+    expect(calcCost('2026-01-01', '2026-01-01', '09:00', '15:00', 100, 1, 0.10, 0.30, 0)).toBe('32.50');
   });
 
   test('does not upcharge the day right after a holiday', () => {
-    expect(calcCost('2026-01-02', '2026-01-02', '09:00', '15:00', 100)).toBe('25.00');
+    expect(calcCost('2026-01-02', '2026-01-02', '09:00', '15:00', 100, 1, 0.10, 0.30, 0)).toBe('25.00');
   });
 
   test('combines the holiday upcharge with the multi-dog discount', () => {
     // 0.25 day; daily rate = $100 * 1.3 = $130; dog 2 = $130 * 0.9 = $117
     // -> ($130 + $117) * 0.25 = $61.75
-    expect(calcCost('2026-01-01', '2026-01-01', '09:00', '15:00', 100, 2)).toBe('61.75');
+    expect(calcCost('2026-01-01', '2026-01-01', '09:00', '15:00', 100, 2, 0.10, 0.30, 0)).toBe('61.75');
   });
 
   test('only upcharges the holiday portion within a multi-day stay', () => {
@@ -1636,6 +1707,19 @@ describe('Step 3 — Stay Dates', () => {
     expect(await screen.findByText('$210')).toBeInTheDocument();
   });
 
+  test('a short same-day stay is estimated at the 1-day minimum, not a small fraction (Sept 24, 2026)', async () => {
+    await fillStep1();
+    await fillStep2();
+    const dateInputs = document.querySelectorAll('input[type="date"]');
+    fireEvent.change(dateInputs[0], { target: { value: '2026-10-01' } });
+    fireEvent.change(dateInputs[1], { target: { value: '2026-10-01' } });
+    const timeInputs = document.querySelectorAll('input[type="time"]');
+    fireEvent.change(timeInputs[0], { target: { value: '09:00' } });
+    fireEvent.change(timeInputs[1], { target: { value: '15:00' } }); // 6 hours
+    expect(await screen.findByText('$105')).toBeInTheDocument(); // 1 full day @ $105, not $26.25
+    expect(screen.getByText(/1-day minimum/)).toBeInTheDocument();
+  });
+
   test('formats the estimate with a thousands comma once it crosses $999', async () => {
     await fillStep1();
     await fillStep2();
@@ -2098,12 +2182,30 @@ describe('Admin — logged in — Requests', () => {
     expect(within(card).queryByAltText(/'s photo/)).not.toBeInTheDocument();
   });
 
+  test('an expanded request card shows breed, aggression, and health flags - not just photos (Sept 24, 2026, on request)', async () => {
+    const dogsWithFlags = [{
+      ...REQUESTS_DOGS[0],
+      stays: [{
+        ...REQUESTS_DOGS[0].stays[0],
+        breed: 'Labrador', dob: '2020-01-01',
+        aggression_history: 'yes', aggression_detail: 'Growls at the mail carrier',
+        health_concerns: 'yes', health_detail: 'Hip dysplasia',
+      }],
+    }];
+    await loginAsAdminWithRequests(dogsWithFlags);
+    const card = within(document.querySelector('.requests-section')).getByText('Bud — Kim').closest('.stay-card');
+    fireEvent.click(within(card).getByText('View'));
+    expect(within(card).getByText(/Labrador/)).toBeInTheDocument();
+    expect(within(card).getByText(/Aggression noted: Growls at the mail carrier/)).toBeInTheDocument();
+    expect(within(card).getByText(/Health note: Hip dysplasia/)).toBeInTheDocument();
+  });
+
   test('a friendly empty state shows when there are no pending requests', async () => {
     await loginAsAdminWithRequests([]);
     expect(screen.getByText('No pending requests right now.')).toBeInTheDocument();
   });
 
-  test('expanding a request shows its details plus Approve/Deny, with no Edit or billing fields', async () => {
+  test('expanding a request shows its details plus Approve/Deny/Edit', async () => {
     await loginAsAdminWithRequests();
     const requestsSection = document.querySelector('.requests-section');
     const header = within(requestsSection).getByText('Bud — Kim');
@@ -2111,8 +2213,63 @@ describe('Admin — logged in — Requests', () => {
     fireEvent.click(header);
     expect(within(card).getByText('Approve')).toBeInTheDocument();
     expect(within(card).getByText('Deny')).toBeInTheDocument();
-    expect(within(card).queryByText('Edit')).not.toBeInTheDocument();
+    expect(within(card).getByText('Edit')).toBeInTheDocument();
     expect(within(card).getByText(/Estimated cost/)).toBeInTheDocument();
+  });
+
+  test('Edit reveals editable dates/times/cost fields for a pending request, and Save persists them without sending any text or deciding (Sept 24, 2026, on request)', async () => {
+    mockInvokeDefaults({
+      'admin-data': async (opts) => {
+        const action = opts?.body?.action;
+        if (action === 'editStay') {
+          expect(opts.body.stayId).toBe('stay-pending');
+          expect(opts.body.checkOut).toBe('2026-10-04');
+          expect(opts.body.estimatedCost).toBe(300);
+          return { data: { dogs: REQUESTS_DOGS, totalStays: 3 }, error: null };
+        }
+        return { data: { dogs: REQUESTS_DOGS, totalStays: REQUESTS_DOGS[0].stays.length }, error: null };
+      },
+    });
+    goToAdminUrl();
+    render(<App />);
+    await userEvent.type(screen.getByPlaceholderText('Password'), 'correct-password');
+    fireEvent.click(screen.getByText('Sign In'));
+    await screen.findByText('Bayview Boarding — Admin');
+
+    const requestsSection = document.querySelector('.requests-section');
+    const card = within(requestsSection).getByText('Bud — Kim').closest('.stay-card');
+    fireEvent.click(within(card).getByText('View'));
+    fireEvent.click(within(card).getByText('Edit'));
+
+    // Approve/Deny are hidden while editing - Save/Cancel take their place.
+    expect(within(card).queryByText('Approve')).not.toBeInTheDocument();
+    expect(within(card).getByText('Save')).toBeInTheDocument();
+
+    const dateInputs = card.querySelectorAll('input[type="date"]');
+    fireEvent.change(dateInputs[1], { target: { value: '2026-10-04' } }); // check-out
+    const costInput = card.querySelector('input[type="number"]');
+    fireEvent.change(costInput, { target: { value: '300' } });
+    fireEvent.click(within(card).getByText('Save'));
+
+    await waitFor(() => expect(supabase.functions.invoke).toHaveBeenCalledWith('admin-data', expect.objectContaining({
+      body: expect.objectContaining({ action: 'editStay' }),
+    })));
+    // Back to view mode, Approve/Deny visible again.
+    expect(await within(card).findByText('Approve')).toBeInTheDocument();
+  });
+
+  test('Cancel discards edits without saving', async () => {
+    await loginAsAdminWithRequests();
+    const requestsSection = document.querySelector('.requests-section');
+    const card = within(requestsSection).getByText('Bud — Kim').closest('.stay-card');
+    fireEvent.click(within(card).getByText('View'));
+    fireEvent.click(within(card).getByText('Edit'));
+    fireEvent.click(within(card).getByText('Cancel'));
+    expect(within(card).getByText('Approve')).toBeInTheDocument();
+    expect(within(card).queryByText('Save')).not.toBeInTheDocument();
+    expect(supabase.functions.invoke).not.toHaveBeenCalledWith('admin-data', expect.objectContaining({
+      body: expect.objectContaining({ action: 'editStay' }),
+    }));
   });
 
   test('a "View" button makes it obvious a request card is clickable (Sept 21, 2026)', async () => {
@@ -2202,6 +2359,24 @@ describe('Admin — logged in — Unbilled Stays', () => {
     expect(within(cards[2]).getByText('Bud — Kim')).toBeInTheDocument(); // stay-future
     // The already-billed stay never renders a card at all
     expect(cards.length).not.toBe(4);
+  });
+
+  test('an expanded unbilled stay shows breed, aggression, and health flags (Sept 24, 2026, on request)', async () => {
+    const dogsWithFlags = [{
+      ...UNBILLED_DOGS[0],
+      stays: [{
+        ...UNBILLED_DOGS[0].stays[0],
+        breed: 'Labrador', dob: '2020-01-01',
+        aggression_history: 'yes', aggression_detail: 'Growls at the mail carrier',
+        health_concerns: 'yes', health_detail: 'Hip dysplasia',
+      }],
+    }];
+    await loginAsAdminWithUnbilled(dogsWithFlags);
+    const card = screen.getByText('Bud — Kim').closest('.stay-card');
+    fireEvent.click(within(card).getByText('View'));
+    expect(within(card).getByText(/Labrador/)).toBeInTheDocument();
+    expect(within(card).getByText(/Aggression noted: Growls at the mail carrier/)).toBeInTheDocument();
+    expect(within(card).getByText(/Health note: Hip dysplasia/)).toBeInTheDocument();
   });
 
   test('clicking a stay expands it, showing details plus Edit and Send Billing Text buttons; clicking again collapses it', async () => {
@@ -2872,6 +3047,14 @@ describe('Admin — logged in', () => {
     fireEvent.change(dayRateEditor.getByRole('spinbutton'), { target: { value: '150' } });
     fireEvent.click(dayRateEditor.getByText('Save'));
     expect(await screen.findByText(/Current rate: \$150\/day/)).toBeInTheDocument();
+  });
+
+  test('updates the minimum stay, in days (Sept 24, 2026)', async () => {
+    await loginAsAdmin();
+    const minStayEditor = within(document.querySelector('.minimum-stay-editor'));
+    fireEvent.change(minStayEditor.getByRole('spinbutton'), { target: { value: '2' } });
+    fireEvent.click(minStayEditor.getByText('Save'));
+    expect(await screen.findByText(/Current: 2-day minimum/)).toBeInTheDocument();
   });
 
   test('updates the 2nd+ dog discount %', async () => {
