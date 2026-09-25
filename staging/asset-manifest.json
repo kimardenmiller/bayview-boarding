@@ -1,14 +1,14 @@
 {
   "files": {
-    "main.css": "https://kimardenmiller.github.io/bayview-boarding/staging/static/css/main.39f57f1b.css",
-    "main.js": "https://kimardenmiller.github.io/bayview-boarding/staging/static/js/main.0830fcb5.js",
-    "static/media/hero-dog.jpg": "https://kimardenmiller.github.io/bayview-boarding/staging/static/media/hero-dog.ab3873eaabe0371f06ef.jpg",
-    "index.html": "https://kimardenmiller.github.io/bayview-boarding/staging/index.html",
-    "main.39f57f1b.css.map": "https://kimardenmiller.github.io/bayview-boarding/staging/static/css/main.39f57f1b.css.map",
-    "main.0830fcb5.js.map": "https://kimardenmiller.github.io/bayview-boarding/staging/static/js/main.0830fcb5.js.map"
+    "main.css": "https://bayviewboarding.com/staging/static/css/main.39f57f1b.css",
+    "main.js": "https://bayviewboarding.com/staging/static/js/main.485b2099.js",
+    "static/media/hero-dog.jpg": "https://bayviewboarding.com/staging/static/media/hero-dog.ab3873eaabe0371f06ef.jpg",
+    "index.html": "https://bayviewboarding.com/staging/index.html",
+    "main.39f57f1b.css.map": "https://bayviewboarding.com/staging/static/css/main.39f57f1b.css.map",
+    "main.485b2099.js.map": "https://bayviewboarding.com/staging/static/js/main.485b2099.js.map"
   },
   "entrypoints": [
     "static/css/main.39f57f1b.css",
-    "static/js/main.0830fcb5.js"
+    "static/js/main.485b2099.js"
   ]
 }
