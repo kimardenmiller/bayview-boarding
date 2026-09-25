@@ -1,6 +1,6 @@
 BAYVIEW BOARDING — FIX LIST
 ============================
-Last updated: September 25, 2026 (Custom domain: account-level verification completed, cert still stuck - GitHub Support ticket #4793526 filed)
+Last updated: September 25, 2026 (2) (Custom domain fully live: certificate issued, HTTPS enforced, app cut over to bayviewboarding.com)
 
 NEXT CHANGE LIST (v1.5)
 -----------------------
@@ -16,22 +16,6 @@ NEXT CHANGE LIST (v1.5)
    was submitted.
    This item itself never gets "done" - it's a recurring habit, not a
    one-time task.
-2. Finish the bayviewboarding.com custom-domain cutover once GitHub
-   finishes issuing its HTTPS certificate (status as of Sept 25, 2026:
-   DNS live and confirmed correct, account-level domain verification
-   completed, GitHub Pages has the domain associated and is serving
-   over plain HTTP, but https_certificate.state has been stuck on "new"
-   for 48+ hours regardless - see COMPLETED for the full troubleshooting
-   history. GitHub Support ticket #4793526 filed Sept 25, 2026; waiting
-   on their reply, no further action on our end for now). Once it's live
-   (check via `gh api repos/kimardenmiller/bayview-boarding/pages`):
-   switch PUBLIC_URL/homepage (package.json) from the github.io path to
-   https://bayviewboarding.com, update the canonical/og/twitter meta
-   tags and sitemap.xml/robots.txt to match, confirm "Enforce HTTPS" is
-   on, then verify live. Decide then whether staging should move too
-   (currently unaffected - still reachable at its own github.io/
-   staging/ path, and also now redirects through the new domain
-   harmlessly) or stay put.
 
 DEFERRED (revisit only if it actually blocks something)
 ---------------------------------------------------------
@@ -45,6 +29,45 @@ DEFERRED (revisit only if it actually blocks something)
 
 COMPLETED
 ---------
+- Sept 25, 2026 (2): Custom domain fully live - the certificate finally
+  issued (cert_state: "approved") not long after completing the
+  account-level "Verified domains" TXT-record step and filing GitHub
+  Support ticket #4793526 (unclear which actually unstuck it - possibly
+  the verification step just needed more time to propagate through
+  GitHub's own backend than the DNS TXT record itself did). Turned on
+  "Enforce HTTPS" (`gh api .../pages -X PUT -F https_enforced=true`) -
+  confirmed plain HTTP now 301s to HTTPS.
+
+  Then a real, reproducible bug surfaced: the live site loaded blank in
+  Safari AND on a phone (a different device/network entirely, ruling
+  out local browser cache or home-network DNS) - even though every
+  `curl` check looked fine (200s, correct HTML, the JS bundle itself
+  fetching correctly through the old-domain-to-new-domain redirect
+  chain GitHub Pages sets up automatically). Root cause: PUBLIC_URL/
+  homepage (package.json) still pointed at the old kimardenmiller.
+  github.io/bayview-boarding path, so the built page's own script/CSS
+  tags depended on that cross-domain redirect succeeding in-browser
+  every time - which apparently didn't work reliably in real browsers
+  even though curl (which doesn't execute JS or replicate exact browser
+  request behavior) couldn't reveal why. Fixed by finishing the cutover
+  properly instead of continuing to diagnose the redirect: switched
+  PUBLIC_URL/homepage to https://bayviewboarding.com, so every asset
+  reference is same-origin now, no cross-domain redirect involved at
+  all. Also updated public/robots.txt and public/sitemap.xml (both had
+  hardcoded the old domain) - robots.txt is now actually honored at its
+  true location for the first time (only ever discoverable at the true
+  domain root, which this site didn't have until now). Verified live:
+  same-origin asset refs confirmed in the deployed page, JS/CSS load
+  correctly, robots.txt/sitemap.xml serve the new domain, staging
+  unaffected (still at its own github.io/staging/ path, unchanged).
+  staging deliberately NOT moved to the new domain - see CLAUDE.md's
+  new "Domain" section for the full picture, including the critical
+  DNS-before-CNAME-file ordering lesson from the Sept 23 incident.
+  No test changes (nothing here is unit-testable - pure build-config/
+  static-file/live-infra work); full Jest suite (233) re-run and still
+  passing after the PUBLIC_URL change, confirming no test depended on
+  the old hardcoded URL.
+
 - Sept 24, 2026: Three requests together - checked the Submit Idea queue
   (standing habit), found "24 hour minimum needs updating. It's now
   prorating for less than 24 hour stay" (Estee) and "Would be nice to

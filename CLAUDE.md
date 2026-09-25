@@ -405,10 +405,57 @@ call itself is dropped, not for a routine secret rotation.
 - React (Create React App)
 - Supabase (database + Edge Functions)
 - Twilio (SMS via send-confirmation Edge Function)
-- GitHub Pages hosting (kimardenmiller.github.io/bayview-boarding)
+- GitHub Pages hosting, at its own custom domain (bayviewboarding.com,
+  Sept 23-25, 2026 - see Domain below); the old kimardenmiller.github.io/
+  bayview-boarding URL still works, redirecting to the new domain
 - Admin password: set as the `ADMIN_PASSWORD` Supabase secret (`supabase secrets set ADMIN_PASSWORD=...`) — never in source, checked server-side by the admin-data function
 - Twilio phone: see src/settings.js PHONE (business's own public contact number)
 - Twilio auth (Sept 21, 2026): every function that sends an outbound SMS (send-confirmation, send-contact, testers, feedback, receive-sms's own reply) authenticates with `TWILIO_API_KEY_SID`/`TWILIO_API_KEY_SECRET` if set, falling back to `TWILIO_ACCOUNT_SID`/`TWILIO_AUTH_TOKEN` otherwise — a restricted, independently-revocable API key is Twilio's own recommendation over the Auth Token (full, unscoped account access). Production has the API key set; the fallback exists for a genuine Twilio "Test Credentials" pair, which has no API-key equivalent - staging ended up with neither (see Staging environment below for why), so it currently has no Twilio credentials at all and its outbound sends just fail. `TWILIO_ACCOUNT_SID` is always required on whichever environment does have credentials (every request URL needs the real Account SID regardless of which credential authenticates it), and `TWILIO_AUTH_TOKEN` stays in use by receive-sms specifically for Twilio's webhook signature check, which only works with the real Auth Token — never an API key.
+
+## Domain (Sept 23-25, 2026)
+Production is served at its own custom domain, bayviewboarding.com
+(registered on Namecheap), not the shared kimardenmiller.github.io
+domain any more - `homepage`/`PUBLIC_URL` in package.json's `build`
+script point there, so every production build's own asset URLs
+(JS/CSS/meta tags, all via public/index.html's %PUBLIC_URL%) are
+same-origin, not dependent on GitHub's automatic old-domain-to-new-
+domain redirect. That redirect still exists and still works (so old
+links/bookmarks to kimardenmiller.github.io/bayview-boarding keep
+working), but production no longer relies on it for its own assets -
+relying on it initially caused a real, reproducible "blank page" for
+real site visitors (Sept 25, 2026) even though the redirect chain
+worked fine via plain curl checks; switching PUBLIC_URL to the new
+domain removed the dependency entirely rather than continuing to
+diagnose why it failed in real browsers.
+
+DNS lives at Namecheap: 4 A records at the apex (185.199.108-111.153,
+GitHub Pages' standard IPs) and a CNAME for www → kimardenmiller.github.io.
+public/CNAME (committed to the repo, rides along in every build/deploy
+via public/) tells GitHub Pages which domain to associate with this
+repo - **critical ordering note**: GitHub Pages starts 301-redirecting
+the OLD github.io URL to whatever's in this file THE INSTANT it sees
+it, regardless of whether DNS is actually live yet - pushing it before
+DNS is ready takes production down. DNS must be confirmed resolving
+(checked against independent public resolvers, not just local cache)
+BEFORE this file is ever (re)introduced.
+
+HTTPS/certificate: also required completing a SEPARATE, account-level
+"Verified domains" step (github.com/settings/pages, distinct from the
+repo's own Settings > Pages custom-domain setting) - a domain-takeover
+security measure that isn't obviously connected to Pages certificate
+issuance, but appears to gate it: the certificate stayed stuck at
+`https_certificate.state: "new"` for 48+ hours despite fully correct
+DNS and a repo-level remove/re-add restart, and only progressed after
+this account-level TXT-record verification was completed (a GitHub
+Support ticket, #4793526, was also filed around the same time - unclear
+which actually unstuck it, but both are worth doing together if this
+ever needs setting up again for another domain). "Enforce HTTPS" is on.
+
+Staging is unaffected by any of this - it still lives at
+kimardenmiller.github.io/bayview-boarding/staging/ (also reachable,
+redundantly, via bayviewboarding.com/staging/ through the old-domain
+redirect) and was a deliberate choice not to move, see Staging
+environment below.
 
 ## Staging environment (Sept 19, 2026)
 Same repo, no second codebase: a `staging` git branch (currently
@@ -478,12 +525,14 @@ https:// URL, not a relative path - package.json's `build` script
 passes an explicit absolute PUBLIC_URL for exactly this (Sept 21, 2026;
 build:staging already did), since Open Graph requires absolute URLs and
 a relative one isn't reliably honored by every platform. public/
-robots.txt lives at a path GitHub Pages crawlers never actually check
-(robots.txt is only honored at the true domain root,
-kimardenmiller.github.io/robots.txt, and this site is at a subpath of
-that shared domain, not a custom domain) - kept anyway for
-convention and its Sitemap: reference, submittable to Search Console
-directly regardless. This is a client-side-only SPA with no
+robots.txt is now genuinely honored at its true location (Sept 25,
+2026 - see Domain above) since the site moved to its own custom domain
+(bayviewboarding.com/robots.txt is the real domain root crawlers check
+by spec); before that it lived at a subpath of the shared
+kimardenmiller.github.io domain and was never actually discovered by
+crawlers, kept only for convention and its Sitemap: reference,
+submittable to Search Console directly regardless either way. This is
+a client-side-only SPA with no
 server-side rendering, so a crawler that doesn't execute JS still sees
 only an empty shell - true SEO here is inherently limited by that, not
 something this pass changes.
