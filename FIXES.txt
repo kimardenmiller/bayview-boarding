@@ -1,6 +1,6 @@
 BAYVIEW BOARDING — FIX LIST
 ============================
-Last updated: September 24, 2026 (Admin-configurable minimum stay, editable requests, and full dog detail on every admin list)
+Last updated: September 25, 2026 (Custom domain: account-level verification completed, cert still stuck - GitHub Support ticket #4793526 filed)
 
 NEXT CHANGE LIST (v1.5)
 -----------------------
@@ -17,11 +17,13 @@ NEXT CHANGE LIST (v1.5)
    This item itself never gets "done" - it's a recurring habit, not a
    one-time task.
 2. Finish the bayviewboarding.com custom-domain cutover once GitHub
-   finishes issuing its HTTPS certificate (status as of Sept 23, 2026:
-   DNS live and confirmed correct, GitHub Pages has the domain
-   associated and is serving over plain HTTP, but
-   https_certificate.state is still "new" - GitHub does this
-   automatically, no action needed but the wait). Once it's live
+   finishes issuing its HTTPS certificate (status as of Sept 25, 2026:
+   DNS live and confirmed correct, account-level domain verification
+   completed, GitHub Pages has the domain associated and is serving
+   over plain HTTP, but https_certificate.state has been stuck on "new"
+   for 48+ hours regardless - see COMPLETED for the full troubleshooting
+   history. GitHub Support ticket #4793526 filed Sept 25, 2026; waiting
+   on their reply, no further action on our end for now). Once it's live
    (check via `gh api repos/kimardenmiller/bayview-boarding/pages`):
    switch PUBLIC_URL/homepage (package.json) from the github.io path to
    https://bayviewboarding.com, update the canonical/og/twitter meta
@@ -130,16 +132,30 @@ COMPLETED
   even then, watched closely (polled both the new domain and the old
   URL every 10s) until both came back healthy, about 2.5 minutes.
 
-  Current state: DNS fully live, GitHub Pages has the domain
-  associated and serving correctly (confirmed via `gh api repos/.../
-  pages`: status "built"), but https_certificate.state is still "new" -
-  GitHub issues this automatically and it hadn't started after several
-  minutes of checking, so left to finish on its own rather than kept
-  polling. The app's own PUBLIC_URL/meta tags/sitemap were deliberately
-  NOT changed yet - see NEXT CHANGE LIST item 2 for the follow-up once
-  the certificate is live. No code/test changes this round - purely a
-  domain/infra operation, plus the one intentionally-reverted CNAME
-  commit.
+  Current state (updated Sept 24-25, 2026): DNS fully live, GitHub
+  Pages has the domain associated and serving correctly, but
+  https_certificate.state has stayed stuck at "new" for 48+ hours
+  despite everything on our end being correct - well past GitHub's
+  normal turnaround. Troubleshooting attempted, in order: (1) repeated
+  re-checks confirming DNS stays correct via 2 independent resolvers,
+  no CAA restrictions, no AAAA/CNAME mixed in at the apex; (2) removed
+  and re-added the custom domain via the Pages API (equivalent to
+  Settings > Pages > Remove > re-enter > Save) twice - no change either
+  time, site stayed healthy throughout both; (3) discovered a SEPARATE,
+  account-level "Verified domains" feature (Settings > Pages > Add a
+  verified domain) - distinct from the repo-level custom domain setting
+  we'd already configured, and never done - added the TXT record GitHub
+  requested (_github-pages-challenge-kimardenmiller), confirmed it via
+  DNS (Namecheap's own dashboard showed the save even after a refresh -
+  it had, in fact, actually saved server-side, confirmed independently
+  via dig), and successfully verified the domain; (4) restarted the
+  cert process again post-verification - still "new" several minutes
+  after. Filed a GitHub Support ticket (#4793526, Sept 25, 2026) with
+  the full history above, since further troubleshooting from our end
+  isn't likely to move it further - this now looks like a genuine stall
+  on GitHub's backend. The app's own PUBLIC_URL/meta tags/sitemap remain
+  deliberately NOT changed - see NEXT CHANGE LIST item 2 for the
+  follow-up once the certificate actually issues.
 
 - Sept 23, 2026: SEO pass, on request ("are you able to perform SEO for
   the site?" → "let's do both" - structured data + on-page copy):
