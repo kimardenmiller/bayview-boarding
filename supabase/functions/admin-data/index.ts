@@ -8,6 +8,18 @@ const ADMIN_PASSWORD = Deno.env.get("ADMIN_PASSWORD")!;
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
+// Each confirmed booking gets its own Google Calendar event (Sept 25,
+// 2026, on request) - deliberately NOT `!`-asserted like the vars above,
+// since staging has none of these set (same pattern as its missing
+// Twilio credentials - see CLAUDE.md) and should just no-op rather than
+// crash this function's module load entirely. A personal Gmail account,
+// not Workspace, so this uses a one-time-authorized OAuth refresh token
+// (see FIXES.txt for how it was generated) rather than a service account.
+const GOOGLE_CALENDAR_CLIENT_ID = Deno.env.get("GOOGLE_CALENDAR_CLIENT_ID");
+const GOOGLE_CALENDAR_CLIENT_SECRET = Deno.env.get("GOOGLE_CALENDAR_CLIENT_SECRET");
+const GOOGLE_CALENDAR_REFRESH_TOKEN = Deno.env.get("GOOGLE_CALENDAR_REFRESH_TOKEN");
+const GOOGLE_CALENDAR_ID = Deno.env.get("GOOGLE_CALENDAR_ID");
+
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
@@ -75,6 +87,107 @@ const DOG_PHOTOS_BUCKET = "dog-photos";
 // generated on every fetchDogsAndTotals call (every login, and after
 // every action), so there's no need to track/renew expiry.
 const SIGNED_URL_TTL_SECONDS = 60 * 60;
+
+// Best-effort throughout, same reasoning as notifyOwnersOfClientText
+// (send-confirmation): a calendar hiccup should never block approving a
+// stay or saving a date/time correction. Exchanges the long-lived
+// refresh token for a fresh (1-hour) access token on every call rather
+// than caching one across requests - this function's own instance
+// doesn't live long enough for that to matter, and it keeps the logic
+// simple (no cache invalidation to get wrong).
+async function googleAccessToken(): Promise<string> {
+  const res = await fetch("https://oauth2.googleapis.com/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      client_id: GOOGLE_CALENDAR_CLIENT_ID ?? "",
+      client_secret: GOOGLE_CALENDAR_CLIENT_SECRET ?? "",
+      refresh_token: GOOGLE_CALENDAR_REFRESH_TOKEN ?? "",
+      grant_type: "refresh_token",
+    }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(`Google token refresh failed: ${JSON.stringify(data)}`);
+  return data.access_token as string;
+}
+
+interface CalendarEventDetails {
+  dogNames: string[];
+  ownerName: string;
+  ownerPhone: string;
+  checkIn: string;
+  checkOut: string;
+  dropTime: string | null;
+  pickupTime: string | null;
+}
+
+// A timed (not all-day) event, using the actual drop-off/pickup times -
+// more useful for tracking real logistics than just blocking off the
+// calendar days. Falls back to 9am for either time if somehow missing
+// (shouldn't happen - both are required by the booking form).
+function calendarEventBody(d: CalendarEventDetails) {
+  const drop = (d.dropTime || "09:00:00").slice(0, 8);
+  const pickup = (d.pickupTime || "09:00:00").slice(0, 8);
+  return {
+    summary: `${d.dogNames.join(" & ")} — Bayview Boarding`,
+    description: `Owner: ${d.ownerName} (${d.ownerPhone})`,
+    start: { dateTime: `${d.checkIn}T${drop}`, timeZone: "America/Los_Angeles" },
+    end: { dateTime: `${d.checkOut}T${pickup}`, timeZone: "America/Los_Angeles" },
+  };
+}
+
+// Returns the new event's id, or null if creation failed for any reason
+// (including simply not being configured, e.g. on staging) - callers
+// store this on the stay only when it's non-null.
+async function createCalendarEvent(d: CalendarEventDetails): Promise<string | null> {
+  try {
+    const accessToken = await googleAccessToken();
+    const res = await fetch(
+      `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(GOOGLE_CALENDAR_ID ?? "")}/events`,
+      {
+        method: "POST",
+        headers: { "Authorization": `Bearer ${accessToken}`, "Content-Type": "application/json" },
+        body: JSON.stringify(calendarEventBody(d)),
+      },
+    );
+    const data = await res.json();
+    if (!res.ok) throw new Error(`Google Calendar event creation failed: ${JSON.stringify(data)}`);
+    return data.id as string;
+  } catch (err) {
+    console.error("createCalendarEvent error:", err);
+    return null;
+  }
+}
+
+async function updateCalendarEvent(eventId: string, d: CalendarEventDetails): Promise<void> {
+  try {
+    const accessToken = await googleAccessToken();
+    const res = await fetch(
+      `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(GOOGLE_CALENDAR_ID ?? "")}/events/${encodeURIComponent(eventId)}`,
+      {
+        method: "PATCH",
+        headers: { "Authorization": `Bearer ${accessToken}`, "Content-Type": "application/json" },
+        body: JSON.stringify(calendarEventBody(d)),
+      },
+    );
+    const data = await res.json();
+    if (!res.ok) throw new Error(`Google Calendar event update failed: ${JSON.stringify(data)}`);
+  } catch (err) {
+    console.error("updateCalendarEvent error:", err);
+  }
+}
+
+// Row shape for syncStayCalendarEvent's own lookup below - Supabase-js
+// can't infer this from the select string alone, same reasoning as
+// RawDog/RawStayLink above.
+interface StayCalendarRow {
+  calendar_event_id: string | null;
+  check_in: string;
+  check_out: string;
+  drop_time: string | null;
+  pickup_time: string | null;
+  stay_dogs: Array<{ name: string; dogs: { owner: { name: string; phone: string } | null } | null }>;
+}
 
 export async function handleRequest(req: Request): Promise<Response> {
   if (req.method === "OPTIONS") {
@@ -144,6 +257,53 @@ export async function handleRequest(req: Request): Promise<Response> {
       return { dogs, totalStays: staysResult.count ?? 0 };
     }
 
+    // Shared by approveStay (creates the event, the "confirmed booking"
+    // moment) and billStay/editStay (updates it in place if dates/times
+    // were corrected afterward) - looks up whatever calendar_event_id/
+    // dog names/owner info/current dates-times are on file for the stay
+    // right now, rather than trusting whatever the client happened to
+    // send, since a correction might only be touching one field. Nested
+    // here (not top-level) so it closes over `supabase`, same as
+    // fetchDogsAndTotals above - passing the client as a parameter hits
+    // a real TypeScript generic-mismatch wall (its inferred type doesn't
+    // structurally match its own declared return type once re-imported
+    // as a standalone annotation).
+    async function syncStayCalendarEvent(stayId: string, opts: { createIfMissing: boolean }): Promise<void> {
+      const { data, error } = await supabase
+        .from("stays")
+        .select("calendar_event_id, check_in, check_out, drop_time, pickup_time, stay_dogs(name, dogs(owner:owners(name, phone)))")
+        .eq("id", stayId)
+        .single();
+      if (error || !data) {
+        console.error("syncStayCalendarEvent: couldn't load stay", error);
+        return;
+      }
+      const stay = data as unknown as StayCalendarRow;
+      const dogNames = stay.stay_dogs.map((sd) => sd.name);
+      const owner = stay.stay_dogs[0]?.dogs?.owner;
+      if (dogNames.length === 0 || !owner) return; // shouldn't happen - defensive only
+
+      const details: CalendarEventDetails = {
+        dogNames,
+        ownerName: owner.name,
+        ownerPhone: owner.phone,
+        checkIn: stay.check_in,
+        checkOut: stay.check_out,
+        dropTime: stay.drop_time,
+        pickupTime: stay.pickup_time,
+      };
+
+      if (stay.calendar_event_id) {
+        await updateCalendarEvent(stay.calendar_event_id, details);
+      } else if (opts.createIfMissing) {
+        const eventId = await createCalendarEvent(details);
+        if (eventId) {
+          const { error: patchErr } = await supabase.from("stays").update({ calendar_event_id: eventId }).eq("id", stayId);
+          if (patchErr) console.error("syncStayCalendarEvent: failed to save calendar_event_id", patchErr);
+        }
+      }
+    }
+
     if (action === "billStay") {
       // "Review and edit, then send the bill" (Sept 17, 2026) - any of
       // the date/time/cost fields the admin corrected are saved here
@@ -160,6 +320,13 @@ export async function handleRequest(req: Request): Promise<Response> {
 
       const { error: updateErr } = await supabase.from("stays").update(patch).eq("id", stayId);
       if (updateErr) throw updateErr;
+      // Keep an already-created calendar event in sync with a corrected
+      // date/time (Sept 25, 2026) - a cost-only correction doesn't touch
+      // the calendar at all, and a stay with no event yet (createIfMissing:
+      // false) is simply left alone here, same as it always was.
+      if (checkIn !== undefined || checkOut !== undefined || dropTime !== undefined || pickupTime !== undefined) {
+        await syncStayCalendarEvent(stayId, { createIfMissing: false });
+      }
     } else if (action === "editStay") {
       // Lets admin correct a request's dates/times/estimated cost before
       // deciding to approve or deny it (Sept 24, 2026, on request -
@@ -178,6 +345,9 @@ export async function handleRequest(req: Request): Promise<Response> {
 
       const { error: updateErr } = await supabase.from("stays").update(patch).eq("id", stayId);
       if (updateErr) throw updateErr;
+      if (checkIn !== undefined || checkOut !== undefined || dropTime !== undefined || pickupTime !== undefined) {
+        await syncStayCalendarEvent(stayId, { createIfMissing: false });
+      }
     } else if (action === "approveStay") {
       // The client-side flow (App.js) sends the real confirmation text
       // FIRST, then calls this - same "action means it actually went
@@ -187,6 +357,10 @@ export async function handleRequest(req: Request): Promise<Response> {
         .update({ approval_status: "approved", approved_at: new Date().toISOString() })
         .eq("id", stayId);
       if (updateErr) throw updateErr;
+      // "Each confirmed booking goes onto my calendar" (Sept 25, 2026, on
+      // request) - this IS the confirmed-booking moment, so always
+      // create an event here, best-effort (see syncStayCalendarEvent).
+      await syncStayCalendarEvent(stayId, { createIfMissing: true });
     } else if (action === "denyStay") {
       if (!stayId) return json({ error: "stayId is required" }, 400);
       const { error: updateErr } = await supabase.from("stays")

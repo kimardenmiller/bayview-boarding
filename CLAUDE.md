@@ -113,7 +113,9 @@ Kim Miller and Estee Fletter at 210 Bayview Drive, San Rafael, CA.
   admin-data's editStay action - deliberately never touches billed_at
   or approval_status, since correcting a request isn't a decision;
   "Cancel" discards), "Approve" (sends the real booking confirmation
-  text, then marks it approved) and "Deny" (an optional typed reason,
+  text, then marks it approved, then creates a Google Calendar event for
+  the stay - Sept 25, 2026, on request, see Data model's
+  stays.calendar_event_id) and "Deny" (an optional typed reason,
   folded into a decline text sent before the stay is marked denied -
   same "text first, then persist" ordering as billing below; Edit
   replaces Approve/Deny with Save/Cancel while active, rather than
@@ -311,6 +313,28 @@ stay already billed before this column existed was backfilled to paid
 (paid_at = billed_at) - same reasoning as the approval_status backfill
 above.
 
+`stays.calendar_event_id` (Sept 25, 2026, on request - "each confirmed
+booking goes onto my calendar") is the Google Calendar API's own event
+id, stamped by admin-data's approveStay action once it successfully
+creates a matching event on a dedicated "Bayview Boarding" Google
+Calendar (not Kim's primary one) - best-effort throughout, same
+reasoning as notifyOwnersOfClientText (send-confirmation): a calendar
+hiccup never blocks approving a stay. Kept specifically so billStay/
+editStay can find and update that SAME event (not create a duplicate)
+whenever a later correction touches check-in/check-out/drop/pickup -
+see syncStayCalendarEvent in admin-data/index.ts. Null for every stay
+that predates this feature, that was denied/never approved, or whose
+event creation failed (including on staging, which has no Google
+credentials configured at all - same pattern as its missing Twilio
+credentials, see Tech stack). Auth is a personal Gmail OAuth refresh
+token (not a service account - Google Workspace-only), obtained via a
+one-time manual authorization; see FIXES.txt for the exact steps and an
+important caveat: a refresh token issued while the Google Cloud OAuth
+consent screen is in "Testing" status expires after 7 days, not
+indefinitely - moving that consent screen to "Published" and redoing
+the one-time authorization once is a real, not-yet-done follow-up (see
+NEXT CHANGE LIST) to make this actually durable long-term.
+
 `dogs.photo_paths`/`stay_dogs.photo_paths` (Sept 21, 2026 as a single
 `photo_path`; replaced with a jsonb array Sept 22, 2026 to allow more
 than one) let an owner upload photos of their dog during booking -
@@ -411,6 +435,7 @@ call itself is dropped, not for a routine secret rotation.
 - Admin password: set as the `ADMIN_PASSWORD` Supabase secret (`supabase secrets set ADMIN_PASSWORD=...`) — never in source, checked server-side by the admin-data function
 - Twilio phone: see src/settings.js PHONE (business's own public contact number)
 - Twilio auth (Sept 21, 2026): every function that sends an outbound SMS (send-confirmation, send-contact, testers, feedback, receive-sms's own reply) authenticates with `TWILIO_API_KEY_SID`/`TWILIO_API_KEY_SECRET` if set, falling back to `TWILIO_ACCOUNT_SID`/`TWILIO_AUTH_TOKEN` otherwise — a restricted, independently-revocable API key is Twilio's own recommendation over the Auth Token (full, unscoped account access). Production has the API key set; the fallback exists for a genuine Twilio "Test Credentials" pair, which has no API-key equivalent - staging ended up with neither (see Staging environment below for why), so it currently has no Twilio credentials at all and its outbound sends just fail. `TWILIO_ACCOUNT_SID` is always required on whichever environment does have credentials (every request URL needs the real Account SID regardless of which credential authenticates it), and `TWILIO_AUTH_TOKEN` stays in use by receive-sms specifically for Twilio's webhook signature check, which only works with the real Auth Token — never an API key.
+- Google Calendar (Sept 25, 2026, admin-data only - see Data model's stays.calendar_event_id): `GOOGLE_CALENDAR_CLIENT_ID`/`GOOGLE_CALENDAR_CLIENT_SECRET`/`GOOGLE_CALENDAR_REFRESH_TOKEN`/`GOOGLE_CALENDAR_ID` Supabase secrets, production only (staging has none set, same pattern as Twilio above). A personal Gmail OAuth Client (Desktop app type, Testing publishing status) + a one-time-authorized refresh token, not a service account - Workspace-only service accounts don't work with a plain Gmail address. See FIXES.txt for the exact setup steps and the 7-day-expiry caveat while the consent screen stays in Testing status.
 
 ## Domain (Sept 23-25, 2026)
 Production is served at its own custom domain, bayviewboarding.com
@@ -451,11 +476,16 @@ Support ticket, #4793526, was also filed around the same time - unclear
 which actually unstuck it, but both are worth doing together if this
 ever needs setting up again for another domain). "Enforce HTTPS" is on.
 
-Staging is unaffected by any of this - it still lives at
-kimardenmiller.github.io/bayview-boarding/staging/ (also reachable,
-redundantly, via bayviewboarding.com/staging/ through the old-domain
-redirect) and was a deliberate choice not to move, see Staging
-environment below.
+Staging moved too, but only partway (Sept 25, 2026, on request - "can
+we set staging.bayviewboarding.com as our staging server?" - a true
+subdomain would need a second, separate GitHub repo/Pages site of its
+own, since GitHub Pages allows only one custom domain per repo; the
+simpler choice made instead was a path on the SAME domain): staging is
+now at bayviewboarding.com/staging/ instead of kimardenmiller.github.io/
+bayview-boarding/staging/ - see Staging environment below for what
+that changed (just PUBLIC_URL; the deploy target itself didn't move).
+The old github.io URL still works too, via the same automatic
+old-domain-to-new-domain redirect.
 
 ## Staging environment (Sept 19, 2026)
 Same repo, no second codebase: a `staging` git branch (currently
@@ -463,8 +493,16 @@ identical to main - meant as the home for future DB-schema/RLS-risky
 work, verified live via a staging deploy before merging to main) and a
 second Supabase project ("Boarding Staging", ref uqmjudozfqlmiepnqodx,
 same org/region as production) deployed to
-kimardenmiller.github.io/bayview-boarding/staging/ - a `staging/`
-subfolder of the same gh-pages branch production deploys to the root of.
+bayviewboarding.com/staging/ (moved from kimardenmiller.github.io/
+bayview-boarding/staging/ on Sept 25, 2026, once production had its own
+custom domain - see Domain above for why a path rather than a true
+subdomain) - a `staging/`
+subfolder of the same gh-pages branch production deploys to the root of;
+the deploy TARGET never changed, only PUBLIC_URL, so staging's own
+asset URLs are same-origin under the new domain the same way
+production's are, rather than depending on the old-to-new-domain
+redirect for its own JS/CSS the way production briefly did (see
+Domain's account of the blank-page bug that caused).
 `npm run build:staging` overrides `PUBLIC_URL` plus
 `REACT_APP_SUPABASE_URL`/`REACT_APP_SUPABASE_KEY` (read by src/
 supabase.js, falling back to production's own public values when unset)
@@ -576,7 +614,7 @@ visitor never reads.
 - supabase/functions/send-confirmation/index.ts — Twilio SMS function (outbound); accepts an optional message_template (the admin-edited settings text, with {placeholders} filled by fillTemplate, including {dogVerb} - "is"/"are" - {billingBreakdown} - the full cost math - and {denialReason} - Sept 21, 2026, resolves to "" when no reason was given, never a literal unfilled placeholder) + packing_list from the caller; falls back to its own hardcoded 6-message-type logic (confirmation/reminder/billing/pickup/request_received/denied) if no template is given. Every dollar placeholder ({finalCost}/{estimatedCost}) is run through formatDollars() first (whole dollars, comma-separated). Has its own direct DB read (service role, fetchFooterAndPhones) for sms_footer and the 2 manager phone numbers (Sept 18, 2026) - fills {primaryManagerPhone}/{secondaryManagerPhone} and appends the filled footer once to every message, and uses the same numbers as the destination for the Kim/Estee copy of every client send (notifyOwnersOfClientText). Called directly by the client at booking time (type request_received - Sept 21, 2026), and by send-reminders/send-pickup-reminders/the admin panel (confirmation on approve, denied on deny, billing, pickup) - has its own Deno test suite (index.test.ts), added Sept 16 (5)
 - supabase/functions/receive-sms/index.ts — inbound SMS webhook: auto-reply + relay to Kim/Estee. Deploy with `--no-verify-jwt` (see comment at top of file) or Twilio's webhook calls silently fail
 - supabase/functions/_shared/contact.ts — pure text builders + Twilio signature validator, shared by send-confirmation and receive-sms, unit-tested via `deno test`
-- supabase/functions/admin-data/index.ts — server-side admin password check + every dog (profile + owner + stay history, incl. approval_status/approved_at/denied_at/denial_reason/paid_at - Sept 21, 2026) (service role key, never exposed to client). Also handles billStay (Sept 17, 2026): saves corrected check-in/out/drop/pickup/cost and marks billed_at; editStay (Sept 24, 2026, on request): the same field patch as billStay but never touches billed_at or approval_status - lets admin correct a still-pending request's details without that implying any decision was made; approveStay/denyStay (Sept 21, 2026): mark a stay approved or denied (denyStay also saves an optional trimmed denial_reason) - both patch the DB and return the refreshed dog list, the actual SMS send is always a separate client-side send-confirmation call first (App.js), same "text actually went out" ordering as billStay; markPaid (Sept 21, 2026): just sets paid_at, no text send involved at all - there's no client-facing message this action is confirming went out. Every stay's photo_paths (if any) are also resolved to signed photoUrls (Sept 21, 2026 for one photo; array since Sept 22, 2026) before the response goes out, since the "dog-photos" bucket is private - a raw path alone isn't viewable; every distinct path across the WHOLE response is batch-signed once per fetch (1-hour TTL), and every stay always gets an explicit photoUrls array (empty when there are no photos), never left undefined
+- supabase/functions/admin-data/index.ts — server-side admin password check + every dog (profile + owner + stay history, incl. approval_status/approved_at/denied_at/denial_reason/paid_at - Sept 21, 2026) (service role key, never exposed to client). Also handles billStay (Sept 17, 2026): saves corrected check-in/out/drop/pickup/cost and marks billed_at; editStay (Sept 24, 2026, on request): the same field patch as billStay but never touches billed_at or approval_status - lets admin correct a still-pending request's details without that implying any decision was made; approveStay/denyStay (Sept 21, 2026): mark a stay approved or denied (denyStay also saves an optional trimmed denial_reason) - both patch the DB and return the refreshed dog list, the actual SMS send is always a separate client-side send-confirmation call first (App.js), same "text actually went out" ordering as billStay; markPaid (Sept 21, 2026): just sets paid_at, no text send involved at all - there's no client-facing message this action is confirming went out. approveStay also creates a Google Calendar event for the stay (Sept 25, 2026, best-effort, see syncStayCalendarEvent + Data model's stays.calendar_event_id), and billStay/editStay update that same event in place whenever they touch a date/time field. Every stay's photo_paths (if any) are also resolved to signed photoUrls (Sept 21, 2026 for one photo; array since Sept 22, 2026) before the response goes out, since the "dog-photos" bucket is private - a raw path alone isn't viewable; every distinct path across the WHOLE response is batch-signed once per fetch (1-hour TTL), and every stay always gets an explicit photoUrls array (empty when there are no photos), never left undefined
 - supabase/functions/lookup-client/index.ts — returning-client autofill by phone: vet + every dog on file (returns only safe fields, never aggression/health)
 - supabase/migrations/ — schema history, including the Sept 14 dog-profiles reorg (owners/dogs/stays/stay_dogs) and the RLS lockdown history for the old flat `stays` table
 - FIXES.txt — current fix list and backlog

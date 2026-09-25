@@ -53,7 +53,7 @@ const FEEDBACK_STATUSES = [
 // typed here at all.
 const DEFAULT_BROADCAST_MESSAGE =
   "We've made a few changes to the Bayview Boarding site below. Please have a look and tell us what you think!\n" +
-  'https://kimardenmiller.github.io/bayview-boarding/staging\n' +
+  'https://bayviewboarding.com/staging\n' +
   'This is our testing sandbox - feel free to make bookings, add dogs, and try anything. None of it touches real client data.\n' +
   'Then just tap the (☰) menu and choose "Submit Idea" to share your feedback with us.';
 

@@ -4,6 +4,10 @@ const ADMIN_PASSWORD = 'test-admin-password';
 Deno.env.set('ADMIN_PASSWORD', ADMIN_PASSWORD);
 Deno.env.set('SUPABASE_URL', 'https://example.supabase.co');
 Deno.env.set('SUPABASE_SERVICE_ROLE_KEY', 'test-service-role-key');
+Deno.env.set('GOOGLE_CALENDAR_CLIENT_ID', 'test-google-client-id');
+Deno.env.set('GOOGLE_CALENDAR_CLIENT_SECRET', 'test-google-client-secret');
+Deno.env.set('GOOGLE_CALENDAR_REFRESH_TOKEN', 'test-google-refresh-token');
+Deno.env.set('GOOGLE_CALENDAR_ID', 'test-calendar-id@group.calendar.google.com');
 
 const { handleRequest } = await import('./index.ts');
 
@@ -35,15 +39,52 @@ const DOGS_FIXTURE = [
   },
 ];
 
-function stubSupabase(opts: { dogs?: unknown[]; totalStays?: number } = {}) {
+// The row syncStayCalendarEvent's own .single() select reads - a
+// separate, minimal fixture from DOGS_FIXTURE above (which shapes the
+// *response* of the admin dog listing, not this internal lookup).
+// null means "not found" (a 406, matching real PostgREST .single()
+// behavior on 0 rows) - not used by default, only by tests that need it.
+const DEFAULT_STAY_ROW = {
+  calendar_event_id: null,
+  check_in: '2026-10-01', check_out: '2026-10-03', drop_time: '09:00:00', pickup_time: '17:00:00',
+  stay_dogs: [{ name: 'Rex', dogs: { owner: { name: 'Kim Miller', phone: '4155550100' } } }],
+};
+
+function stubSupabase(opts: {
+  dogs?: unknown[]; totalStays?: number;
+  stayRow?: Record<string, unknown> | null;
+  googleTokenStatus?: number; googleEventStatus?: number;
+} = {}) {
   const dogs = opts.dogs ?? DOGS_FIXTURE;
   const totalStays = opts.totalStays ?? 2;
+  const stayRow = opts.stayRow !== undefined ? opts.stayRow : DEFAULT_STAY_ROW;
   const calls: { method: string; table: string; body?: unknown; search?: string }[] = [];
 
   const original = globalThis.fetch;
   globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
     const url = new URL(String(input instanceof Request ? input.url : input));
     const method = (init?.method || 'GET').toUpperCase();
+
+    // Google's OAuth token endpoint - a URL-encoded form body, not JSON,
+    // so this has to be handled before the generic JSON.parse below.
+    if (url.hostname === 'oauth2.googleapis.com') {
+      const params = new URLSearchParams(String(init?.body ?? ''));
+      calls.push({ method, table: 'google-token', body: Object.fromEntries(params), search: url.search });
+      if (opts.googleTokenStatus && opts.googleTokenStatus !== 200) {
+        return new Response(JSON.stringify({ error: 'invalid_grant' }), { status: opts.googleTokenStatus });
+      }
+      return new Response(JSON.stringify({ access_token: 'fake-access-token', expires_in: 3599 }), { status: 200 });
+    }
+    // Google Calendar's events endpoint (create: POST .../events, update:
+    // PATCH .../events/{id}).
+    if (url.hostname === 'www.googleapis.com' && url.pathname.includes('/calendar/v3/calendars/')) {
+      const body = init?.body ? JSON.parse(String(init.body)) : undefined;
+      calls.push({ method, table: 'google-calendar-event', body, search: url.pathname });
+      if (opts.googleEventStatus && opts.googleEventStatus !== 200) {
+        return new Response(JSON.stringify({ error: { message: 'boom' } }), { status: opts.googleEventStatus });
+      }
+      return new Response(JSON.stringify({ id: 'fake-event-id' }), { status: 200 });
+    }
 
     if (url.pathname.startsWith('/storage/v1/object/sign/')) {
       const body = init?.body ? JSON.parse(String(init.body)) : { paths: [] };
@@ -65,6 +106,13 @@ function stubSupabase(opts: { dogs?: unknown[]; totalStays?: number } = {}) {
     }
     if (table === 'stays' && method === 'HEAD') {
       return new Response(null, { status: 200, headers: { 'content-range': `0-0/${totalStays}` } });
+    }
+    // syncStayCalendarEvent's own .single() lookup - real PostgREST
+    // returns the object directly (not array-wrapped) for .single(), or
+    // a 406 if no row matches.
+    if (table === 'stays' && method === 'GET') {
+      if (stayRow === null) return new Response(JSON.stringify({ message: 'not found' }), { status: 406 });
+      return new Response(JSON.stringify(stayRow), { status: 200 });
     }
     if (table === 'stays' && method === 'PATCH') {
       return new Response(JSON.stringify([{ id: url.searchParams.get('id')?.replace('eq.', ''), ...body }]), { status: 200 });
@@ -315,6 +363,91 @@ Deno.test('approveStay: sets approval_status approved and stamps approved_at', a
     const body = patchCall.body as Record<string, unknown>;
     assertEquals(body.approval_status, 'approved');
     assertEquals(typeof body.approved_at, 'string');
+  } finally {
+    stub.restore();
+  }
+});
+
+Deno.test('approveStay: creates a Google Calendar event and saves its id (Sept 25, 2026, on request)', async () => {
+  const stub = stubSupabase();
+  try {
+    const res = await handleRequest(postRequest({ password: ADMIN_PASSWORD, action: 'approveStay', stayId: 'stay-2' }));
+    assertEquals(res.status, 200);
+
+    const tokenCall = stub.calls.find((c) => c.table === 'google-token')!;
+    assertEquals((tokenCall.body as Record<string, unknown>).refresh_token, 'test-google-refresh-token');
+    assertEquals((tokenCall.body as Record<string, unknown>).grant_type, 'refresh_token');
+
+    const eventCall = stub.calls.find((c) => c.table === 'google-calendar-event')!;
+    assertEquals(eventCall.method, 'POST');
+    const eventBody = eventCall.body as Record<string, unknown>;
+    assertEquals(eventBody.summary, 'Rex — Bayview Boarding');
+    assertEquals(eventBody.description, 'Owner: Kim Miller (4155550100)');
+    assertEquals((eventBody.start as Record<string, unknown>).dateTime, '2026-10-01T09:00:00');
+    assertEquals((eventBody.end as Record<string, unknown>).dateTime, '2026-10-03T17:00:00');
+
+    // The event's id came back from the (stubbed) Google API and got
+    // saved on the stay in a follow-up patch.
+    const patchCalls = stub.calls.filter((c) => c.table === 'stays' && c.method === 'PATCH');
+    assertEquals(patchCalls.length, 2); // the approval patch, then this one
+    const calendarPatch = patchCalls.find((c) => (c.body as Record<string, unknown>).calendar_event_id)!;
+    assertEquals((calendarPatch.body as Record<string, unknown>).calendar_event_id, 'fake-event-id');
+  } finally {
+    stub.restore();
+  }
+});
+
+Deno.test('approveStay: still succeeds even when Google Calendar is unreachable (best-effort, Sept 25, 2026)', async () => {
+  const stub = stubSupabase({ googleTokenStatus: 500 });
+  try {
+    const res = await handleRequest(postRequest({ password: ADMIN_PASSWORD, action: 'approveStay', stayId: 'stay-2' }));
+    assertEquals(res.status, 200); // approving the stay itself never fails because of this
+    const data = await res.json();
+    assertEquals(data.dogs.length, 1);
+
+    // The approval patch happened; no second patch, since there's no
+    // event id to save when creation failed.
+    const patchCalls = stub.calls.filter((c) => c.table === 'stays' && c.method === 'PATCH');
+    assertEquals(patchCalls.length, 1);
+    assertEquals((patchCalls[0].body as Record<string, unknown>).approval_status, 'approved');
+  } finally {
+    stub.restore();
+  }
+});
+
+Deno.test('billStay: updates the existing calendar event when dates/times change (Sept 25, 2026)', async () => {
+  const stub = stubSupabase({ stayRow: { ...DEFAULT_STAY_ROW, calendar_event_id: 'existing-event-id' } });
+  try {
+    await handleRequest(postRequest({
+      password: ADMIN_PASSWORD, action: 'billStay', stayId: 'stay-2', checkOut: '2026-10-04',
+    }));
+    const eventCall = stub.calls.find((c) => c.table === 'google-calendar-event')!;
+    assertEquals(eventCall.method, 'PATCH');
+    assertEquals(eventCall.search?.endsWith('/existing-event-id'), true);
+  } finally {
+    stub.restore();
+  }
+});
+
+Deno.test('billStay: never touches the calendar when only the cost changes, not dates/times', async () => {
+  const stub = stubSupabase({ stayRow: { ...DEFAULT_STAY_ROW, calendar_event_id: 'existing-event-id' } });
+  try {
+    await handleRequest(postRequest({ password: ADMIN_PASSWORD, action: 'billStay', stayId: 'stay-2', estimatedCost: 300 }));
+    assertEquals(stub.calls.some((c) => c.table === 'google-token' || c.table === 'google-calendar-event'), false);
+  } finally {
+    stub.restore();
+  }
+});
+
+Deno.test('editStay: a still-pending stay with no calendar event yet is left alone, even if dates change', async () => {
+  const stub = stubSupabase({ stayRow: DEFAULT_STAY_ROW }); // calendar_event_id: null
+  try {
+    await handleRequest(postRequest({
+      password: ADMIN_PASSWORD, action: 'editStay', stayId: 'stay-2', checkOut: '2026-10-04',
+    }));
+    // Looked the stay up (to check for an event id) but never created one -
+    // editStay/billStay only ever update an existing event, never create.
+    assertEquals(stub.calls.some((c) => c.table === 'google-calendar-event'), false);
   } finally {
     stub.restore();
   }

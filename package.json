@@ -15,7 +15,7 @@
     "build": "PUBLIC_URL=https://bayviewboarding.com REACT_APP_GA_MEASUREMENT_ID=G-160YK5FB7D react-scripts build",
     "predeploy": "npm run build",
     "deploy": "gh-pages -d build --add",
-    "build:staging": "PUBLIC_URL=https://kimardenmiller.github.io/bayview-boarding/staging REACT_APP_SUPABASE_URL=https://uqmjudozfqlmiepnqodx.supabase.co REACT_APP_SUPABASE_KEY=sb_publishable_5a9wgA9-6_SFKd235QWwzQ_-pm0cv9C react-scripts build",
+    "build:staging": "PUBLIC_URL=https://bayviewboarding.com/staging REACT_APP_SUPABASE_URL=https://uqmjudozfqlmiepnqodx.supabase.co REACT_APP_SUPABASE_KEY=sb_publishable_5a9wgA9-6_SFKd235QWwzQ_-pm0cv9C react-scripts build",
     "deploy:staging": "npm run build:staging && gh-pages -d build --dest staging --add",
     "test": "react-scripts test",
     "test:coverage": "react-scripts test --watchAll=false --coverage --collectCoverageFrom=\"src/**/*.js\" --collectCoverageFrom=\"!src/index.js\" --collectCoverageFrom=\"!src/reportWebVitals.js\""

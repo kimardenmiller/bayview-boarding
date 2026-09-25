@@ -1,6 +1,6 @@
 BAYVIEW BOARDING — FIX LIST
 ============================
-Last updated: September 25, 2026 (2) (Custom domain fully live: certificate issued, HTTPS enforced, app cut over to bayviewboarding.com)
+Last updated: September 25, 2026 (3) (Google Calendar: each confirmed booking now creates an event; staging moved to bayviewboarding.com/staging)
 
 NEXT CHANGE LIST (v1.5)
 -----------------------
@@ -16,6 +16,20 @@ NEXT CHANGE LIST (v1.5)
    was submitted.
    This item itself never gets "done" - it's a recurring habit, not a
    one-time task.
+2. Move the Google Calendar OAuth consent screen from "Testing" to
+   "Published" status, then redo the one-time authorization ONE more
+   time to get a refresh token that doesn't expire (see COMPLETED for
+   the full setup and why this matters: a refresh token issued to a
+   Testing-status app expires after 7 days - the one currently in place,
+   set Sept 25, 2026, will stop working around Oct 2, 2026, and calendar
+   events will silently stop being created/updated - approving/editing
+   stays themselves will keep working fine either way, since this is
+   all best-effort). Publishing doesn't require Google's formal
+   verification review for a personal-use app with only one user - just
+   click Publish on the OAuth consent screen, then redo the
+   authorization URL flow (see COMPLETED) to get the new long-lived
+   token, then `supabase secrets set GOOGLE_CALENDAR_REFRESH_TOKEN=...`
+   with the new one on production.
 
 DEFERRED (revisit only if it actually blocks something)
 ---------------------------------------------------------
@@ -29,6 +43,77 @@ DEFERRED (revisit only if it actually blocks something)
 
 COMPLETED
 ---------
+- Sept 25, 2026 (3): "Let's create a feature where each confirmed
+  booking goes onto my calendar." Google Calendar chosen over Apple/
+  iCloud - Kim already has Gmail, Google's Calendar API is a
+  straightforward REST API callable from a Deno Edge Function, and
+  CalDAV (Apple's alternative) is considerably clunkier to integrate
+  server-side. Design confirmed with Kim before building: a new,
+  dedicated "Bayview Boarding" Google Calendar (not his primary one),
+  an event created the moment admin clicks Approve (the actual
+  "confirmed booking" moment), and that event kept in sync if the
+  stay's dates/times are corrected afterward via Edit/billing.
+
+  Setup (one-time, walked Kim through it live):
+  1. Google Cloud Console: new project, enabled the Calendar API,
+     configured the OAuth consent screen as External + Testing status
+     with Kim's own Gmail added as a test user (avoids Google's full
+     app-verification review entirely, since only Kim will ever use
+     this), created a "Desktop app" OAuth Client ID.
+  2. One-time authorization: built the consent URL by hand
+     (https://accounts.google.com/o/oauth2/v2/auth with
+     redirect_uri=http://localhost, scope=.../auth/calendar,
+     access_type=offline, prompt=consent - the last two are what
+     actually gets a refresh_token back, not just a short-lived access
+     token). Kim opened it, approved, and got redirected to a failed
+     localhost page whose address bar contained the authorization code
+     - copied that back rather than needing any real server listening
+     on localhost. Exchanged the code for tokens via a direct curl to
+     https://oauth2.googleapis.com/token.
+  3. Created the dedicated "Bayview Boarding" calendar via a direct API
+     call using the fresh access token.
+  4. Stored GOOGLE_CALENDAR_CLIENT_ID/_CLIENT_SECRET/_REFRESH_TOKEN/_ID
+     as Supabase secrets, production only (staging intentionally has
+     none, same pattern as its missing Twilio credentials - a calendar
+     hiccup, or simply not being configured at all, never blocks
+     approving/editing a stay, same "best-effort" reasoning as
+     notifyOwnersOfClientText in send-confirmation).
+
+  IMPORTANT CAVEAT discovered during setup: Google only issues 7-day
+  refresh tokens to test users of a Testing-status app
+  (refresh_token_expires_in: 604799 in the token response, confirmed
+  directly). The one in place now will expire around Oct 2, 2026 -
+  see NEXT CHANGE LIST item 2 for the fix (publish the consent screen,
+  redo authorization once for a token that doesn't expire this way).
+
+  Code: new stays.calendar_event_id column (migration). admin-data
+  gained googleAccessToken/calendarEventBody/createCalendarEvent/
+  updateCalendarEvent helpers and a nested syncStayCalendarEvent
+  (closes over `supabase`, same reasoning as the existing
+  fetchDogsAndTotals) shared by approveStay (creates, always) and
+  billStay/editStay (updates in place, only when a date/time field was
+  actually part of that particular patch, and only if an event already
+  exists - neither of those two ever creates one). Events are timed
+  (using real drop-off/pickup times), not all-day, since exact times
+  are more operationally useful than just blocked-off calendar days.
+  No App.js changes at all - the sync is fully transparent, triggered
+  by the same Approve/Edit/Send-Billing-Text actions that already
+  existed, nothing new for admin to click.
+
+  Tests: 5 new Deno tests on admin-data (event creation + calendar_event_id
+  saved on approve; approval still succeeds when Google is unreachable,
+  best-effort; billStay/editStay update an existing event on a date/time
+  change; billStay never touches the calendar on a cost-only edit;
+  editStay never creates an event for a still-pending stay with none
+  yet). 202 Deno passing (previous baseline 197 + 5).
+
+  Verified live: the real Calendar API round-tripped successfully
+  outside the test suite too - created a real test event on the actual
+  "Bayview Boarding" calendar, updated its dates, confirmed the change,
+  then deleted it (production credentials, real API, cleaned up
+  immediately after). Migration applied and admin-data redeployed to
+  both production and staging.
+
 - Sept 25, 2026 (2): Custom domain fully live - the certificate finally
   issued (cert_state: "approved") not long after completing the
   account-level "Verified domains" TXT-record step and filing GitHub
