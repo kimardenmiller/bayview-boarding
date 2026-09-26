@@ -2876,6 +2876,15 @@ function NavMenu({ onAbout, onContact, onSubmitIdea, onBookStay, onAdmin }) {
             <button className="nav-menu-item" onClick={() => go(onContact)}>Contact Us</button>
             <button className="nav-menu-item" onClick={() => go(onSubmitIdea)}>Submit Idea</button>
             <button className="nav-menu-item" onClick={() => go(onAdmin)}>Admin</button>
+            {/* A plain static page (public/privacy.html), not part of the
+                SPA - opens in a new tab (Sept 26, 2026, on request) so a
+                client mid-booking never loses their in-progress form by
+                navigating away. Previously only linked from the
+                <noscript> fallback in index.html, invisible to any real
+                (JS-enabled) visitor - Google's own OAuth consent screen
+                asked for a reachable privacy policy URL, which is what
+                surfaced that gap. */}
+            <a className="nav-menu-item" href="privacy.html" target="_blank" rel="noopener noreferrer" onClick={() => setOpen(false)}>Privacy Policy</a>
           </div>
         </>
       )}

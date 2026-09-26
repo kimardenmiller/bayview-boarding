@@ -203,7 +203,14 @@ Kim Miller and Estee Fletter at 210 Bayview Drive, San Rafael, CA.
   array - the actual image files live in Supabase Storage instead of
   the git-tracked public/ folder.
 - Hamburger nav menu (every screen): Book a Stay, About Us, Contact Us,
-  Submit Idea, Admin (Sept 16, 2026; Book a Stay moved to the top Sept 16 (9))
+  Submit Idea, Admin (Sept 16, 2026; Book a Stay moved to the top Sept
+  16 (9)), Privacy Policy (Sept 26, 2026, on request - a real `<a
+  target="_blank">` to public/privacy.html, not a button, since it's a
+  plain static page outside the SPA - opens in a new tab so an
+  in-progress booking is never lost. Previously only linked from
+  index.html's `<noscript>` fallback, invisible to any real visitor -
+  Google's own OAuth consent screen asking for a reachable privacy
+  policy URL is what surfaced that gap)
 - "Contact Us" page — relays a name/email-or-phone/message submission to
   Kim & Estee by SMS via send-contact (Sept 16, 2026)
 - "Submit Idea" page (Sept 16 (8), simplified (9)) — one open message box
@@ -688,7 +695,7 @@ visitor never reads.
 - src/App.js — main app
 - src/settings.js — all configurable values (rates, vets, messages, packing list)
 - src/waiver.js — full waiver text
-- src/App.test.js — 233 passing tests (TDD), Supabase mocked via src/__mocks__/supabase.js
+- src/App.test.js — 236 passing tests (TDD), Supabase mocked via src/__mocks__/supabase.js
 - src/supabase.js — creates the Supabase client from REACT_APP_SUPABASE_URL/_KEY (falling back to production's own public values) - see Staging environment above for how the staging build overrides these
 - src/index.js — app entry point; also where Google Analytics loads (production only) and staging's noindex meta tag gets injected - see SEO & Analytics above
 - supabase/functions/send-contact/index.ts — public Contact Us form handler: relays name/email-or-phone/message to Kim & Estee by SMS (reuses KIM_PHONE/ESTEE_PHONE). Deployed normally (no --no-verify-jwt) since it's called via the Supabase JS client like settings/lookup-client/submit-booking

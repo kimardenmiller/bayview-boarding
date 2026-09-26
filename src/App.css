@@ -100,7 +100,7 @@
 .nav-menu-toggle:hover { background: rgba(28,40,51,.75); }
 .nav-menu-backdrop { position: fixed; inset: 0; z-index: 49; }
 .nav-menu-panel { position: absolute; top: 50px; right: 0; background: #fff; border-radius: 10px; box-shadow: 0 4px 20px rgba(44,62,80,.25); padding: 8px; display: flex; flex-direction: column; min-width: 170px; z-index: 51; }
-.nav-menu-item { background: none; border: none; text-align: left; padding: 11px 14px; border-radius: 6px; font-size: 0.9rem; font-weight: 500; color: #2C3E50; cursor: pointer; }
+.nav-menu-item { background: none; border: none; text-align: left; padding: 11px 14px; border-radius: 6px; font-size: 0.9rem; font-weight: 500; color: #2C3E50; cursor: pointer; text-decoration: none; display: block; }
 .nav-menu-item:hover { background: #F5F0E8; }
 .about-content p { font-size: 0.95rem; color: #1A2530; line-height: 1.7; margin-bottom: 16px; }
 .about-rating { font-size: 0.85rem; color: #2C3E50; letter-spacing: 1px; margin-bottom: 14px; }
