@@ -53,11 +53,13 @@ const DEFAULT_STAY_ROW = {
 function stubSupabase(opts: {
   dogs?: unknown[]; totalStays?: number;
   stayRow?: Record<string, unknown> | null;
+  dueStays?: { id: string }[];
   googleTokenStatus?: number; googleEventStatus?: number;
 } = {}) {
   const dogs = opts.dogs ?? DOGS_FIXTURE;
   const totalStays = opts.totalStays ?? 2;
   const stayRow = opts.stayRow !== undefined ? opts.stayRow : DEFAULT_STAY_ROW;
+  const dueStays = opts.dueStays ?? [];
   const calls: { method: string; table: string; body?: unknown; search?: string }[] = [];
 
   const original = globalThis.fetch;
@@ -106,6 +108,13 @@ function stubSupabase(opts: {
     }
     if (table === 'stays' && method === 'HEAD') {
       return new Response(null, { status: 200, headers: { 'content-range': `0-0/${totalStays}` } });
+    }
+    // backfillCalendarEvents' own list query - distinguished from
+    // syncStayCalendarEvent's single-row lookup below by its filters:
+    // this one has no `id` param (it's not looking up one specific
+    // stay) but does have `approval_status`.
+    if (table === 'stays' && method === 'GET' && url.searchParams.has('approval_status') && !url.searchParams.has('id')) {
+      return new Response(JSON.stringify(dueStays), { status: 200 });
     }
     // syncStayCalendarEvent's own .single() lookup - real PostgREST
     // returns the object directly (not array-wrapped) for .single(), or
@@ -448,6 +457,54 @@ Deno.test('editStay: a still-pending stay with no calendar event yet is left alo
     // Looked the stay up (to check for an event id) but never created one -
     // editStay/billStay only ever update an existing event, never create.
     assertEquals(stub.calls.some((c) => c.table === 'google-calendar-event'), false);
+  } finally {
+    stub.restore();
+  }
+});
+
+Deno.test('backfillCalendarEvents: creates an event for every due stay and reports the count (Sept 25, 2026)', async () => {
+  const stub = stubSupabase({ dueStays: [{ id: 'stay-2' }, { id: 'stay-3' }] });
+  try {
+    const res = await handleRequest(postRequest({ password: ADMIN_PASSWORD, action: 'backfillCalendarEvents' }));
+    assertEquals(res.status, 200);
+    const data = await res.json();
+    assertEquals(data.backfilledCount, 2);
+
+    // The list query itself was scoped to approved, un-synced, not-yet-
+    // over stays - not every stay in the table.
+    const listCall = stub.calls.find((c) => c.table === 'stays' && c.method === 'GET' && c.search?.includes('approval_status'));
+    assertEquals(listCall!.search!.includes('approval_status=eq.approved'), true);
+    assertEquals(listCall!.search!.includes('calendar_event_id=is.null'), true);
+    assertEquals(listCall!.search!.includes('check_out=gte.'), true);
+
+    // One calendar event created per due stay.
+    const eventCalls = stub.calls.filter((c) => c.table === 'google-calendar-event' && c.method === 'POST');
+    assertEquals(eventCalls.length, 2);
+  } finally {
+    stub.restore();
+  }
+});
+
+Deno.test('backfillCalendarEvents: no due stays means no calendar calls at all', async () => {
+  const stub = stubSupabase({ dueStays: [] });
+  try {
+    const res = await handleRequest(postRequest({ password: ADMIN_PASSWORD, action: 'backfillCalendarEvents' }));
+    const data = await res.json();
+    assertEquals(data.backfilledCount, 0);
+    assertEquals(stub.calls.some((c) => c.table === 'google-token' || c.table === 'google-calendar-event'), false);
+  } finally {
+    stub.restore();
+  }
+});
+
+Deno.test('backfillCalendarEvents: still returns 200 with the attempted count even if Google is unreachable (best-effort)', async () => {
+  const stub = stubSupabase({ dueStays: [{ id: 'stay-2' }], googleTokenStatus: 500 });
+  try {
+    const res = await handleRequest(postRequest({ password: ADMIN_PASSWORD, action: 'backfillCalendarEvents' }));
+    assertEquals(res.status, 200);
+    const data = await res.json();
+    assertEquals(data.backfilledCount, 1);
+    assertEquals(data.dogs.length, 1); // the rest of the response still comes back fine
   } finally {
     stub.restore();
   }

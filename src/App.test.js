@@ -2956,6 +2956,47 @@ describe('Admin — logged in', () => {
     }));
   });
 
+  test('Google Calendar: "Add Existing Stays to Calendar" reports how many were added (Sept 25, 2026)', async () => {
+    mockInvokeDefaults({
+      'admin-data': async (opts) => {
+        if (opts?.body?.action === 'backfillCalendarEvents') {
+          return { data: { dogs: SAMPLE_DOGS, totalStays: SAMPLE_TOTAL_STAYS, backfilledCount: 3 }, error: null };
+        }
+        return { data: { dogs: SAMPLE_DOGS, totalStays: SAMPLE_TOTAL_STAYS }, error: null };
+      },
+    });
+    goToAdminUrl();
+    render(<App />);
+    await userEvent.type(screen.getByPlaceholderText('Password'), 'correct-password');
+    fireEvent.click(screen.getByText('Sign In'));
+    await screen.findByText('Bayview Boarding — Admin');
+
+    fireEvent.click(screen.getByText('Add Existing Stays to Calendar'));
+    await waitFor(() => expect(supabase.functions.invoke).toHaveBeenCalledWith('admin-data', {
+      body: { password: 'correct-password', action: 'backfillCalendarEvents' },
+    }));
+    expect(await screen.findByText('Added 3 stays to the calendar.')).toBeInTheDocument();
+  });
+
+  test('Google Calendar: reports "already up to date" when nothing needed adding', async () => {
+    mockInvokeDefaults({
+      'admin-data': async (opts) => {
+        if (opts?.body?.action === 'backfillCalendarEvents') {
+          return { data: { dogs: SAMPLE_DOGS, totalStays: SAMPLE_TOTAL_STAYS, backfilledCount: 0 }, error: null };
+        }
+        return { data: { dogs: SAMPLE_DOGS, totalStays: SAMPLE_TOTAL_STAYS }, error: null };
+      },
+    });
+    goToAdminUrl();
+    render(<App />);
+    await userEvent.type(screen.getByPlaceholderText('Password'), 'correct-password');
+    fireEvent.click(screen.getByText('Sign In'));
+    await screen.findByText('Bayview Boarding — Admin');
+
+    fireEvent.click(screen.getByText('Add Existing Stays to Calendar'));
+    expect(await screen.findByText('Already up to date - nothing to add.')).toBeInTheDocument();
+  });
+
   test('← All Owners returns from the owner detail view to Past Stays', async () => {
     await loginAsAdmin();
     fireEvent.click(screen.getByText('Kim'));

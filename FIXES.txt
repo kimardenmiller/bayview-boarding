@@ -1,6 +1,6 @@
 BAYVIEW BOARDING — FIX LIST
 ============================
-Last updated: September 25, 2026 (3) (Google Calendar: each confirmed booking now creates an event; staging moved to bayviewboarding.com/staging)
+Last updated: September 25, 2026 (4) (Admin can now backfill Google Calendar events for existing approved stays)
 
 NEXT CHANGE LIST (v1.5)
 -----------------------
@@ -43,6 +43,26 @@ DEFERRED (revisit only if it actually blocks something)
 
 COMPLETED
 ---------
+- Sept 25, 2026 (4): "Can we update the calendar with existing stays?" -
+  the calendar sync below (3) only ever fires going forward from
+  approveStay/billStay/editStay, so every stay approved before that
+  shipped had no calendar_event_id at all and never would on its own.
+  Added a new admin-data action, backfillCalendarEvents, plus an "Add
+  Existing Stays to Calendar" button in Admin > Site Settings (right
+  above Day Rate). Scoped to approved stays with check_out today or
+  later, on request - a stay that's already over isn't useful on the
+  calendar, so the button intentionally does NOT touch fully past
+  stays. Safe to click more than once (or leave for a future one-off
+  catch-up): the query itself only ever picks up stays with a null
+  calendar_event_id, so an already-synced stay is never duplicated.
+  Best-effort per stay, same as the original sync - one Google hiccup
+  doesn't stop the rest of the batch or turn into a visible error, it
+  just leaves that one stay to be picked up the next time the button is
+  clicked. 3 new Deno tests (creates one event per due stay and reports
+  the count; no-op with nothing due; still returns 200 with an
+  unreachable Google API) + 2 new Jest tests (shows "Added N stays..."
+  / "Already up to date"). 233 Jest -> 235, 29 Deno on admin-data
+  (202 -> 204 overall).
 - Sept 25, 2026 (3): "Let's create a feature where each confirmed
   booking goes onto my calendar." Google Calendar chosen over Apple/
   iCloud - Kim already has Gmail, Google's Calendar API is a

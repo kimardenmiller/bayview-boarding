@@ -177,6 +177,13 @@ async function updateCalendarEvent(eventId: string, d: CalendarEventDetails): Pr
   }
 }
 
+// Same fixed-business-timezone reasoning as send-reminders/send-pickup-
+// reminders - there's no "visitor" here, just an admin action, and a
+// plain Date.toISOString() would drift to UTC's own date near midnight.
+function todayInBusinessTimezone(): string {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "America/Los_Angeles" }).format(new Date());
+}
+
 // Row shape for syncStayCalendarEvent's own lookup below - Supabase-js
 // can't infer this from the select string alone, same reasoning as
 // RawDog/RawStayLink above.
@@ -371,6 +378,25 @@ export async function handleRequest(req: Request): Promise<Response> {
         })
         .eq("id", stayId);
       if (updateErr) throw updateErr;
+    } else if (action === "backfillCalendarEvents") {
+      // One-time catch-up for stays approved before the calendar feature
+      // existed, or from when Google Calendar was briefly unreachable
+      // (Sept 25, 2026, on request - "can we update the calendar with
+      // existing stays?"). Scoped to check_out >= today only, on request
+      // - a calendar entry for a stay that's already over isn't useful.
+      // Safe to click more than once: the calendar_event_id IS NULL
+      // filter means an already-synced stay is never touched twice.
+      const { data: dueStays, error: dueErr } = await supabase
+        .from("stays")
+        .select("id")
+        .eq("approval_status", "approved")
+        .is("calendar_event_id", null)
+        .gte("check_out", todayInBusinessTimezone());
+      if (dueErr) throw dueErr;
+      for (const s of (dueStays ?? []) as { id: string }[]) {
+        await syncStayCalendarEvent(s.id, { createIfMissing: true });
+      }
+      return json({ ...(await fetchDogsAndTotals()), backfilledCount: (dueStays ?? []).length });
     } else if (action === "markPaid") {
       // Just a status flip (Sept 21, 2026) - unlike billStay/approveStay/
       // denyStay, there's no client-facing text this is confirming went

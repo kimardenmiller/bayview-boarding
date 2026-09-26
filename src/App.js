@@ -947,6 +947,13 @@ function AdminView({
   const [broadcastSaveStatus, setBroadcastSaveStatus] = useState('idle'); // idle | saving | saved
   const [settingsError, setSettingsError] = useState('');
   const [savingSettings, setSavingSettings] = useState(false);
+  // One-time "add existing stays to the calendar" utility (Sept 25,
+  // 2026, on request) - a plain button rather than something that runs
+  // automatically, since it's a catch-up action, not a recurring one;
+  // safe to click more than once (admin-data's backfillCalendarEvents
+  // action only ever touches stays with no calendar_event_id yet).
+  const [backfillingCalendar, setBackfillingCalendar] = useState(false);
+  const [backfillCalendarStatus, setBackfillCalendarStatus] = useState('');
   // "Submit Idea" queue - fetched alongside the dog list at login, shown
   // as its own sub-view (see showFeedback) rather than mixed into the dog
   // list, since it's a different kind of thing to triage.
@@ -1508,6 +1515,32 @@ function AdminView({
     }
     setDogs(data.dogs);
     setTotalStays(data.totalStays);
+  }
+
+  // Catch-up for stays approved before the calendar feature existed, or
+  // from any stretch when Google Calendar was unreachable (Sept 25,
+  // 2026, on request - "can we update the calendar with existing
+  // stays?"). Best-effort like everything else calendar-related - a
+  // failure here just means try again later, never an error the admin
+  // has to do anything about.
+  async function backfillCalendar() {
+    setBackfillingCalendar(true);
+    setBackfillCalendarStatus('');
+    const { data, error: fnError } = await supabase.functions.invoke('admin-data', {
+      body: { password: pw, action: 'backfillCalendarEvents' },
+    });
+    setBackfillingCalendar(false);
+    if (fnError || data?.error) {
+      setBackfillCalendarStatus('Failed to sync. Please try again.');
+      return;
+    }
+    setDogs(data.dogs);
+    setTotalStays(data.totalStays);
+    setBackfillCalendarStatus(
+      data.backfilledCount === 0
+        ? 'Already up to date - nothing to add.'
+        : `Added ${data.backfilledCount} stay${data.backfilledCount === 1 ? '' : 's'} to the calendar.`
+    );
   }
 
   if (!authed) {
@@ -2238,6 +2271,18 @@ function AdminView({
         </div>
 
         <h3 className="admin-section-header">Site Settings</h3>
+
+        <div className="rate-setting calendar-backfill">
+          <label className="field-label">Google Calendar</label>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <button className="btn-secondary" style={{ padding: '6px 14px' }} disabled={backfillingCalendar} onClick={backfillCalendar}>
+              {backfillingCalendar ? 'Adding…' : 'Add Existing Stays to Calendar'}
+            </button>
+          </div>
+          <div style={{ fontSize: '0.75rem', color: '#6B7A8A', marginTop: 4 }}>
+            {backfillCalendarStatus || 'One-time catch-up for approved, upcoming stays booked before the calendar sync existed. Safe to click more than once.'}
+          </div>
+        </div>
 
         <div className="rate-setting day-rate-editor">
           <label className="field-label">Day Rate (per 24 hours)</label>
