@@ -147,12 +147,23 @@ function addMinutesToTime(time: string, minutes: number): string {
 // the real times from the booking. Falls back to 9am for either time if
 // somehow missing (shouldn't happen - both are required by the booking
 // form).
+// Google Calendar's PATCH is a merge, not a replace, at the field level
+// INSIDE start/end too (confirmed live, Sept 26, 2026 - every existing
+// stay's all-day PATCH failed with "Invalid start time" once this
+// shipped): sending `start: {date: ...}` over an event whose start
+// still has dateTime/timeZone from its old timed form leaves those
+// stale fields in place instead of clearing them, and an event with
+// BOTH date and dateTime set is invalid. Every body below explicitly
+// nulls out the field(s) that type does NOT use, so a PATCH actually
+// clears the other representation instead of merging into an invalid
+// mixed state. Harmless on a plain create (a null field there is just
+// absent).
 function allDayEventBody(d: CalendarEventDetails) {
   return {
     summary: `${d.dogNames.join(" & ")} — Bayview Boarding`,
     description: `Owner: ${d.ownerName} (${d.ownerPhone})`,
-    start: { date: d.checkIn },
-    end: { date: addDaysToDate(d.checkOut, 1) },
+    start: { date: d.checkIn, dateTime: null, timeZone: null },
+    end: { date: addDaysToDate(d.checkOut, 1), dateTime: null, timeZone: null },
   };
 }
 
@@ -161,8 +172,8 @@ function dropoffEventBody(d: CalendarEventDetails) {
   return {
     summary: `${d.dogNames.join(" & ")} — Drop-off`,
     description: `Owner: ${d.ownerName} (${d.ownerPhone})`,
-    start: { dateTime: `${d.checkIn}T${drop}`, timeZone: "America/Los_Angeles" },
-    end: { dateTime: `${d.checkIn}T${addMinutesToTime(drop, 30)}`, timeZone: "America/Los_Angeles" },
+    start: { dateTime: `${d.checkIn}T${drop}`, timeZone: "America/Los_Angeles", date: null },
+    end: { dateTime: `${d.checkIn}T${addMinutesToTime(drop, 30)}`, timeZone: "America/Los_Angeles", date: null },
   };
 }
 
@@ -171,8 +182,8 @@ function pickupEventBody(d: CalendarEventDetails) {
   return {
     summary: `${d.dogNames.join(" & ")} — Pickup`,
     description: `Owner: ${d.ownerName} (${d.ownerPhone})`,
-    start: { dateTime: `${d.checkOut}T${pickup}`, timeZone: "America/Los_Angeles" },
-    end: { dateTime: `${d.checkOut}T${addMinutesToTime(pickup, 30)}`, timeZone: "America/Los_Angeles" },
+    start: { dateTime: `${d.checkOut}T${pickup}`, timeZone: "America/Los_Angeles", date: null },
+    end: { dateTime: `${d.checkOut}T${addMinutesToTime(pickup, 30)}`, timeZone: "America/Los_Angeles", date: null },
   };
 }
 

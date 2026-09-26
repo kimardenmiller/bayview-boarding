@@ -1,6 +1,6 @@
 BAYVIEW BOARDING — FIX LIST
 ============================
-Last updated: September 26, 2026 (Calendar sync self-heals a deleted event, and the "Add Existing Stays" button now resyncs every stay, not just ones missing an id)
+Last updated: September 26, 2026 (2) (Fixed the real cause of the all-day calendar conversion silently failing: Google's PATCH merges into start/end instead of replacing it)
 
 NEXT CHANGE LIST (v1.5)
 -----------------------
@@ -43,6 +43,38 @@ DEFERRED (revisit only if it actually blocks something)
 
 COMPLETED
 ---------
+- Sept 26, 2026 (2): Found the actual root cause behind the Sept 26
+  fix below not working live - Kim deleted a stay's all-day event and
+  clicked "Add Existing Stays to Calendar" again, and it still didn't
+  come back. He pasted the Edge Function logs on request (I don't have
+  a way to pull Supabase logs myself - asked him to check the dashboard
+  and share them), which showed the REAL error on every single stay's
+  all-day PATCH, not just the deleted one: `400 "Invalid start time"`.
+  Google Calendar's `events.patch` merges fields into the existing
+  start/end object rather than replacing it wholesale (the assumption
+  the Sept 25 (5) split below was built on, and which every mocked Deno
+  test also assumed, since the mocks don't simulate Google's actual
+  merge behavior) - so sending `start: {date: ...}` over an event whose
+  start still has `dateTime`/`timeZone` from its old timed form leaves
+  those stale fields in place, and Google rejects an event with both
+  date AND dateTime set. This affected EVERY existing stay's all-day
+  conversion (any stay approved before the Sept 25 split), not just a
+  deleted one. Fixed: allDayEventBody/dropoffEventBody/pickupEventBody
+  now explicitly send `dateTime: null, timeZone: null` (all-day) or
+  `date: null` (drop-off/pickup) alongside the real values, forcing
+  Google to actually clear the other representation instead of merging
+  into an invalid mixed state. This also means a genuinely-deleted
+  event (the original "if I delete it, will it come back" question)
+  should now correctly surface as 404 and hit the self-healing path
+  from the Sept 26 fix below, rather than getting masked by this same
+  400 first.
+  Tests: extended the existing approveStay calendar test to assert the
+  null-clearing fields are actually present on all 3 event bodies
+  (would have caught this before it ever reached production, if the
+  mocked Google endpoint had been asserting response validity - the gap
+  was real Google behavior none of the mocks modeled). No test count
+  change (35 admin-data / 211 total) - existing tests extended, not new
+  ones added.
 - Sept 26, 2026: "My calendar still shows the stays with specific
   times... Does not seem to be working." Two real bugs found once the
   Sept 25 (5) all-day/drop-off/pickup split (below) shipped:

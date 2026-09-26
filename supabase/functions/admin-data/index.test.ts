@@ -402,18 +402,38 @@ Deno.test('approveStay: creates 3 Google Calendar events (all-day + drop-off + p
 
     const allDay = eventCalls.find((c) => (c.body as Record<string, unknown>).summary === 'Rex — Bayview Boarding')!;
     assertEquals((allDay.body as Record<string, unknown>).description, 'Owner: Kim Miller (4155550100)');
-    assertEquals((allDay.body as { start: { date: string } }).start.date, '2026-10-01');
+    const allDayStart = (allDay.body as { start: { date: string; dateTime: unknown; timeZone: unknown } }).start;
+    const allDayEnd = (allDay.body as { end: { date: string; dateTime: unknown; timeZone: unknown } }).end;
+    assertEquals(allDayStart.date, '2026-10-01');
     // check_out's day is exclusive on an all-day event - one day past
     // check_out (10-04, not 10-03) or the pickup day wouldn't show as occupied.
-    assertEquals((allDay.body as { end: { date: string } }).end.date, '2026-10-04');
+    assertEquals(allDayEnd.date, '2026-10-04');
+    // Explicitly null, not just absent (Sept 26, 2026, confirmed live) -
+    // Google Calendar's PATCH merges into the existing start/end object
+    // rather than replacing it, so converting a stay's old timed event
+    // to all-day needs these nulled to actually clear them, or Google
+    // rejects the result as "Invalid start time" (both date AND dateTime
+    // set at once).
+    assertEquals(allDayStart.dateTime, null);
+    assertEquals(allDayStart.timeZone, null);
+    assertEquals(allDayEnd.dateTime, null);
+    assertEquals(allDayEnd.timeZone, null);
 
     const dropoff = eventCalls.find((c) => (c.body as Record<string, unknown>).summary === 'Rex — Drop-off')!;
-    assertEquals((dropoff.body as { start: { dateTime: string } }).start.dateTime, '2026-10-01T09:00:00');
-    assertEquals((dropoff.body as { end: { dateTime: string } }).end.dateTime, '2026-10-01T09:30:00');
+    const dropoffStart = (dropoff.body as { start: { dateTime: string; date: unknown } }).start;
+    const dropoffEnd = (dropoff.body as { end: { dateTime: string; date: unknown } }).end;
+    assertEquals(dropoffStart.dateTime, '2026-10-01T09:00:00');
+    assertEquals(dropoffEnd.dateTime, '2026-10-01T09:30:00');
+    assertEquals(dropoffStart.date, null);
+    assertEquals(dropoffEnd.date, null);
 
     const pickup = eventCalls.find((c) => (c.body as Record<string, unknown>).summary === 'Rex — Pickup')!;
-    assertEquals((pickup.body as { start: { dateTime: string } }).start.dateTime, '2026-10-03T17:00:00');
-    assertEquals((pickup.body as { end: { dateTime: string } }).end.dateTime, '2026-10-03T17:30:00');
+    const pickupStart = (pickup.body as { start: { dateTime: string; date: unknown } }).start;
+    const pickupEnd = (pickup.body as { end: { dateTime: string; date: unknown } }).end;
+    assertEquals(pickupStart.dateTime, '2026-10-03T17:00:00');
+    assertEquals(pickupEnd.dateTime, '2026-10-03T17:30:00');
+    assertEquals(pickupStart.date, null);
+    assertEquals(pickupEnd.date, null);
 
     // All 3 event ids came back from the (stubbed) Google API and got
     // saved on the stay in one follow-up patch.
