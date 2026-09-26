@@ -1,14 +1,14 @@
 {
   "files": {
     "main.css": "https://bayviewboarding.com/static/css/main.39f57f1b.css",
-    "main.js": "https://bayviewboarding.com/static/js/main.5252284e.js",
+    "main.js": "https://bayviewboarding.com/static/js/main.4182a89d.js",
     "static/media/hero-dog.jpg": "https://bayviewboarding.com/static/media/hero-dog.ab3873eaabe0371f06ef.jpg",
     "index.html": "https://bayviewboarding.com/index.html",
     "main.39f57f1b.css.map": "https://bayviewboarding.com/static/css/main.39f57f1b.css.map",
-    "main.5252284e.js.map": "https://bayviewboarding.com/static/js/main.5252284e.js.map"
+    "main.4182a89d.js.map": "https://bayviewboarding.com/static/js/main.4182a89d.js.map"
   },
   "entrypoints": [
     "static/css/main.39f57f1b.css",
-    "static/js/main.5252284e.js"
+    "static/js/main.4182a89d.js"
   ]
 }
