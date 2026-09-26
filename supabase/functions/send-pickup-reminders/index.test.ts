@@ -18,9 +18,21 @@ interface StayRow {
   stay_dogs: { name: string }[];
 }
 
-// Fakes both the Supabase REST API (stays select/update, settings read)
-// and the function-to-function call to send-confirmation - distinguished
-// by pathname, since both go through the same global fetch.
+// "Due" (due_pickup_reminder_stay_ids, the real migration) means the
+// stay's actual pickup moment - check_out + pickup_time, in Pacific
+// time - is within 24 hours of now. This mock approximates Postgres's
+// `at time zone 'America/Los_Angeles'` with a fixed -07:00 (PDT) offset
+// - fine here since every fixture date in this file falls within
+// Pacific Daylight Time; the real DST-aware comparison happens in
+// Postgres, not in this mock.
+function pickupMoment(stay: StayRow): Date {
+  return new Date(`${stay.check_out}T${stay.pickup_time ?? '09:00:00'}-07:00`);
+}
+
+// Fakes both the Supabase REST API (the due_pickup_reminder_stay_ids
+// RPC, stays select/update, settings read) and the function-to-function
+// call to send-confirmation - distinguished by pathname, since both go
+// through the same global fetch.
 function stubEnvironment(
   stays: StayRow[],
   opts: { confirmationFails?: boolean; settings?: { sms_pickup_reminder: string } | null } = {},
@@ -47,13 +59,19 @@ function stubEnvironment(
       return new Response(settingsRow ? JSON.stringify(settingsRow) : 'null', { status: 200 });
     }
 
+    if (url.pathname.endsWith('/rpc/due_pickup_reminder_stay_ids') && method === 'POST') {
+      const now = new Date();
+      const dueIds = db.stays
+        .filter((s) => s.pickup_reminder_sent_at === null && pickupMoment(s).getTime() <= now.getTime() + 24 * 60 * 60 * 1000)
+        .map((s) => s.id);
+      return new Response(JSON.stringify(dueIds), { status: 200 });
+    }
+
     if (url.pathname.endsWith('/stays')) {
       if (method === 'GET') {
-        const checkOut = url.searchParams.get('check_out')?.replace('eq.', '');
-        const reminderNull = url.searchParams.get('pickup_reminder_sent_at') === 'is.null';
-        const matches = db.stays.filter((s) =>
-          (!checkOut || s.check_out === checkOut) && (!reminderNull || s.pickup_reminder_sent_at === null)
-        );
+        const idsParam = url.searchParams.get('id'); // "in.(id1,id2)"
+        const ids = idsParam ? idsParam.replace(/^in\.\(|\)$/g, '').split(',') : null;
+        const matches = db.stays.filter((s) => !ids || ids.includes(s.id));
         return new Response(JSON.stringify(matches), { status: 200 });
       }
       if (method === 'PATCH') {
@@ -109,9 +127,9 @@ Deno.test('rejects non-POST requests', async () => {
   }
 });
 
-Deno.test('sends a pickup reminder for a stay checking out tomorrow, then marks it sent', async () => {
-  const time = new FakeTime('2026-10-01T18:00:00Z');
-  const stub = stubEnvironment([stayDueTomorrow({}, time)]);
+Deno.test('sends a pickup reminder once the stay is within 24 hours of its actual pickup time, then marks it sent', async () => {
+  const time = new FakeTime('2026-10-01T18:00:00Z'); // 11am Pacific
+  const stub = stubEnvironment([stayDueTomorrow({}, time)]); // pickup tomorrow 9am - 22h away
   try {
     const res = await handleRequest(cronRequest());
     assertEquals(res.status, 200);
@@ -162,7 +180,7 @@ Deno.test('does not re-send to a stay that already has a pickup reminder recorde
   }
 });
 
-Deno.test('ignores stays checking out on a different day', async () => {
+Deno.test('ignores a stay whose pickup moment is more than 24 hours away', async () => {
   const time = new FakeTime('2026-10-01T18:00:00Z');
   const stub = stubEnvironment([stayDueTomorrow({ check_out: '2026-10-05' }, time)]);
   try {
@@ -170,6 +188,42 @@ Deno.test('ignores stays checking out on a different day', async () => {
     const data = await res.json();
     assertEquals(data.sent, 0);
     assertEquals(stub.confirmationCalls.length, 0);
+  } finally {
+    time.restore();
+    stub.restore();
+  }
+});
+
+// The actual bug report this fix addresses: a stay checking out
+// "tomorrow" by calendar date, but with a late pickup time, used to get
+// reminded first thing in the morning the day before - more like 30+
+// hours early, not 24.
+Deno.test('does NOT send a reminder ~22 hours before a late pickup time, even though check_out is tomorrow (the reported bug)', async () => {
+  const time = new FakeTime('2026-10-01T18:00:00Z'); // 11am Pacific, Oct 1
+  // Pickup tomorrow (Oct 2) at 5pm Pacific = Oct 3 00:00 UTC - that's
+  // 30 hours from now, well outside the 24-hour window.
+  const stub = stubEnvironment([stayDueTomorrow({ pickup_time: '17:00:00' }, time)]);
+  try {
+    const res = await handleRequest(cronRequest());
+    const data = await res.json();
+    assertEquals(data.sent, 0);
+    assertEquals(data.found, 0);
+    assertEquals(stub.confirmationCalls.length, 0);
+  } finally {
+    time.restore();
+    stub.restore();
+  }
+});
+
+Deno.test('sends the reminder once that same late-pickup stay actually crosses into the 24-hour window', async () => {
+  // 6pm Pacific on Oct 1 - exactly 24 hours before a 5pm Oct 2 pickup.
+  const time = new FakeTime('2026-10-02T01:00:00Z');
+  const stub = stubEnvironment([stayDueTomorrow({ check_out: '2026-10-02', pickup_time: '17:00:00' }, time)]);
+  try {
+    const res = await handleRequest(cronRequest());
+    const data = await res.json();
+    assertEquals(data.sent, 1);
+    assertEquals(stub.confirmationCalls.length, 1);
   } finally {
     time.restore();
     stub.restore();

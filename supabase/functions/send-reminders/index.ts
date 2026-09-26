@@ -1,11 +1,17 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
-// Sends the "your stay starts tomorrow" reminder text (FIXES.txt item 1).
-// Triggered once a day by a pg_cron job (see the migration) rather than
-// exactly 24 hours before each stay's own drop-off time - a fixed daily
-// batch at a normal business hour is simpler and avoids texting someone
-// at 2am just because that happens to be their drop-off time.
+// Sends the "your stay starts tomorrow" reminder text, exactly 24 hours
+// before each stay's own actual drop-off moment (check_in + drop_time,
+// Sept 26, 2026, on request, same fix as the pickup-side reminder -
+// "send the pickup reminder exactly when the stay is 24 hours away").
+// Originally ran once a day at a fixed cron time and matched on
+// calendar date alone ("check_in is tomorrow"), which sent anywhere
+// from ~21 to 33+ hours early depending on drop_time; "due" is now a
+// real 24-hour window computed by Postgres (due_dropoff_reminder_stay_ids
+// - see that migration for why this can't be done reliably in plain JS
+// against a named timezone), checked by the cron job every 15 minutes
+// instead of once a day.
 //
 // Not client-invoked - only the cron job should ever call this, so it's
 // deployed with --no-verify-jwt (like receive-sms, since Twilio/cron
@@ -22,16 +28,6 @@ function json(body: unknown, status = 200): Response {
     status,
     headers: { "Content-Type": "application/json" },
   });
-}
-
-// The business operates in one fixed timezone (San Rafael, CA), unlike
-// the booking form's own todayISO (src/App.js) which has to account for
-// whichever timezone the visitor is actually in - there's no "visitor"
-// here, just a scheduled job, so Pacific time is hardcoded rather than
-// derived from a request.
-function tomorrowInBusinessTimezone(): string {
-  const tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000);
-  return new Intl.DateTimeFormat("en-CA", { timeZone: "America/Los_Angeles" }).format(tomorrow);
 }
 
 interface DueStay {
@@ -55,7 +51,6 @@ export async function handleRequest(req: Request): Promise<Response> {
 
   try {
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
-    const tomorrow = tomorrowInBusinessTimezone();
 
     // The reminder wording and packing list are admin-editable (settings
     // table, Sept 16, 2026) - fetched once per run rather than per stay,
@@ -69,11 +64,20 @@ export async function handleRequest(req: Request): Promise<Response> {
       .eq("id", true)
       .maybeSingle();
 
-    const { data: dueStays, error: queryErr } = await supabase
-      .from("stays")
-      .select("id, check_in, drop_time, owners(name, phone), stay_dogs(name)")
-      .eq("check_in", tomorrow)
-      .is("reminder_sent_at", null);
+    // due_dropoff_reminder_stay_ids (migration) does the actual "is this
+    // stay's real drop-off moment within 24 hours" comparison in
+    // Postgres, in the business's own Pacific timezone - not something
+    // plain JS date math can do correctly against a named timezone (DST).
+    const { data: dueIds, error: dueErr } = await supabase.rpc("due_dropoff_reminder_stay_ids");
+    if (dueErr) throw dueErr;
+    const ids = (dueIds ?? []) as string[];
+
+    const { data: dueStays, error: queryErr } = ids.length === 0
+      ? { data: [] as DueStay[], error: null }
+      : await supabase
+        .from("stays")
+        .select("id, check_in, drop_time, owners(name, phone), stay_dogs(name)")
+        .in("id", ids);
     if (queryErr) throw queryErr;
 
     let sent = 0;
@@ -122,7 +126,7 @@ export async function handleRequest(req: Request): Promise<Response> {
       sent++;
     }
 
-    return json({ date: tomorrow, found: (dueStays ?? []).length, sent, failed });
+    return json({ found: (dueStays ?? []).length, sent, failed });
   } catch (err) {
     console.error("send-reminders error:", err);
     return json({ error: (err as Error).message }, 500);

@@ -1,6 +1,6 @@
 BAYVIEW BOARDING — FIX LIST
 ============================
-Last updated: September 26, 2026 (3) (Calendar sync now un-cancels an event deleted through the Google Calendar UI - it was surviving as invisible "cancelled", not actually gone)
+Last updated: September 26, 2026 (4) (Drop-off/pickup reminders now fire exactly 24 hours before each stay's real time, not once daily at a fixed hour - checked every 15 min instead of once a day)
 
 NEXT CHANGE LIST (v1.5)
 -----------------------
@@ -43,6 +43,65 @@ DEFERRED (revisit only if it actually blocks something)
 
 COMPLETED
 ---------
+- Sept 26, 2026 (4): "The pickup reminder just went out to Tom Maddox,
+  but pickup is not 24 hours away yet. Send the pickup reminder exactly
+  when the stay is 24 hours away. How do we trigger these, a cron job?"
+  Yes - pg_cron + pg_net, same as everything scheduled in this app. The
+  actual bug: both send-reminders (drop-off) and send-pickup-reminders
+  ran once a day at a fixed cron time (~9am Pacific) and matched stays
+  by calendar DATE alone ("check_in/check_out is tomorrow") - so a
+  stay with a late drop-off/pickup time got reminded anywhere from ~21
+  to 33+ hours early, not a consistent 24. Also applied the identical
+  fix to the drop-off reminder proactively, since it has the exact same
+  bug for the exact same reason, even though only the pickup side had
+  been reported.
+
+  Fixed with 2 new SQL functions, due_dropoff_reminder_stay_ids()/
+  due_pickup_reminder_stay_ids() (migration
+  20260926000000_reminder_due_functions.sql) - each computes a stay's
+  real drop-off/pickup MOMENT (date + time) in Pacific time via
+  Postgres's `at time zone 'America/Los_Angeles'` and returns only
+  stays within 24 hours of it now; this genuinely can't be done
+  reliably in plain JS against a named timezone (DST), which is why it
+  lives in Postgres, not the Edge Functions. Both Edge Functions now
+  call their RPC to get due stay ids, then fetch just those rows -
+  everything else about how they send/mark-sent is unchanged. The cron
+  schedule itself also moved from once daily to every 15 minutes
+  (migration 20260926000001_reminder_cron_15min.sql,
+  send-stay-reminders-every-15-min/send-stay-pickup-reminders-every-
+  15-min replacing the old *-daily jobs) - a precise 24-hour window is
+  meaningless if the job checking it only runs once a day. The cron
+  migration is production-only, deliberately - staging has never had
+  these jobs scheduled (see Staging environment); the due_* functions
+  themselves ARE on staging too, needed for the Edge Functions to work
+  there at all when manually invoked.
+
+  Hit a real, unrelated discovery applying this to staging: its
+  `stays` table was missing `reminder_sent_at` entirely - a gap in the
+  original Sept 14 bootstrap that had never surfaced until this
+  migration's SQL referenced the column directly. Fixed with a direct
+  `alter table ... add column` via `db query` (see CLAUDE.md's Staging
+  environment section for the full account).
+
+  Tests: rewrote both Deno test suites' due-stay stubs to mock the new
+  RPC endpoints instead of matching on check_in/check_out equality,
+  plus 2 new tests per function reproducing the exact reported bug (a
+  late-time stay is NOT sent ~22 hours early, but IS sent once it
+  genuinely crosses the 24-hour mark). send-reminders: 10 -> 12,
+  send-pickup-reminders: 10 -> 12 (211 -> 215 overall). No Jest changes
+  - nothing here is frontend-visible.
+
+  Also hit and fixed an unrelated environment problem while running
+  tests this round: `CI=true npx react-scripts test` started failing
+  with yargs/jest-cli errors having nothing to do with this change -
+  traced to a node_modules file (jest-cli's args.js) that had a
+  plausible size on disk but read back with empty exports, consistent
+  with Dropbox's CloudStorage virtualization serving a stale/corrupted
+  cached copy (this project's known ongoing friction, documented
+  elsewhere in this file/CLAUDE.md). Fixed with a clean `rm -rf
+  node_modules && npm ci` - if `npm test` ever starts failing with
+  errors that don't trace to anything actually changed, this is worth
+  trying before assuming a real regression.
 - Sept 26, 2026 (3): The (2) fix below cleared the "Invalid start time"
   errors, and every other stay converted to all-day correctly - but the
   ONE stay Kim had actually deleted to test the self-healing logic (the

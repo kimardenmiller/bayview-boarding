@@ -74,11 +74,14 @@ Kim Miller and Estee Fletter at 210 Bayview Drive, San Rafael, CA.
   confirmation text (or a decline) - the client's immediate text at
   submission is a separate, distinct "request received" message.
 - Twilio SMS: booking confirmations (sent once admin approves a
-  request, not at submission - Sept 21, 2026), stay reminders
-  (a daily cron job texts everyone checking in the next day, Sept 16 —
-  see supabase/functions/send-reminders), pickup reminders (the same
-  idea for the day before check_out instead of check_in, Sept 17 - see
-  supabase/functions/send-pickup-reminders), and billing texts (admin-
+  request, not at submission - Sept 21, 2026), stay reminders (a cron
+  job checks every 15 minutes and texts each stay exactly 24 hours
+  before its own real drop-off moment, Sept 16, 2026, precise timing
+  added Sept 26 - see supabase/functions/send-reminders and Data
+  model's Reminder timing), pickup reminders (the same idea for the
+  24 hours before check-out's pickup moment instead of check-in's
+  drop-off, Sept 17 - see supabase/functions/send-pickup-reminders),
+  and billing texts (admin-
   triggered, editable final cost, not auto-sent — the estimate can be
   wrong by pickup). A2P 10DLC is APPROVED (confirmed via the API Sept
   16, 2026) - real sends actually go through. Every dollar amount is a
@@ -290,8 +293,9 @@ placeholder. Unbilled Stays/Past Stays both filter to
 a real booking, so it never shows up in either.
 
 `stays.reminder_sent_at` (Sept 16, 2026) marks a stay's drop-off reminder
-text as already sent, so the daily cron job can't double-text someone on
-a retried or overlapping run. `stays.pickup_reminder_sent_at` (Sept 17,
+text as already sent, so the cron job (every 15 minutes since Sept 26,
+2026 - see Reminder timing below) can't double-text someone on a
+retried or overlapping run. `stays.pickup_reminder_sent_at` (Sept 17,
 2026) is the same idea for the pickup-side reminder (see send-pickup-
 reminders below) - a separate column since it's a separate cron/message.
 
@@ -432,14 +436,42 @@ send-reminders via pg_net with an x-cron-secret header, read from
 `vault.decrypted_secrets where name = 'cron_secret'` - the actual value
 is deliberately not in any git-tracked file. send-pickup-reminders (Sept
 17, 2026) reuses this exact same secret/vault entry, just a second cron
-schedule (send-stay-pickup-reminders-daily, 5 min offset) pointed at a
-different function - no separate secret needed. If the cron job or the
-vault secret is ever lost/needs rotating: generate a random value, run
+schedule pointed at a different function - no separate secret needed.
+If the cron job or the vault secret is ever lost/needs rotating:
+generate a random value, run
 `select vault.create_secret('<value>', 'cron_secret');` directly against
 the live database (not saved as a migration), and
 `supabase secrets set CRON_SECRET=<same value>` so the Edge Function can
 check it. The migration only needs re-running if the cron.schedule()
 call itself is dropped, not for a routine secret rotation.
+
+**Reminder timing** (Sept 26, 2026, on request - "the pickup reminder
+just went out to Tom Maddox, but pickup is not 24 hours away yet"):
+both reminder crons originally ran once a day at a fixed time (~9am
+Pacific) and matched stays by calendar date alone ("check_in/check_out
+is tomorrow"), so a stay with a late drop-off/pickup time got reminded
+anywhere from ~21 to 33+ hours early, not a consistent 24. Fixed by
+replacing the date match with 2 SQL functions,
+`due_dropoff_reminder_stay_ids()`/`due_pickup_reminder_stay_ids()`
+(migration 20260926000000_reminder_due_functions.sql) - each computes
+a stay's real drop-off/pickup MOMENT (date + time) in the business's
+own Pacific timezone via `at time zone 'America/Los_Angeles'` and
+returns only stays whose moment is now within 24 hours; this can't be
+done reliably in plain JS against a named timezone (DST), which is why
+it lives in Postgres rather than in the Edge Function itself. Both
+functions are deployed to staging too (needed for the functions to work
+there at all if manually invoked), but the cron schedule that calls
+them on a timer is production-only, same as before - see the next
+paragraph and Staging environment below.
+The cron schedule itself was also changed (migration
+20260926000001_reminder_cron_15min.sql) from once daily to every 15
+minutes (`send-stay-reminders-every-15-min`/
+`send-stay-pickup-reminders-every-15-min`, replacing
+`send-stay-reminders-daily`/`send-pickup-reminders-daily` - the old
+job names are unscheduled first, conditionally, so this migration
+doesn't error on a database that never had them, e.g. staging), since a
+precise 24-hour window is meaningless if the job checking it only runs
+once a day.
 
 ## Tech stack
 - React (Create React App)
@@ -547,7 +579,20 @@ ran (`relation "owners" already exists`). Applying just the one new
 migration directly - `supabase db query --linked --file
 supabase/migrations/<file>.sql` - works fine and is the right move here;
 `db push` on staging should be expected to fail this way indefinitely,
-not treated as a real error each time. Staging has no cron jobs scheduled (send-reminders/send-
+not treated as a real error each time. A second consequence, discovered
+Sept 26, 2026: the skip-the-cron-parts bootstrap missed more than just
+cron.schedule() for the Sept 16 stay-reminders migration specifically -
+staging never got `stays.reminder_sent_at` at all (the Sept 17
+migration's own non-cron parts, billed_at/pickup_reminder_sent_at, DID
+make it in fine) - a gap nothing had surfaced until send-reminders'
+new due_dropoff_reminder_stay_ids() RPC (Data model's Reminder timing)
+tried to reference that column and got `column "reminder_sent_at" does
+not exist`. Fixed directly (`alter table public.stays add column if
+not exists reminder_sent_at timestamptz;` via `db query`) rather than
+worth a dedicated migration, same reasoning as the db-push workaround
+above - if another such gap ever turns up, check for it the same way:
+compare staging's actual columns/functions against what a migration
+expects, don't assume the bootstrap was complete. Staging has no cron jobs scheduled (send-reminders/send-
 pickup-reminders are deployed and manually callable, just not on a
 daily schedule - testers exercise the booking flow directly) and no
 Twilio credentials at all, by decision (Sept 21, 2026) rather than an
@@ -628,9 +673,9 @@ visitor never reads.
 - supabase/functions/send-contact/index.ts — public Contact Us form handler: relays name/email-or-phone/message to Kim & Estee by SMS (reuses KIM_PHONE/ESTEE_PHONE). Deployed normally (no --no-verify-jwt) since it's called via the Supabase JS client like settings/lookup-client/submit-booking
 - supabase/functions/feedback/index.ts — "Submit Idea": public submit (no password, also texts Kim & Estee) + admin list/status-update/delete (password) for the feedback queue
 - supabase/functions/testers/index.ts — tester broadcast list: entirely admin-password-gated list/add/remove/notify (no public branch at all); notify greets each active tester by their own first name
-- supabase/functions/send-pickup-reminders/index.ts — daily cron target, the pickup-side counterpart to send-reminders: finds stays checking out tomorrow, texts each via send-confirmation (type "pickup"), marks pickup_reminder_sent_at. Deployed with `--no-verify-jwt` - same care needed on redeploy as send-reminders
+- supabase/functions/send-pickup-reminders/index.ts — cron target (every 15 minutes, Sept 26, 2026 - see Data model's Reminder timing), the pickup-side counterpart to send-reminders: asks due_pickup_reminder_stay_ids() (RPC) which stays are within 24 hours of their real pickup moment, texts each via send-confirmation (type "pickup"), marks pickup_reminder_sent_at. Deployed with `--no-verify-jwt` - same care needed on redeploy as send-reminders
 - public/img/about/ — the 6 numbered photos on the About page, served from the public folder (not bundled) and referenced via process.env.PUBLIC_URL since the app is hosted at a subpath
-- supabase/functions/send-reminders/index.ts — daily cron target (pg_cron + pg_net, see the migration): finds stays checking in tomorrow, fetches the current sms_reminder template + packing_list from `settings`, texts each via send-confirmation, marks reminder_sent_at. Deployed with `--no-verify-jwt`; checks its own CRON_SECRET instead (see Data model for how that secret is set up without ever being committed) - be careful to keep that flag on every redeploy (a plain `supabase functions deploy send-reminders` silently re-enables JWT verification and would break the cron, same bug class as the receive-sms incident)
+- supabase/functions/send-reminders/index.ts — cron target (pg_cron + pg_net, every 15 minutes, Sept 26, 2026 - see Data model's Reminder timing; was once daily): asks due_dropoff_reminder_stay_ids() (RPC) which stays are within 24 hours of their real drop-off moment, fetches the current sms_reminder template + packing_list from `settings`, texts each via send-confirmation, marks reminder_sent_at. Deployed with `--no-verify-jwt`; checks its own CRON_SECRET instead (see Data model for how that secret is set up without ever being committed) - be careful to keep that flag on every redeploy (a plain `supabase functions deploy send-reminders` silently re-enables JWT verification and would break the cron, same bug class as the receive-sms incident)
 - supabase/functions/settings/index.ts — public read (PUBLIC_COLUMNS) / password-gated read or write (ADMIN_COLUMNS) of day rate, minimum stay in days (Sept 24, 2026, must be positive), multi-dog discount, holiday upcharge, vet list, packing list, the About page's photo list (about_photos - Sept 21, 2026, just `{path, alt}` pairs; the actual files live in Storage, see about-photos below), the 6 SMS templates (confirmation/drop-off reminder/pickup reminder/billing/request-received/denied - the last 2 added Sept 21, 2026), the shared sms_footer, and (admin-only) the 2 manager phone numbers plus the tester broadcast's default_broadcast_message
 - supabase/functions/about-photos/index.ts — manages the actual image files behind settings.about_photos (Sept 21, 2026); entirely admin-password-gated, 2 actions: upload (multipart/form-data: password, file, alt? - stores the file in the "about-photos" Storage bucket under a fresh random name, never the client's own filename, and appends {path, alt} to settings.about_photos) and delete (JSON: password, action 'delete', path - removes the file from Storage AND drops that entry from settings.about_photos in the same call). Reordering/alt-text edits for existing photos don't touch this function at all - they're just settings.about_photos array edits, saved through the settings function like everything else there
 - supabase/functions/submit-booking/index.ts — handles booking submission: find-or-create owner (by phone) and each dog (by owner+name), inserts the stay (incl. waiver_snapshot, approval_status 'pending' - Sept 21, 2026) + stay_dogs snapshot links (service role key). Each dog's optional photoPaths (Sept 21, 2026 as photoPath; array since Sept 22, 2026, from the dog-photos function's own upload responses, one call per file) is saved to dogs.photo_paths ONLY when at least one new one is given - a returning dog's existing photo set is never silently cleared - and snapshotted onto stay_dogs.photo_paths either way (falling back to whatever's currently on the dog's profile if none came with this submission)

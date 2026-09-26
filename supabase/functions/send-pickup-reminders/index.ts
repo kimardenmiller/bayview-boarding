@@ -1,11 +1,17 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
-// Sends the "we'll see you tomorrow for pickup" text, the day before
-// check_out - the pickup-side counterpart to send-reminders (which does
-// the same thing for drop-off, the day before check_in). Same fixed-
-// daily-batch reasoning: simpler than timing to each stay's own exact
-// pickup time, and avoids texting someone at 2am.
+// Sends the "we'll see you tomorrow for pickup" text, exactly 24 hours
+// before each stay's own actual pickup moment (check_out + pickup_time,
+// Sept 26, 2026, on request - "send the pickup reminder exactly when
+// the stay is 24 hours away") - the pickup-side counterpart to
+// send-reminders (drop-off). Originally ran once a day at a fixed cron
+// time and matched on calendar date alone ("check_out is tomorrow"),
+// which sent anywhere from ~21 to 33+ hours early depending on
+// pickup_time; "due" is now a real 24-hour window computed by Postgres
+// (due_pickup_reminder_stay_ids - see that migration for why this can't
+// be done reliably in plain JS against a named timezone), checked by
+// the cron job every 15 minutes instead of once a day.
 //
 // Not client-invoked - only the cron job should ever call this, so it's
 // deployed with --no-verify-jwt and checks its own shared secret
@@ -20,13 +26,6 @@ function json(body: unknown, status = 200): Response {
     status,
     headers: { "Content-Type": "application/json" },
   });
-}
-
-// Same fixed-business-timezone reasoning as send-reminders - there's no
-// "visitor" here, just a scheduled job.
-function tomorrowInBusinessTimezone(): string {
-  const tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000);
-  return new Intl.DateTimeFormat("en-CA", { timeZone: "America/Los_Angeles" }).format(tomorrow);
 }
 
 interface DueStay {
@@ -50,7 +49,6 @@ export async function handleRequest(req: Request): Promise<Response> {
 
   try {
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
-    const tomorrow = tomorrowInBusinessTimezone();
 
     // The pickup-reminder wording is admin-editable (settings table) -
     // fetched once per run, passed through to send-confirmation (which
@@ -63,11 +61,20 @@ export async function handleRequest(req: Request): Promise<Response> {
       .eq("id", true)
       .maybeSingle();
 
-    const { data: dueStays, error: queryErr } = await supabase
-      .from("stays")
-      .select("id, check_out, pickup_time, owners(name, phone), stay_dogs(name)")
-      .eq("check_out", tomorrow)
-      .is("pickup_reminder_sent_at", null);
+    // due_pickup_reminder_stay_ids (migration) does the actual "is this
+    // stay's real pickup moment within 24 hours" comparison in Postgres,
+    // in the business's own Pacific timezone - not something plain JS
+    // date math can do correctly against a named timezone (DST).
+    const { data: dueIds, error: dueErr } = await supabase.rpc("due_pickup_reminder_stay_ids");
+    if (dueErr) throw dueErr;
+    const ids = (dueIds ?? []) as string[];
+
+    const { data: dueStays, error: queryErr } = ids.length === 0
+      ? { data: [] as DueStay[], error: null }
+      : await supabase
+        .from("stays")
+        .select("id, check_out, pickup_time, owners(name, phone), stay_dogs(name)")
+        .in("id", ids);
     if (queryErr) throw queryErr;
 
     let sent = 0;
@@ -116,7 +123,7 @@ export async function handleRequest(req: Request): Promise<Response> {
       sent++;
     }
 
-    return json({ date: tomorrow, found: (dueStays ?? []).length, sent, failed });
+    return json({ found: (dueStays ?? []).length, sent, failed });
   } catch (err) {
     console.error("send-pickup-reminders error:", err);
     return json({ error: (err as Error).message }, 500);
