@@ -3058,7 +3058,12 @@ function SubmitIdea({ onBack }) {
 }
 
 export default function App() {
-  const [showLanding, setShowLanding] = useState(true);
+  // Landing page by default, but a bookmarked/linked URL (?book) jumps
+  // straight into the booking flow instead - same pattern as ?admin
+  // below (Sept 26, 2026, on request - a direct "start booking" link
+  // for Google Business Profile's booking-link field, which wants
+  // customers dropped right into checkout, not a marketing page first).
+  const [showLanding, setShowLanding] = useState(() => !new URLSearchParams(window.location.search).has('book'));
   const [showContact, setShowContact] = useState(false);
   const [showSubmitIdea, setShowSubmitIdea] = useState(false);
   const [step, setStep] = useState(0);

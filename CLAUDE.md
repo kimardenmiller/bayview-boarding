@@ -212,6 +212,13 @@ Kim Miller and Estee Fletter at 210 Bayview Drive, San Rafael, CA.
   fallback, invisible to any real visitor - Google's own OAuth consent
   screen asking for reachable privacy policy/terms of service URLs is
   what surfaced that gap)
+- A bookmarked `?book` URL (e.g. `https://bayviewboarding.com/?book`,
+  Sept 26, 2026, on request - for Google Business Profile's own
+  booking-link field, which wants customers dropped directly into a
+  booking flow rather than a marketing page first) skips the landing
+  page and opens straight to Owner Information - same
+  `useState(() => new URLSearchParams(...))` pattern as the existing
+  `?admin` URL just below.
 - "Contact Us" page — relays a name/email-or-phone/message submission to
   Kim & Estee by SMS via send-contact (Sept 16, 2026)
 - "Submit Idea" page (Sept 16 (8), simplified (9)) — one open message box
@@ -694,7 +701,7 @@ visitor never reads.
 - src/App.js — main app
 - src/settings.js — all configurable values (rates, vets, messages, packing list)
 - src/waiver.js — full waiver text
-- src/App.test.js — 237 passing tests (TDD), Supabase mocked via src/__mocks__/supabase.js
+- src/App.test.js — 238 passing tests (TDD), Supabase mocked via src/__mocks__/supabase.js
 - src/supabase.js — creates the Supabase client from REACT_APP_SUPABASE_URL/_KEY (falling back to production's own public values) - see Staging environment above for how the staging build overrides these
 - src/index.js — app entry point; also where Google Analytics loads (production only) and staging's noindex meta tag gets injected - see SEO & Analytics above
 - supabase/functions/send-contact/index.ts — public Contact Us form handler: relays name/email-or-phone/message to Kim & Estee by SMS (reuses KIM_PHONE/ESTEE_PHONE). Deployed normally (no --no-verify-jwt) since it's called via the Supabase JS client like settings/lookup-client/submit-booking

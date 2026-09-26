@@ -298,6 +298,12 @@ function goToAdminUrl() {
   window.history.pushState({}, '', '/?admin');
 }
 
+// A direct "start booking" link (Sept 26, 2026, on request - for Google
+// Business Profile's booking-link field) - skips the landing page.
+function goToBookUrl() {
+  window.history.pushState({}, '', '/?book');
+}
+
 async function loginAsAdmin(dogs = SAMPLE_DOGS, totalStays = SAMPLE_TOTAL_STAYS) {
   mockInvokeDefaults({ 'admin-data': async () => ({ data: { dogs, totalStays }, error: null }) });
   goToAdminUrl();
@@ -1203,6 +1209,13 @@ describe('Submit Idea', () => {
 
 // ── Step 1: Owner Info (now also vet + Number of Dogs) ──────────────────────
 describe('Step 1 — Owner Info', () => {
+  test('a bookmarked ?book URL jumps straight into the booking flow, skipping the landing page (Sept 26, 2026)', async () => {
+    goToBookUrl();
+    render(<App />);
+    expect(await screen.findByText('Owner Information')).toBeInTheDocument();
+    expect(screen.queryByText('Dog Paradise Above Loch Lomond')).not.toBeInTheDocument();
+  });
+
   test('shows the "non-binding request" notice above Owner Information (Sept 21, 2026 - moved here from the landing page)', async () => {
     await goToOwnerStep();
     expect(screen.getByText(/non-binding booking request/)).toBeInTheDocument();
