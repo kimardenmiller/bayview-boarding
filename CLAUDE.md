@@ -356,12 +356,10 @@ day, before the feature had shipped to more than a handful of stays -
 see supabase/migrations/20260925010000_stay_calendar_events_split.sql.
 Auth is a personal Gmail OAuth refresh token (not a service account -
 Google Workspace-only), obtained via a one-time manual authorization;
-see FIXES.txt for the exact steps and an important caveat: a refresh
-token issued while the Google Cloud OAuth consent screen is in
-"Testing" status expires after 7 days, not indefinitely - moving that
-consent screen to "Published" and redoing the one-time authorization
-once is a real, not-yet-done follow-up (see NEXT CHANGE LIST) to make
-this actually durable long-term.
+see FIXES.txt for the exact steps. The OAuth consent screen is
+Published (Sept 26, 2026 - moved off Testing status specifically
+because a Testing-status app's refresh tokens expire after 7 days;
+Published ones don't).
 
 `dogs.photo_paths`/`stay_dogs.photo_paths` (Sept 21, 2026 as a single
 `photo_path`; replaced with a jsonb array Sept 22, 2026 to allow more
@@ -491,7 +489,7 @@ once a day.
 - Admin password: set as the `ADMIN_PASSWORD` Supabase secret (`supabase secrets set ADMIN_PASSWORD=...`) — never in source, checked server-side by the admin-data function
 - Twilio phone: see src/settings.js PHONE (business's own public contact number)
 - Twilio auth (Sept 21, 2026): every function that sends an outbound SMS (send-confirmation, send-contact, testers, feedback, receive-sms's own reply) authenticates with `TWILIO_API_KEY_SID`/`TWILIO_API_KEY_SECRET` if set, falling back to `TWILIO_ACCOUNT_SID`/`TWILIO_AUTH_TOKEN` otherwise — a restricted, independently-revocable API key is Twilio's own recommendation over the Auth Token (full, unscoped account access). Production has the API key set; the fallback exists for a genuine Twilio "Test Credentials" pair, which has no API-key equivalent - staging ended up with neither (see Staging environment below for why), so it currently has no Twilio credentials at all and its outbound sends just fail. `TWILIO_ACCOUNT_SID` is always required on whichever environment does have credentials (every request URL needs the real Account SID regardless of which credential authenticates it), and `TWILIO_AUTH_TOKEN` stays in use by receive-sms specifically for Twilio's webhook signature check, which only works with the real Auth Token — never an API key.
-- Google Calendar (Sept 25, 2026, admin-data only - see Data model's stays.calendar_allday_event_id): `GOOGLE_CALENDAR_CLIENT_ID`/`GOOGLE_CALENDAR_CLIENT_SECRET`/`GOOGLE_CALENDAR_REFRESH_TOKEN`/`GOOGLE_CALENDAR_ID` Supabase secrets, production only (staging has none set, same pattern as Twilio above). A personal Gmail OAuth Client (Desktop app type, Testing publishing status) + a one-time-authorized refresh token, not a service account - Workspace-only service accounts don't work with a plain Gmail address. See FIXES.txt for the exact setup steps and the 7-day-expiry caveat while the consent screen stays in Testing status.
+- Google Calendar (Sept 25, 2026, admin-data only - see Data model's stays.calendar_allday_event_id): `GOOGLE_CALENDAR_CLIENT_ID`/`GOOGLE_CALENDAR_CLIENT_SECRET`/`GOOGLE_CALENDAR_REFRESH_TOKEN`/`GOOGLE_CALENDAR_ID` Supabase secrets, production only (staging has none set, same pattern as Twilio above). A personal Gmail OAuth Client (Desktop app type) + a one-time-authorized refresh token, not a service account - Workspace-only service accounts don't work with a plain Gmail address. The OAuth consent screen is Published (moved off Testing status Sept 26, 2026 - a Testing-status app's refresh tokens expired after 7 days; publishing removes that cap, confirmed by the token response no longer including a `refresh_token_expires_in` field at all). Publishing a personal single-user app doesn't require Google's formal verification review - expect the standard "Google hasn't verified this app" warning on every future re-authorization regardless, click through via Advanced -> "Go to Bayview Boarding (unsafe)". See FIXES.txt Sept 26 (8) for the exact steps (including the "Missing domain" Authorized-domains gotcha) if this OAuth client ever needs recreating or re-authorizing again.
 
 ## Domain (Sept 23-25, 2026)
 Production is served at its own custom domain, bayviewboarding.com

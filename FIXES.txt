@@ -1,6 +1,6 @@
 BAYVIEW BOARDING — FIX LIST
 ============================
-Last updated: September 26, 2026 (7) (Privacy Policy added to the hamburger nav menu - it existed but was unreachable for any real visitor)
+Last updated: September 26, 2026 (8) (Google Calendar OAuth consent screen published; refresh token no longer expires after 7 days)
 
 NEXT CHANGE LIST (v1.5)
 -----------------------
@@ -16,20 +16,6 @@ NEXT CHANGE LIST (v1.5)
    was submitted.
    This item itself never gets "done" - it's a recurring habit, not a
    one-time task.
-2. Move the Google Calendar OAuth consent screen from "Testing" to
-   "Published" status, then redo the one-time authorization ONE more
-   time to get a refresh token that doesn't expire (see COMPLETED for
-   the full setup and why this matters: a refresh token issued to a
-   Testing-status app expires after 7 days - the one currently in place,
-   set Sept 25, 2026, will stop working around Oct 2, 2026, and calendar
-   events will silently stop being created/updated - approving/editing
-   stays themselves will keep working fine either way, since this is
-   all best-effort). Publishing doesn't require Google's formal
-   verification review for a personal-use app with only one user - just
-   click Publish on the OAuth consent screen, then redo the
-   authorization URL flow (see COMPLETED) to get the new long-lived
-   token, then `supabase secrets set GOOGLE_CALENDAR_REFRESH_TOKEN=...`
-   with the new one on production.
 
 DEFERRED (revisit only if it actually blocks something)
 ---------------------------------------------------------
@@ -43,6 +29,28 @@ DEFERRED (revisit only if it actually blocks something)
 
 COMPLETED
 ---------
+- Sept 26, 2026 (8): Published the Google Calendar OAuth consent screen
+  and re-authorized, closing out the 7-day-refresh-token caveat from
+  Sept 25 (3)/(4) below. Hit "Missing domain: BayviewBoarding.com" while
+  filling in the consent screen's Branding fields at first - resolved
+  once bayviewboarding.com was added to Authorized domains specifically
+  (a separate field from the actual Privacy Policy/Terms/App home page
+  URL boxes - easy to fill in the URLs and still miss this). Publishing
+  triggers Google's standard "app hasn't been verified" warning for a
+  sensitive scope (Calendar) - expected, not a problem, since a
+  personal single-user app doesn't need Google's formal review; clicked
+  through via Advanced -> "Go to Bayview Boarding (unsafe)". Re-ran the
+  one-time authorization (same Client ID, hit a stale/mistyped client
+  secret first - fixed by regenerating one via Credentials > Add Secret
+  in Google Cloud Console) and confirmed the new token response has NO
+  refresh_token_expires_in field at all (versus 604799/7 days on the
+  original Testing-status token) - the publish genuinely worked. Set as
+  GOOGLE_CALENDAR_REFRESH_TOKEN on production
+  (`supabase secrets set`). Verified live: clicked "Add Existing Stays
+  to Calendar" (no errors in the admin-data logs), then confirmed
+  directly in Google Calendar that events are present and correct.
+  No code changes - purely a Google Cloud Console + Supabase secret
+  operation.
 - Sept 26, 2026 (7): "[Google's OAuth] Branding wants my privacy page,
   where is that, and should that be off our menu?" - then, seconds
   later, "and I need a Application terms of service link." public/
