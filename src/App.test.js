@@ -939,6 +939,15 @@ describe('Landing — About Us, embedded on the home page', () => {
     starRows.forEach(row => expect(row.textContent).toBe('★★★★★'));
   });
 
+  test('About section invites a Google review, linking to the Business Profile\'s review form (Sept 26, 2026, on request)', () => {
+    render(<App />);
+    const link = screen.getByText('Leave us a Google review');
+    expect(link.tagName).toBe('A');
+    expect(link).toHaveAttribute('href', 'https://g.page/r/CX9YK-LEWX_nEAI/review');
+    expect(link).toHaveAttribute('target', '_blank');
+    expect(link).toHaveAttribute('rel', expect.stringContaining('noopener'));
+  });
+
   test('shows a keyword-bearing tagline under the About title, for local search (Sept 23, 2026, on request)', () => {
     render(<App />);
     expect(screen.getByText(/Home-based dog boarding in San Rafael, CA/)).toBeInTheDocument();

@@ -201,7 +201,12 @@ Kim Miller and Estee Fletter at 210 Bayview Drive, San Rafael, CA.
   Its photo gallery is admin-manageable now (Sept 21, 2026 - see Data
   model's settings.about_photos and Admin panel below), not a hardcoded
   array - the actual image files live in Supabase Storage instead of
-  the git-tracked public/ folder.
+  the git-tracked public/ folder. Right below the Rover review quotes,
+  a "Leave us a Google review" link (Sept 26, 2026, on request, once
+  the Business Profile itself existed - GOOGLE_REVIEW_URL in App.js,
+  Google's own direct-to-review-form short link) points at a completely
+  separate review pool from Rover - the one that actually counts toward
+  Google's own local search ranking.
 - Hamburger nav menu (every screen): Book a Stay, About Us, Contact Us,
   Submit Idea, Admin (Sept 16, 2026; Book a Stay moved to the top Sept
   16 (9)), Privacy Policy, Terms & Conditions (Sept 26, 2026, on
@@ -701,7 +706,7 @@ visitor never reads.
 - src/App.js — main app
 - src/settings.js — all configurable values (rates, vets, messages, packing list)
 - src/waiver.js — full waiver text
-- src/App.test.js — 238 passing tests (TDD), Supabase mocked via src/__mocks__/supabase.js
+- src/App.test.js — 239 passing tests (TDD), Supabase mocked via src/__mocks__/supabase.js
 - src/supabase.js — creates the Supabase client from REACT_APP_SUPABASE_URL/_KEY (falling back to production's own public values) - see Staging environment above for how the staging build overrides these
 - src/index.js — app entry point; also where Google Analytics loads (production only) and staging's noindex meta tag gets injected - see SEO & Analytics above
 - supabase/functions/send-contact/index.ts — public Contact Us form handler: relays name/email-or-phone/message to Kim & Estee by SMS (reuses KIM_PHONE/ESTEE_PHONE). Deployed normally (no --no-verify-jwt) since it's called via the Supabase JS client like settings/lookup-client/submit-booking

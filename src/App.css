@@ -107,6 +107,7 @@
 .about-rating strong { letter-spacing: normal; }
 .stars-inline { color: #0000EE; }
 .about-reviews { display: flex; flex-direction: column; gap: 12px; max-height: 420px; overflow-y: auto; border: 1.5px solid #EAE3D6; border-radius: 6px; padding: 14px; margin-bottom: 24px; background: #F5F0E8; -webkit-overflow-scrolling: touch; }
+.about-google-review-prompt { font-size: 0.85rem; color: #2C3E50; margin: -14px 0 24px; }
 .about-review { background: #fff; border-radius: 8px; padding: 14px 16px; }
 .about-content p.about-review-stars { color: #0000EE; font-size: 0.8rem; letter-spacing: 1px; margin-bottom: 4px; }
 .about-content p.about-review-quote { font-size: 0.88rem; color: #1A2530; line-height: 1.55; font-style: italic; margin-bottom: 6px; }

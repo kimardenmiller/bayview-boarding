@@ -2689,6 +2689,14 @@ const ABOUT_MAP_LINK_URL = 'https://maps.app.goo.gl/xWg4sCFVpevDCKd16';
 // 2026) - kept as one constant so the two can't drift apart.
 const ROVER_PROFILE_URL = 'https://www.rover.com/members/kim-m-dog-paradise-above-loch-lomond/';
 
+// Google's own direct-to-review-form short link for the Bayview
+// Boarding Business Profile (Sept 26, 2026, on request, once the
+// profile itself was set up and verified) - a SEPARATE review pool
+// from Rover above, and the one that actually counts toward Google's
+// own local search ranking, so worth surfacing on its own rather than
+// folding it into the Rover mentions.
+const GOOGLE_REVIEW_URL = 'https://g.page/r/CX9YK-LEWX_nEAI/review';
+
 // Content adapted from the Bayview Boarding Rover profile - embedded
 // directly on the Landing page (see Landing above) rather than behind
 // its own "Learn more" tap, so first-time visitors can see who they're
@@ -2835,6 +2843,12 @@ function AboutContent({ onStart, aboutPhotos }) {
             </div>
           ))}
         </div>
+        <p className="about-google-review-prompt">
+          Had a great stay?{' '}
+          <a className="link-blue" href={GOOGLE_REVIEW_URL} target="_blank" rel="noopener noreferrer">
+            Leave us a Google review
+          </a>
+        </p>
 
       <button className="landing-cta" onClick={onStart}>Book My Stay</button>
     </>

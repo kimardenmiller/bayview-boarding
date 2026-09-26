@@ -1,6 +1,6 @@
 BAYVIEW BOARDING — FIX LIST
 ============================
-Last updated: September 26, 2026 (9) (New ?book URL jumps straight into the booking flow - for Google Business Profile's booking-link field)
+Last updated: September 26, 2026 (10) ("Leave us a Google review" link added to the About section, next to the existing Rover reviews)
 
 NEXT CHANGE LIST (v1.5)
 -----------------------
@@ -29,6 +29,18 @@ DEFERRED (revisit only if it actually blocks something)
 
 COMPLETED
 ---------
+- Sept 26, 2026 (10): Business Profile finished and verified; Kim shared
+  the review-form short link (https://g.page/r/CX9YK-LEWX_nEAI/review -
+  note: he'd first pasted a personalized Google Search results URL with
+  session-specific tracking params, not something safe to publish - the
+  actual "Share" button on the listing gives the right kind of stable
+  public link). Added "Leave us a Google review" right below the
+  existing Rover review quotes in the About section
+  (GOOGLE_REVIEW_URL in App.js) - a deliberately separate prompt from
+  the Rover ones, since Google reviews (not Rover's) are what actually
+  count toward Google's own local search ranking.
+  Tests: 1 new (confirms it's a real link with the right href/target/
+  rel). 238 -> 239 Jest passing. No Deno changes.
 - Sept 26, 2026 (9): "Setting up a business profile, Google wants a url
   for a checkout being started. Can we set up one?" - Google Business
   Profile's booking-link field wants customers dropped straight into
