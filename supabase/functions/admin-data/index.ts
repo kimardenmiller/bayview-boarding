@@ -199,7 +199,17 @@ async function createCalendarEvent(body: Record<string, unknown>): Promise<strin
   }
 }
 
-async function updateCalendarEvent(eventId: string, body: Record<string, unknown>): Promise<void> {
+// "updated" on success. "not-found" specifically means Google returned
+// 404/410 for this event id - i.e. it was deleted directly in Google
+// Calendar (not through this app), and syncStayCalendarEvent's caller
+// should treat it as if it never existed and create a fresh one, rather
+// than leaving the stay stuck pointing at a dead id forever. "failed"
+// covers everything else (network error, bad credentials, Google down)
+// - deliberately NOT treated as "recreate", since a transient failure
+// on the PATCH doesn't mean the original event is actually gone, and
+// blindly recreating on every kind of failure risks a duplicate event
+// sitting next to the still-very-much-real original.
+async function updateCalendarEvent(eventId: string, body: Record<string, unknown>): Promise<"updated" | "not-found" | "failed"> {
   try {
     const accessToken = await googleAccessToken();
     const res = await fetch(
@@ -210,10 +220,13 @@ async function updateCalendarEvent(eventId: string, body: Record<string, unknown
         body: JSON.stringify(body),
       },
     );
+    if (res.status === 404 || res.status === 410) return "not-found";
     const data = await res.json();
     if (!res.ok) throw new Error(`Google Calendar event update failed: ${JSON.stringify(data)}`);
+    return "updated";
   } catch (err) {
     console.error("updateCalendarEvent error:", err);
+    return "failed";
   }
 }
 
@@ -317,7 +330,11 @@ export async function handleRequest(req: Request): Promise<Response> {
     // a real TypeScript generic-mismatch wall (its inferred type doesn't
     // structurally match its own declared return type once re-imported
     // as a standalone annotation).
-    async function syncStayCalendarEvent(stayId: string, opts: { createIfMissing: boolean }): Promise<void> {
+    // Returns whether anything was actually created/recreated (never
+    // true for a plain update-in-place) - callers that sync a whole
+    // batch (backfillCalendarEvents) use this to report how many stays
+    // genuinely needed fixing, rather than just how many were checked.
+    async function syncStayCalendarEvent(stayId: string, opts: { createIfMissing: boolean }): Promise<boolean> {
       const { data, error } = await supabase
         .from("stays")
         .select("calendar_allday_event_id, calendar_dropoff_event_id, calendar_pickup_event_id, check_in, check_out, drop_time, pickup_time, stay_dogs(name, dogs(owner:owners(name, phone)))")
@@ -325,12 +342,12 @@ export async function handleRequest(req: Request): Promise<Response> {
         .single();
       if (error || !data) {
         console.error("syncStayCalendarEvent: couldn't load stay", error);
-        return;
+        return false;
       }
       const stay = data as unknown as StayCalendarRow;
       const dogNames = stay.stay_dogs.map((sd) => sd.name);
       const owner = stay.stay_dogs[0]?.dogs?.owner;
-      if (dogNames.length === 0 || !owner) return; // shouldn't happen - defensive only
+      if (dogNames.length === 0 || !owner) return false; // shouldn't happen - defensive only
 
       const details: CalendarEventDetails = {
         dogNames,
@@ -354,7 +371,17 @@ export async function handleRequest(req: Request): Promise<Response> {
       const patch: Record<string, string> = {};
       for (const ev of events) {
         if (ev.existingId) {
-          await updateCalendarEvent(ev.existingId, ev.body);
+          const result = await updateCalendarEvent(ev.existingId, ev.body);
+          if (result === "not-found") {
+            // The id on file no longer resolves to a real event -
+            // someone deleted it directly in Google Calendar. Recreate
+            // it fresh (regardless of opts.createIfMissing - the event
+            // really is missing now, whatever mode this sync run is in)
+            // rather than leaving the stay stuck pointing at a dead id
+            // forever with no way to self-heal.
+            const eventId = await createCalendarEvent(ev.body);
+            if (eventId) patch[ev.column] = eventId;
+          }
         } else if (opts.createIfMissing) {
           const eventId = await createCalendarEvent(ev.body);
           if (eventId) patch[ev.column] = eventId;
@@ -363,7 +390,9 @@ export async function handleRequest(req: Request): Promise<Response> {
       if (Object.keys(patch).length > 0) {
         const { error: patchErr } = await supabase.from("stays").update(patch).eq("id", stayId);
         if (patchErr) console.error("syncStayCalendarEvent: failed to save calendar event ids", patchErr);
+        return true;
       }
+      return false;
     }
 
     if (action === "billStay") {
@@ -434,29 +463,34 @@ export async function handleRequest(req: Request): Promise<Response> {
         .eq("id", stayId);
       if (updateErr) throw updateErr;
     } else if (action === "backfillCalendarEvents") {
-      // One-time catch-up for stays approved before the calendar feature
-      // existed (or before it was split into 3 events, Sept 25, 2026),
-      // or from when Google Calendar was briefly unreachable (Sept 25,
-      // 2026, on request - "can we update the calendar with existing
-      // stays?"). Scoped to check_out >= today only, on request - a
-      // calendar entry for a stay that's already over isn't useful.
-      // Matches a stay missing ANY of the 3 event ids, not just all of
-      // them - syncStayCalendarEvent only creates whichever pieces are
-      // actually missing, so this is also how an already-approved stay
-      // from before the drop-off/pickup split above picks up its 2 new
-      // events, on top of its existing all-day one. Safe to click more
-      // than once: nothing already fully synced ever matches this filter.
+      // Resyncs every approved, not-yet-over stay's calendar events
+      // (Sept 25-26, 2026, on request - "can we update the calendar
+      // with existing stays?", then "does not seem to be working" once
+      // an already-synced-but-wrong-format stay turned out to be
+      // invisible to this action). Deliberately NOT scoped to "missing
+      // an event id" any more - a stay can have all 3 ids on file and
+      // still need fixing (its all-day event was created before the
+      // Sept 25 all-day/drop-off/pickup split and is still the old
+      // single timed event; or someone deleted an event directly in
+      // Google Calendar without clearing the id here) - syncStayCalendarEvent
+      // itself decides what actually needs creating vs just updating vs
+      // recreating a deleted one (see its own "not-found" handling
+      // above), so this just needs to call it for every candidate stay.
+      // Scoped to check_out >= today only, on request - a calendar entry
+      // for a stay that's already over isn't useful. Safe to click more
+      // than once/routinely: every call here is either a no-op PATCH
+      // (nothing actually changed) or fixes something real.
       const { data: dueStays, error: dueErr } = await supabase
         .from("stays")
         .select("id")
         .eq("approval_status", "approved")
-        .or("calendar_allday_event_id.is.null,calendar_dropoff_event_id.is.null,calendar_pickup_event_id.is.null")
         .gte("check_out", todayInBusinessTimezone());
       if (dueErr) throw dueErr;
+      let backfilledCount = 0;
       for (const s of (dueStays ?? []) as { id: string }[]) {
-        await syncStayCalendarEvent(s.id, { createIfMissing: true });
+        if (await syncStayCalendarEvent(s.id, { createIfMissing: true })) backfilledCount++;
       }
-      return json({ ...(await fetchDogsAndTotals()), backfilledCount: (dueStays ?? []).length });
+      return json({ ...(await fetchDogsAndTotals()), backfilledCount });
     } else if (action === "markPaid") {
       // Just a status flip (Sept 21, 2026) - unlike billStay/approveStay/
       // denyStay, there's no client-facing text this is confirming went

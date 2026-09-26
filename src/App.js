@@ -1518,12 +1518,17 @@ function AdminView({
     setTotalStays(data.totalStays);
   }
 
-  // Catch-up for stays approved before the calendar feature existed, or
-  // from any stretch when Google Calendar was unreachable (Sept 25,
+  // Resyncs every approved, upcoming stay's calendar events (Sept 25-26,
   // 2026, on request - "can we update the calendar with existing
-  // stays?"). Best-effort like everything else calendar-related - a
-  // failure here just means try again later, never an error the admin
-  // has to do anything about.
+  // stays?", then "does not seem to be working" once a stay with a
+  // stale/wrong-format event turned out to need more than just filling
+  // in what was missing). Safe to click any time, not just once:
+  // creates whatever's actually missing (including an event deleted
+  // directly in Google Calendar - see admin-data's syncStayCalendarEvent
+  // "not-found" handling), and refreshes everything else in place.
+  // Best-effort like everything else calendar-related - a failure here
+  // just means try again later, never an error the admin has to do
+  // anything about.
   async function backfillCalendar() {
     setBackfillingCalendar(true);
     setBackfillCalendarStatus('');
@@ -2281,7 +2286,7 @@ function AdminView({
             </button>
           </div>
           <div style={{ fontSize: '0.75rem', color: '#6B7A8A', marginTop: 4 }}>
-            {backfillCalendarStatus || 'One-time catch-up for approved, upcoming stays booked before the calendar sync existed. Safe to click more than once.'}
+            {backfillCalendarStatus || 'Resyncs approved, upcoming stays with the calendar - fixes anything missing or deleted. Safe to click any time.'}
           </div>
         </div>
 

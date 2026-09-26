@@ -1,6 +1,6 @@
 BAYVIEW BOARDING — FIX LIST
 ============================
-Last updated: September 25, 2026 (5) (Calendar sync now creates an all-day event plus separate 30-min drop-off/pickup events, not one timed event)
+Last updated: September 26, 2026 (Calendar sync self-heals a deleted event, and the "Add Existing Stays" button now resyncs every stay, not just ones missing an id)
 
 NEXT CHANGE LIST (v1.5)
 -----------------------
@@ -43,6 +43,42 @@ DEFERRED (revisit only if it actually blocks something)
 
 COMPLETED
 ---------
+- Sept 26, 2026: "My calendar still shows the stays with specific
+  times... Does not seem to be working." Two real bugs found once the
+  Sept 25 (5) all-day/drop-off/pickup split (below) shipped:
+  1. backfillCalendarEvents only ever matched a stay missing at least
+     one of the 3 event ids. The very first click after that split
+     filled in the (previously nonexistent) drop-off/pickup ids for
+     already-approved stays - which meant every one of them now had
+     all 3 ids on file, so a SECOND click (needed to actually convert
+     the pre-existing all-day id's event to true all-day format) found
+     nothing left to do and silently skipped them all. Fixed by
+     dropping the "missing an id" filter entirely - the button now
+     resyncs every approved, not-yet-over stay on every click, and
+     syncStayCalendarEvent itself decides what actually needs touching.
+     A stay with nothing wrong just gets a harmless no-op PATCH.
+  2. Asked directly: "If I delete the multi-day stay events, will
+     clicking the button again add them back correctly?" As the code
+     stood, no - an id already on file always took the "update"
+     branch, so a deleted event's PATCH would just 404 forever with no
+     fallback, permanently stuck. Fixed: updateCalendarEvent now
+     distinguishes a confirmed 404/410 ("this event is gone") from any
+     other failure, and syncStayCalendarEvent recreates a "not-found"
+     event fresh and saves the new id over the dead one - but does NOT
+     do this for an ordinary outage/auth failure, since that could
+     create a duplicate next to an event that's actually still there.
+     This also means the answer to the question above is now yes.
+  backfilledCount in the response now only counts stays that actually
+  had something created or recreated, not every stay merely checked -
+  more honest than "attempted" once every stay gets touched on every
+  click.
+  Tests: 4 new/changed on backfillCalendarEvents (broadened query, a
+  fully-correct stay isn't counted, a deleted-and-recreated stay is
+  counted, unreachable Google counts nothing) + 2 new directly on
+  billStay for the same "not-found" recreate vs. "just unreachable"
+  distinction. Admin-data: 31 -> 35 tests. Repo-wide Deno: 207 -> 211.
+  No Jest changes beyond wording tweaks to the existing button-status
+  tests (still passing as-is).
 - Sept 25, 2026 (5): "We want to add the event as an 'all day' event +
   add a 30m event for pickup and drop." Replaces the single timed
   calendar event (spanning check-in's drop time to check-out's pickup

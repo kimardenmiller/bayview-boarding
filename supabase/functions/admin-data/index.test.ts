@@ -57,6 +57,7 @@ function stubSupabase(opts: {
   stayRow?: Record<string, unknown> | null;
   dueStays?: { id: string }[];
   googleTokenStatus?: number; googleEventStatus?: number;
+  googleEventPatchStatus?: number;
 } = {}) {
   const dogs = opts.dogs ?? DOGS_FIXTURE;
   const totalStays = opts.totalStays ?? 2;
@@ -84,6 +85,13 @@ function stubSupabase(opts: {
     if (url.hostname === 'www.googleapis.com' && url.pathname.includes('/calendar/v3/calendars/')) {
       const body = init?.body ? JSON.parse(String(init.body)) : undefined;
       calls.push({ method, table: 'google-calendar-event', body, search: url.pathname });
+      // A dedicated status for PATCH (update) calls specifically, so a
+      // test can simulate "this event was deleted directly in Google
+      // Calendar" (404/410 on PATCH) while POST (create) still succeeds
+      // normally, distinct from googleEventStatus which affects both.
+      if (method === 'PATCH' && opts.googleEventPatchStatus && opts.googleEventPatchStatus !== 200) {
+        return new Response(JSON.stringify({ error: { message: 'gone' } }), { status: opts.googleEventPatchStatus });
+      }
       if (opts.googleEventStatus && opts.googleEventStatus !== 200) {
         return new Response(JSON.stringify({ error: { message: 'boom' } }), { status: opts.googleEventStatus });
       }
@@ -462,6 +470,57 @@ Deno.test('billStay: updates all 3 existing calendar events when dates/times cha
   }
 });
 
+Deno.test('billStay: recreates an event that was deleted directly in Google Calendar (404 on PATCH), and saves the new id (Sept 26, 2026)', async () => {
+  const stub = stubSupabase({
+    stayRow: {
+      ...DEFAULT_STAY_ROW,
+      calendar_allday_event_id: 'deleted-allday-id',
+      calendar_dropoff_event_id: 'existing-dropoff-id',
+      calendar_pickup_event_id: 'existing-pickup-id',
+    },
+    googleEventPatchStatus: 404,
+  });
+  try {
+    await handleRequest(postRequest({
+      password: ADMIN_PASSWORD, action: 'billStay', stayId: 'stay-2', checkOut: '2026-10-04',
+    }));
+    // All 3 PATCHes were attempted (each 404s here); only the all-day
+    // one gets a follow-up create, since only its id was "deleted".
+    const patches = stub.calls.filter((c) => c.table === 'google-calendar-event' && c.method === 'PATCH');
+    assertEquals(patches.length, 3);
+    const created = stub.calls.filter((c) => c.table === 'google-calendar-event' && c.method === 'POST');
+    assertEquals(created.length, 3); // this stub 404s every PATCH, so all 3 get recreated
+
+    const patchCalls = stub.calls.filter((c) => c.table === 'stays' && c.method === 'PATCH');
+    const savedIds = patchCalls.find((c) => (c.body as Record<string, unknown>).calendar_allday_event_id)!;
+    const body = savedIds.body as Record<string, unknown>;
+    assertEquals(body.calendar_allday_event_id, 'fake-event-id');
+    assertEquals(body.calendar_dropoff_event_id, 'fake-event-id');
+    assertEquals(body.calendar_pickup_event_id, 'fake-event-id');
+  } finally {
+    stub.restore();
+  }
+});
+
+Deno.test('billStay: still succeeds even when Google Calendar is unreachable (best-effort) - a PATCH failure is not treated as "deleted"', async () => {
+  const stub = stubSupabase({
+    stayRow: { ...DEFAULT_STAY_ROW, calendar_allday_event_id: 'existing-allday-id' },
+    googleTokenStatus: 500,
+  });
+  try {
+    const res = await handleRequest(postRequest({
+      password: ADMIN_PASSWORD, action: 'billStay', stayId: 'stay-2', checkOut: '2026-10-04',
+    }));
+    assertEquals(res.status, 200);
+    // A total outage (can't even get an access token) is NOT the same
+    // as a confirmed 404/410 "this event is gone" - never falls back to
+    // creating a duplicate just because Google is unreachable.
+    assertEquals(stub.calls.some((c) => c.table === 'google-calendar-event' && c.method === 'POST'), false);
+  } finally {
+    stub.restore();
+  }
+});
+
 Deno.test('billStay: never touches the calendar when only the cost changes, not dates/times', async () => {
   const stub = stubSupabase({ stayRow: { ...DEFAULT_STAY_ROW, calendar_allday_event_id: 'existing-event-id' } });
   try {
@@ -515,14 +574,14 @@ Deno.test('backfillCalendarEvents: creates all 3 events for every due stay and r
     const data = await res.json();
     assertEquals(data.backfilledCount, 2);
 
-    // The list query itself was scoped to approved, not-yet-over stays
-    // missing at least one of the 3 event ids - not every stay in the table.
+    // Deliberately NOT scoped to "missing an event id" (Sept 26, 2026) -
+    // a stay can have all 3 ids on file and still need fixing (a stale
+    // all-day id from before the drop-off/pickup split, or a deleted-
+    // in-Google-Calendar event) - just every approved, not-yet-over stay.
     const listCall = stub.calls.find((c) => c.table === 'stays' && c.method === 'GET' && c.search?.includes('approval_status'));
     assertEquals(listCall!.search!.includes('approval_status=eq.approved'), true);
-    assertEquals(listCall!.search!.includes('calendar_allday_event_id.is.null'), true);
-    assertEquals(listCall!.search!.includes('calendar_dropoff_event_id.is.null'), true);
-    assertEquals(listCall!.search!.includes('calendar_pickup_event_id.is.null'), true);
     assertEquals(listCall!.search!.includes('check_out=gte.'), true);
+    assertEquals(listCall!.search!.includes('is.null'), false);
 
     // 3 calendar events created per due stay (all 3 ids start null on
     // the stubbed stay row) - 2 stays x 3 events.
@@ -533,13 +592,16 @@ Deno.test('backfillCalendarEvents: creates all 3 events for every due stay and r
   }
 });
 
-Deno.test('backfillCalendarEvents: only creates the missing piece(s) for a stay that already has some events', async () => {
+Deno.test('backfillCalendarEvents: only creates the missing piece(s) for a stay that already has some events, and still counts it', async () => {
   const stub = stubSupabase({
     dueStays: [{ id: 'stay-2' }],
     stayRow: { ...DEFAULT_STAY_ROW, calendar_allday_event_id: 'existing-allday-id' },
   });
   try {
-    await handleRequest(postRequest({ password: ADMIN_PASSWORD, action: 'backfillCalendarEvents' }));
+    const res = await handleRequest(postRequest({ password: ADMIN_PASSWORD, action: 'backfillCalendarEvents' }));
+    const data = await res.json();
+    assertEquals(data.backfilledCount, 1); // 2 new events created for this 1 stay
+
     // The existing all-day event gets updated (not recreated); only the
     // 2 still-missing events (drop-off, pickup) get created.
     const patchToAllday = stub.calls.filter((c) => c.table === 'google-calendar-event' && c.method === 'PATCH');
@@ -547,6 +609,67 @@ Deno.test('backfillCalendarEvents: only creates the missing piece(s) for a stay 
     assertEquals(patchToAllday[0].search?.endsWith('/existing-allday-id'), true);
     const created = stub.calls.filter((c) => c.table === 'google-calendar-event' && c.method === 'POST');
     assertEquals(created.length, 2);
+  } finally {
+    stub.restore();
+  }
+});
+
+Deno.test('backfillCalendarEvents: a stay whose events are already all correct is checked but not counted', async () => {
+  const stub = stubSupabase({
+    dueStays: [{ id: 'stay-2' }],
+    stayRow: {
+      ...DEFAULT_STAY_ROW,
+      calendar_allday_event_id: 'existing-allday-id',
+      calendar_dropoff_event_id: 'existing-dropoff-id',
+      calendar_pickup_event_id: 'existing-pickup-id',
+    },
+  });
+  try {
+    const res = await handleRequest(postRequest({ password: ADMIN_PASSWORD, action: 'backfillCalendarEvents' }));
+    const data = await res.json();
+    assertEquals(data.backfilledCount, 0); // nothing created/recreated - all 3 already existed
+    // Still PATCHed all 3 (a no-op resync, keeps them in sync with the
+    // current dates/times) - just doesn't count as "fixed" since nothing
+    // was missing or dead.
+    const patches = stub.calls.filter((c) => c.table === 'google-calendar-event' && c.method === 'PATCH');
+    assertEquals(patches.length, 3);
+    const created = stub.calls.filter((c) => c.table === 'google-calendar-event' && c.method === 'POST');
+    assertEquals(created.length, 0);
+  } finally {
+    stub.restore();
+  }
+});
+
+Deno.test('backfillCalendarEvents: recreates an event that was deleted directly in Google Calendar (404 on PATCH), and counts it', async () => {
+  const stub = stubSupabase({
+    dueStays: [{ id: 'stay-2' }],
+    // This stub's googleEventPatchStatus 404s every PATCH, not just
+    // one - the point here is the stay-level count, not which of the 3
+    // event types was the one actually deleted (that's the more precise
+    // billStay test above).
+    stayRow: {
+      ...DEFAULT_STAY_ROW,
+      calendar_allday_event_id: 'deleted-allday-id',
+      calendar_dropoff_event_id: 'deleted-dropoff-id',
+      calendar_pickup_event_id: 'deleted-pickup-id',
+    },
+    googleEventPatchStatus: 404,
+  });
+  try {
+    const res = await handleRequest(postRequest({ password: ADMIN_PASSWORD, action: 'backfillCalendarEvents' }));
+    const data = await res.json();
+    assertEquals(data.backfilledCount, 1); // 1 stay had events recreated, however many pieces
+
+    const created = stub.calls.filter((c) => c.table === 'google-calendar-event' && c.method === 'POST');
+    assertEquals(created.length, 3); // all 3 were "deleted" (404) here, so all 3 get recreated
+
+    // The new ids got saved over the dead ones.
+    const patchCalls = stub.calls.filter((c) => c.table === 'stays' && c.method === 'PATCH');
+    const savedPatch = patchCalls.find((c) => (c.body as Record<string, unknown>).calendar_allday_event_id)!;
+    const body = savedPatch.body as Record<string, unknown>;
+    assertEquals(body.calendar_allday_event_id, 'fake-event-id');
+    assertEquals(body.calendar_dropoff_event_id, 'fake-event-id');
+    assertEquals(body.calendar_pickup_event_id, 'fake-event-id');
   } finally {
     stub.restore();
   }
@@ -564,13 +687,15 @@ Deno.test('backfillCalendarEvents: no due stays means no calendar calls at all',
   }
 });
 
-Deno.test('backfillCalendarEvents: still returns 200 with the attempted count even if Google is unreachable (best-effort)', async () => {
+Deno.test('backfillCalendarEvents: still returns 200 (with nothing counted) even if Google is unreachable (best-effort)', async () => {
   const stub = stubSupabase({ dueStays: [{ id: 'stay-2' }], googleTokenStatus: 500 });
   try {
     const res = await handleRequest(postRequest({ password: ADMIN_PASSWORD, action: 'backfillCalendarEvents' }));
     assertEquals(res.status, 200);
     const data = await res.json();
-    assertEquals(data.backfilledCount, 1);
+    // Nothing actually succeeded, so nothing is counted as fixed - more
+    // honest than reporting stays merely "attempted."
+    assertEquals(data.backfilledCount, 0);
     assertEquals(data.dogs.length, 1); // the rest of the response still comes back fine
   } finally {
     stub.restore();
