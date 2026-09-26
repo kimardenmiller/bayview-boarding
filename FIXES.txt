@@ -1,6 +1,6 @@
 BAYVIEW BOARDING — FIX LIST
 ============================
-Last updated: September 26, 2026 (5) (Real favicon - a house with a paw print - replacing Create React App's stock default)
+Last updated: September 26, 2026 (6) (Favicon switched from "Home & Paw" to a plain paw print, per Kim's pick from the 5 options)
 
 NEXT CHANGE LIST (v1.5)
 -----------------------
@@ -43,6 +43,16 @@ DEFERRED (revisit only if it actually blocks something)
 
 COMPLETED
 ---------
+- Sept 26, 2026 (6): "Let's change to Paw Print" - swapped the favicon
+  from the "Home & Paw" pick in (5) below to option 1 from that same
+  gallery, a plain paw print (one heel pad + 4 toes, cream on the same
+  navy badge). Reused the same generator script from (5), just swapped
+  its shape list; same 6 output files (favicon.ico, favicon-16x16.png,
+  favicon-32x32.png, apple-touch-icon.png, logo192.png, logo512.png),
+  same rounded-badge-for-the-tab-icon vs. full-bleed-square-for-app-
+  icons split. No code/doc changes beyond the images themselves.
+  Deployed to both environments, verified favicon.ico resolves (200) on
+  both.
 - Sept 26, 2026 (5): "What do you call the little icon that appears on
   the browser tab? I see you came up with one, but it does not fit dog
   boarding." That was Create React App's own stock default (the blue

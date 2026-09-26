@@ -646,8 +646,10 @@ something this pass changes.
 
 **Favicon** (Sept 26, 2026, on request - "I see you came up with one,
 but it does not fit dog boarding," referring to CRA's own stock React-
-logo default, left untouched since the original scaffold). Now a house
-with a paw print cut into it, cream on a navy rounded-square badge -
+logo default, left untouched since the original scaffold; briefly a
+house-with-a-paw-print design before Kim picked a plain paw print
+instead - see FIXES.txt for both rounds). Now a paw print (one heel pad
++ 4 toes), cream on a navy rounded-square badge -
 public/favicon.ico + favicon-16x16.png/favicon-32x32.png (all 3
 rounded, transparent corners - a deliberate tab-icon look, since
 browsers render a favicon exactly as given), and public/
