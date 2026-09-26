@@ -401,7 +401,18 @@ Deno.test('approveStay: creates 3 Google Calendar events (all-day + drop-off + p
     assertEquals(eventCalls.length, 3);
 
     const allDay = eventCalls.find((c) => (c.body as Record<string, unknown>).summary === 'Rex — Bayview Boarding')!;
+    const dropoff = eventCalls.find((c) => (c.body as Record<string, unknown>).summary === 'Rex — Drop-off')!;
+    const pickup = eventCalls.find((c) => (c.body as Record<string, unknown>).summary === 'Rex — Pickup')!;
     assertEquals((allDay.body as Record<string, unknown>).description, 'Owner: Kim Miller (4155550100)');
+    // Sept 26, 2026, confirmed live: deleting an event through the
+    // Google Calendar UI just sets status "cancelled" without purging
+    // it - a PATCH that never mentions status leaves it cancelled (so
+    // invisible) even though the request itself succeeds with no
+    // error. Every event body pins status "confirmed" so a sync always
+    // un-cancels it, not just on first create.
+    assertEquals((allDay.body as Record<string, unknown>).status, 'confirmed');
+    assertEquals((dropoff.body as Record<string, unknown>).status, 'confirmed');
+    assertEquals((pickup.body as Record<string, unknown>).status, 'confirmed');
     const allDayStart = (allDay.body as { start: { date: string; dateTime: unknown; timeZone: unknown } }).start;
     const allDayEnd = (allDay.body as { end: { date: string; dateTime: unknown; timeZone: unknown } }).end;
     assertEquals(allDayStart.date, '2026-10-01');
@@ -419,7 +430,6 @@ Deno.test('approveStay: creates 3 Google Calendar events (all-day + drop-off + p
     assertEquals(allDayEnd.dateTime, null);
     assertEquals(allDayEnd.timeZone, null);
 
-    const dropoff = eventCalls.find((c) => (c.body as Record<string, unknown>).summary === 'Rex — Drop-off')!;
     const dropoffStart = (dropoff.body as { start: { dateTime: string; date: unknown } }).start;
     const dropoffEnd = (dropoff.body as { end: { dateTime: string; date: unknown } }).end;
     assertEquals(dropoffStart.dateTime, '2026-10-01T09:00:00');
@@ -427,7 +437,6 @@ Deno.test('approveStay: creates 3 Google Calendar events (all-day + drop-off + p
     assertEquals(dropoffStart.date, null);
     assertEquals(dropoffEnd.date, null);
 
-    const pickup = eventCalls.find((c) => (c.body as Record<string, unknown>).summary === 'Rex — Pickup')!;
     const pickupStart = (pickup.body as { start: { dateTime: string; date: unknown } }).start;
     const pickupEnd = (pickup.body as { end: { dateTime: string; date: unknown } }).end;
     assertEquals(pickupStart.dateTime, '2026-10-03T17:00:00');

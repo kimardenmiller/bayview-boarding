@@ -1,6 +1,6 @@
 BAYVIEW BOARDING — FIX LIST
 ============================
-Last updated: September 26, 2026 (2) (Fixed the real cause of the all-day calendar conversion silently failing: Google's PATCH merges into start/end instead of replacing it)
+Last updated: September 26, 2026 (3) (Calendar sync now un-cancels an event deleted through the Google Calendar UI - it was surviving as invisible "cancelled", not actually gone)
 
 NEXT CHANGE LIST (v1.5)
 -----------------------
@@ -43,6 +43,28 @@ DEFERRED (revisit only if it actually blocks something)
 
 COMPLETED
 ---------
+- Sept 26, 2026 (3): The (2) fix below cleared the "Invalid start time"
+  errors, and every other stay converted to all-day correctly - but the
+  ONE stay Kim had actually deleted to test the self-healing logic (the
+  "Pemmy" all-day event, Sept 26 - October 4) stayed missing, with no
+  error logged at all this time. Root cause: deleting an event through
+  the Google Calendar UI doesn't purge it right away - it sets
+  `status: "cancelled"` while leaving the event fully gettable/
+  patchable for a while (this is why the "not-found" (404/410) self-
+  healing logic from the very first Sept 26 fix never fired: the event
+  still very much existed, just cancelled). A PATCH that never mentions
+  `status` leaves it as "cancelled" - invisible on the calendar - even
+  though Google returns a normal 200 with no error, which is exactly
+  why nothing showed up in the logs this time. Fixed: every event body
+  (allDayEventBody/dropoffEventBody/pickupEventBody) now pins
+  `status: "confirmed"`, so any sync - not just a first create -
+  un-cancels an event that was deleted through the UI. Kim will need to
+  click "Add Existing Stays to Calendar" once more to bring Pemmy's
+  event back (or it'll happen automatically next time that stay is
+  edited/billed).
+  Tests: extended the same approveStay calendar test to assert
+  `status: "confirmed"` is present on all 3 event bodies. No test count
+  change (35 admin-data / 211 total) - existing test extended, not new.
 - Sept 26, 2026 (2): Found the actual root cause behind the Sept 26
   fix below not working live - Kim deleted a stay's all-day event and
   clicked "Add Existing Stays to Calendar" again, and it still didn't

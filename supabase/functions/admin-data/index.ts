@@ -157,11 +157,20 @@ function addMinutesToTime(time: string, minutes: number): string {
 // nulls out the field(s) that type does NOT use, so a PATCH actually
 // clears the other representation instead of merging into an invalid
 // mixed state. Harmless on a plain create (a null field there is just
-// absent).
+// absent). Every body also pins status: "confirmed" (Sept 26, 2026,
+// confirmed live - deleting an event through the Google Calendar UI
+// doesn't purge it right away, it just sets status: "cancelled" while
+// leaving the event fully gettable/patchable for a while; a PATCH that
+// never mentions status leaves it cancelled - invisible on the
+// calendar - even though the request itself succeeds with a 200 and no
+// error at all, so this was silently no-op'ing on exactly the stay
+// someone had just deleted) - explicitly un-cancels it back to a normal
+// visible event on every sync, not just on first create.
 function allDayEventBody(d: CalendarEventDetails) {
   return {
     summary: `${d.dogNames.join(" & ")} — Bayview Boarding`,
     description: `Owner: ${d.ownerName} (${d.ownerPhone})`,
+    status: "confirmed",
     start: { date: d.checkIn, dateTime: null, timeZone: null },
     end: { date: addDaysToDate(d.checkOut, 1), dateTime: null, timeZone: null },
   };
@@ -172,6 +181,7 @@ function dropoffEventBody(d: CalendarEventDetails) {
   return {
     summary: `${d.dogNames.join(" & ")} — Drop-off`,
     description: `Owner: ${d.ownerName} (${d.ownerPhone})`,
+    status: "confirmed",
     start: { dateTime: `${d.checkIn}T${drop}`, timeZone: "America/Los_Angeles", date: null },
     end: { dateTime: `${d.checkIn}T${addMinutesToTime(drop, 30)}`, timeZone: "America/Los_Angeles", date: null },
   };
@@ -182,6 +192,7 @@ function pickupEventBody(d: CalendarEventDetails) {
   return {
     summary: `${d.dogNames.join(" & ")} — Pickup`,
     description: `Owner: ${d.ownerName} (${d.ownerPhone})`,
+    status: "confirmed",
     start: { dateTime: `${d.checkOut}T${pickup}`, timeZone: "America/Los_Angeles", date: null },
     end: { dateTime: `${d.checkOut}T${addMinutesToTime(pickup, 30)}`, timeZone: "America/Los_Angeles", date: null },
   };
