@@ -994,7 +994,7 @@ describe('Nav menu (hamburger)', () => {
     fireEvent.click(screen.getByLabelText('Open menu'));
   }
 
-  test('is collapsed until opened, then shows all six destinations', async () => {
+  test('is collapsed until opened, then shows all seven destinations', async () => {
     render(<App />);
     expect(screen.queryByText('About Us')).not.toBeInTheDocument();
     openMenu();
@@ -1004,6 +1004,17 @@ describe('Nav menu (hamburger)', () => {
     expect(screen.getByText('Book a Stay')).toBeInTheDocument();
     expect(screen.getByText('Admin')).toBeInTheDocument();
     expect(screen.getByText('Privacy Policy')).toBeInTheDocument();
+    expect(screen.getByText('Terms & Conditions')).toBeInTheDocument();
+  });
+
+  test('"Terms & Conditions" is a real link to the static page, opening in a new tab rather than inside the app (Sept 26, 2026)', async () => {
+    render(<App />);
+    openMenu();
+    const link = screen.getByText('Terms & Conditions');
+    expect(link.tagName).toBe('A');
+    expect(link).toHaveAttribute('href', 'terms.html');
+    expect(link).toHaveAttribute('target', '_blank');
+    expect(link).toHaveAttribute('rel', expect.stringContaining('noopener'));
   });
 
   test('"Privacy Policy" is a real link to the static page, opening in a new tab rather than inside the app (Sept 26, 2026)', async () => {

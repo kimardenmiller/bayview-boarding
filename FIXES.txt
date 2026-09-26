@@ -44,20 +44,23 @@ DEFERRED (revisit only if it actually blocks something)
 COMPLETED
 ---------
 - Sept 26, 2026 (7): "[Google's OAuth] Branding wants my privacy page,
-  where is that, and should that be off our menu?" - public/
-  privacy.html already existed (live at bayviewboarding.com/
-  privacy.html, along with terms.html/sms-consent.html) but was ONLY
-  ever linked from index.html's <noscript> fallback - invisible to any
-  real, JS-enabled visitor, which is exactly why Google's OAuth consent
-  screen "Branding" section (asking for a reachable privacy policy URL
-  while publishing it, see NEXT CHANGE LIST item 2) is what surfaced
-  the gap. Added "Privacy Policy" as a 6th hamburger-menu item - a real
-  `<a target="_blank">` to the static page rather than a button, since
-  it's genuinely outside the SPA; opens in a new tab so a client
-  mid-booking never loses their in-progress form.
-  Tests: 1 new (confirms it's a real link, not a button, with the right
-  href/target/rel) + the "shows all N destinations" test extended to
-  six. 235 -> 236 Jest passing. No Deno changes.
+  where is that, and should that be off our menu?" - then, seconds
+  later, "and I need a Application terms of service link." public/
+  privacy.html and public/terms.html both already existed (live at
+  bayviewboarding.com/privacy.html and /terms.html, along with
+  sms-consent.html) but were ONLY ever linked from index.html's
+  <noscript> fallback - invisible to any real, JS-enabled visitor,
+  which is exactly why Google's OAuth consent screen "Branding" section
+  (asking for reachable privacy policy AND terms of service URLs while
+  publishing it, see NEXT CHANGE LIST item 2) is what surfaced the gap.
+  Added "Privacy Policy" and "Terms & Conditions" as the 6th and 7th
+  hamburger-menu items - real `<a target="_blank">` links to the static
+  pages rather than buttons, since they're genuinely outside the SPA;
+  open in a new tab so a client mid-booking never loses their
+  in-progress form.
+  Tests: 2 new (each confirms it's a real link, not a button, with the
+  right href/target/rel) + the "shows all N destinations" test extended
+  to seven. 235 -> 237 Jest passing. No Deno changes.
 - Sept 26, 2026 (6): "Let's change to Paw Print" - swapped the favicon
   from the "Home & Paw" pick in (5) below to option 1 from that same
   gallery, a plain paw print (one heel pad + 4 toes, cream on the same
