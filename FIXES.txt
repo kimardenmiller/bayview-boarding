@@ -1,6 +1,6 @@
 BAYVIEW BOARDING — FIX LIST
 ============================
-Last updated: September 25, 2026 (4) (Admin can now backfill Google Calendar events for existing approved stays)
+Last updated: September 25, 2026 (5) (Calendar sync now creates an all-day event plus separate 30-min drop-off/pickup events, not one timed event)
 
 NEXT CHANGE LIST (v1.5)
 -----------------------
@@ -43,6 +43,36 @@ DEFERRED (revisit only if it actually blocks something)
 
 COMPLETED
 ---------
+- Sept 25, 2026 (5): "We want to add the event as an 'all day' event +
+  add a 30m event for pickup and drop." Replaces the single timed
+  calendar event (spanning check-in's drop time to check-out's pickup
+  time) with 3 separate events per stay: an all-day block for the whole
+  boarding duration (check_in through check_out inclusive - Google's
+  all-day end date is exclusive, so end.date is one day past check_out),
+  plus a 30-minute event each right at the actual drop-off and pickup
+  times. Renamed the column from calendar_event_id to
+  calendar_allday_event_id and added calendar_dropoff_event_id/
+  calendar_pickup_event_id (migration
+  20260925010000_stay_calendar_events_split.sql) - a same-day rename was
+  judged safe since the feature had only shipped hours earlier, so at
+  most a handful of rows had anything in the old column yet.
+  syncStayCalendarEvent now syncs all 3 independently: each one either
+  gets PATCHed if it already has an id, or created if missing and
+  createIfMissing is true - so a stay that only ever got the old all-day-
+  turned-out-to-be-timed event doesn't get a duplicate, it just gains the
+  2 new drop-off/pickup events the next time it's touched. Also updated
+  backfillCalendarEvents (4, below) to match ANY of the 3 ids being null
+  (an OR filter, not just the one column) so it doubles as the migration
+  path for stays that were already synced under the old single-event
+  model - clicking "Add Existing Stays to Calendar" again fills in just
+  the 2 new pieces for those, converts nothing that's already correct.
+  Tests: rewrote the calendar-related Deno tests for 3 events instead of
+  1 (approveStay creates 3, billStay/editStay update only what exists,
+  a partially-synced stay only gets its missing piece(s) synced/created)
+  plus 2 new ones specifically for the "some but not all 3 exist yet"
+  case on editStay and backfillCalendarEvents. 205 -> 207 Deno passing
+  (admin-data alone: 29 -> 31). No Jest changes - nothing here is
+  frontend-visible.
 - Sept 25, 2026 (4): "Can we update the calendar with existing stays?" -
   the calendar sync below (3) only ever fires going forward from
   approveStay/billStay/editStay, so every stay approved before that

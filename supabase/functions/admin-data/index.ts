@@ -121,25 +121,65 @@ interface CalendarEventDetails {
   pickupTime: string | null;
 }
 
-// A timed (not all-day) event, using the actual drop-off/pickup times -
-// more useful for tracking real logistics than just blocking off the
-// calendar days. Falls back to 9am for either time if somehow missing
-// (shouldn't happen - both are required by the booking form).
-function calendarEventBody(d: CalendarEventDetails) {
-  const drop = (d.dropTime || "09:00:00").slice(0, 8);
-  const pickup = (d.pickupTime || "09:00:00").slice(0, 8);
+// check_out's calendar day is exclusive on an all-day (date-only) Google
+// event - a stay spanning check_in through check_out inclusive (the dog
+// is there for part of check_out too, until pickup) needs end.date one
+// day past check_out, or the last day wouldn't show as occupied at all.
+function addDaysToDate(date: string, days: number): string {
+  const d = new Date(`${date}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+function addMinutesToTime(time: string, minutes: number): string {
+  const [h, m, s] = time.split(":").map(Number);
+  const total = h * 60 + m + minutes;
+  const hh = String(Math.floor(total / 60) % 24).padStart(2, "0");
+  const mm = String(total % 60).padStart(2, "0");
+  return `${hh}:${mm}:${String(s ?? 0).padStart(2, "0")}`;
+}
+
+// Three separate events per stay (Sept 25, 2026, on request - "add the
+// event as an all-day event + add a 30m event for pickup and drop"): an
+// all-day block for the whole boarding duration (easier to scan at a
+// glance than a single timed event spanning the whole stay), plus a
+// 30-minute event each for the actual drop-off/pickup moments, using
+// the real times from the booking. Falls back to 9am for either time if
+// somehow missing (shouldn't happen - both are required by the booking
+// form).
+function allDayEventBody(d: CalendarEventDetails) {
   return {
     summary: `${d.dogNames.join(" & ")} — Bayview Boarding`,
     description: `Owner: ${d.ownerName} (${d.ownerPhone})`,
+    start: { date: d.checkIn },
+    end: { date: addDaysToDate(d.checkOut, 1) },
+  };
+}
+
+function dropoffEventBody(d: CalendarEventDetails) {
+  const drop = (d.dropTime || "09:00:00").slice(0, 8);
+  return {
+    summary: `${d.dogNames.join(" & ")} — Drop-off`,
+    description: `Owner: ${d.ownerName} (${d.ownerPhone})`,
     start: { dateTime: `${d.checkIn}T${drop}`, timeZone: "America/Los_Angeles" },
-    end: { dateTime: `${d.checkOut}T${pickup}`, timeZone: "America/Los_Angeles" },
+    end: { dateTime: `${d.checkIn}T${addMinutesToTime(drop, 30)}`, timeZone: "America/Los_Angeles" },
+  };
+}
+
+function pickupEventBody(d: CalendarEventDetails) {
+  const pickup = (d.pickupTime || "09:00:00").slice(0, 8);
+  return {
+    summary: `${d.dogNames.join(" & ")} — Pickup`,
+    description: `Owner: ${d.ownerName} (${d.ownerPhone})`,
+    start: { dateTime: `${d.checkOut}T${pickup}`, timeZone: "America/Los_Angeles" },
+    end: { dateTime: `${d.checkOut}T${addMinutesToTime(pickup, 30)}`, timeZone: "America/Los_Angeles" },
   };
 }
 
 // Returns the new event's id, or null if creation failed for any reason
 // (including simply not being configured, e.g. on staging) - callers
 // store this on the stay only when it's non-null.
-async function createCalendarEvent(d: CalendarEventDetails): Promise<string | null> {
+async function createCalendarEvent(body: Record<string, unknown>): Promise<string | null> {
   try {
     const accessToken = await googleAccessToken();
     const res = await fetch(
@@ -147,7 +187,7 @@ async function createCalendarEvent(d: CalendarEventDetails): Promise<string | nu
       {
         method: "POST",
         headers: { "Authorization": `Bearer ${accessToken}`, "Content-Type": "application/json" },
-        body: JSON.stringify(calendarEventBody(d)),
+        body: JSON.stringify(body),
       },
     );
     const data = await res.json();
@@ -159,7 +199,7 @@ async function createCalendarEvent(d: CalendarEventDetails): Promise<string | nu
   }
 }
 
-async function updateCalendarEvent(eventId: string, d: CalendarEventDetails): Promise<void> {
+async function updateCalendarEvent(eventId: string, body: Record<string, unknown>): Promise<void> {
   try {
     const accessToken = await googleAccessToken();
     const res = await fetch(
@@ -167,7 +207,7 @@ async function updateCalendarEvent(eventId: string, d: CalendarEventDetails): Pr
       {
         method: "PATCH",
         headers: { "Authorization": `Bearer ${accessToken}`, "Content-Type": "application/json" },
-        body: JSON.stringify(calendarEventBody(d)),
+        body: JSON.stringify(body),
       },
     );
     const data = await res.json();
@@ -188,7 +228,9 @@ function todayInBusinessTimezone(): string {
 // can't infer this from the select string alone, same reasoning as
 // RawDog/RawStayLink above.
 interface StayCalendarRow {
-  calendar_event_id: string | null;
+  calendar_allday_event_id: string | null;
+  calendar_dropoff_event_id: string | null;
+  calendar_pickup_event_id: string | null;
   check_in: string;
   check_out: string;
   drop_time: string | null;
@@ -278,7 +320,7 @@ export async function handleRequest(req: Request): Promise<Response> {
     async function syncStayCalendarEvent(stayId: string, opts: { createIfMissing: boolean }): Promise<void> {
       const { data, error } = await supabase
         .from("stays")
-        .select("calendar_event_id, check_in, check_out, drop_time, pickup_time, stay_dogs(name, dogs(owner:owners(name, phone)))")
+        .select("calendar_allday_event_id, calendar_dropoff_event_id, calendar_pickup_event_id, check_in, check_out, drop_time, pickup_time, stay_dogs(name, dogs(owner:owners(name, phone)))")
         .eq("id", stayId)
         .single();
       if (error || !data) {
@@ -300,14 +342,27 @@ export async function handleRequest(req: Request): Promise<Response> {
         pickupTime: stay.pickup_time,
       };
 
-      if (stay.calendar_event_id) {
-        await updateCalendarEvent(stay.calendar_event_id, details);
-      } else if (opts.createIfMissing) {
-        const eventId = await createCalendarEvent(details);
-        if (eventId) {
-          const { error: patchErr } = await supabase.from("stays").update({ calendar_event_id: eventId }).eq("id", stayId);
-          if (patchErr) console.error("syncStayCalendarEvent: failed to save calendar_event_id", patchErr);
+      // Three independent events per stay - each is synced on its own
+      // (an old stay that only ever got the all-day event, from before
+      // drop-off/pickup existed, gets just those two created here
+      // rather than needing its own separate migration path).
+      const events: Array<{ existingId: string | null; body: Record<string, unknown>; column: string }> = [
+        { existingId: stay.calendar_allday_event_id, body: allDayEventBody(details), column: "calendar_allday_event_id" },
+        { existingId: stay.calendar_dropoff_event_id, body: dropoffEventBody(details), column: "calendar_dropoff_event_id" },
+        { existingId: stay.calendar_pickup_event_id, body: pickupEventBody(details), column: "calendar_pickup_event_id" },
+      ];
+      const patch: Record<string, string> = {};
+      for (const ev of events) {
+        if (ev.existingId) {
+          await updateCalendarEvent(ev.existingId, ev.body);
+        } else if (opts.createIfMissing) {
+          const eventId = await createCalendarEvent(ev.body);
+          if (eventId) patch[ev.column] = eventId;
         }
+      }
+      if (Object.keys(patch).length > 0) {
+        const { error: patchErr } = await supabase.from("stays").update(patch).eq("id", stayId);
+        if (patchErr) console.error("syncStayCalendarEvent: failed to save calendar event ids", patchErr);
       }
     }
 
@@ -380,17 +435,22 @@ export async function handleRequest(req: Request): Promise<Response> {
       if (updateErr) throw updateErr;
     } else if (action === "backfillCalendarEvents") {
       // One-time catch-up for stays approved before the calendar feature
-      // existed, or from when Google Calendar was briefly unreachable
-      // (Sept 25, 2026, on request - "can we update the calendar with
-      // existing stays?"). Scoped to check_out >= today only, on request
-      // - a calendar entry for a stay that's already over isn't useful.
-      // Safe to click more than once: the calendar_event_id IS NULL
-      // filter means an already-synced stay is never touched twice.
+      // existed (or before it was split into 3 events, Sept 25, 2026),
+      // or from when Google Calendar was briefly unreachable (Sept 25,
+      // 2026, on request - "can we update the calendar with existing
+      // stays?"). Scoped to check_out >= today only, on request - a
+      // calendar entry for a stay that's already over isn't useful.
+      // Matches a stay missing ANY of the 3 event ids, not just all of
+      // them - syncStayCalendarEvent only creates whichever pieces are
+      // actually missing, so this is also how an already-approved stay
+      // from before the drop-off/pickup split above picks up its 2 new
+      // events, on top of its existing all-day one. Safe to click more
+      // than once: nothing already fully synced ever matches this filter.
       const { data: dueStays, error: dueErr } = await supabase
         .from("stays")
         .select("id")
         .eq("approval_status", "approved")
-        .is("calendar_event_id", null)
+        .or("calendar_allday_event_id.is.null,calendar_dropoff_event_id.is.null,calendar_pickup_event_id.is.null")
         .gte("check_out", todayInBusinessTimezone());
       if (dueErr) throw dueErr;
       for (const s of (dueStays ?? []) as { id: string }[]) {

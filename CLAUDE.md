@@ -113,9 +113,10 @@ Kim Miller and Estee Fletter at 210 Bayview Drive, San Rafael, CA.
   admin-data's editStay action - deliberately never touches billed_at
   or approval_status, since correcting a request isn't a decision;
   "Cancel" discards), "Approve" (sends the real booking confirmation
-  text, then marks it approved, then creates a Google Calendar event for
-  the stay - Sept 25, 2026, on request, see Data model's
-  stays.calendar_event_id) and "Deny" (an optional typed reason,
+  text, then marks it approved, then creates 3 Google Calendar events for
+  the stay (an all-day block + a 30-min drop-off event + a 30-min pickup
+  event) - Sept 25, 2026, on request, see Data model's
+  stays.calendar_allday_event_id) and "Deny" (an optional typed reason,
   folded into a decline text sent before the stay is marked denied -
   same "text first, then persist" ordering as billing below; Edit
   replaces Approve/Deny with Save/Cancel while active, rather than
@@ -313,27 +314,42 @@ stay already billed before this column existed was backfilled to paid
 (paid_at = billed_at) - same reasoning as the approval_status backfill
 above.
 
-`stays.calendar_event_id` (Sept 25, 2026, on request - "each confirmed
-booking goes onto my calendar") is the Google Calendar API's own event
-id, stamped by admin-data's approveStay action once it successfully
-creates a matching event on a dedicated "Bayview Boarding" Google
-Calendar (not Kim's primary one) - best-effort throughout, same
-reasoning as notifyOwnersOfClientText (send-confirmation): a calendar
-hiccup never blocks approving a stay. Kept specifically so billStay/
-editStay can find and update that SAME event (not create a duplicate)
-whenever a later correction touches check-in/check-out/drop/pickup -
-see syncStayCalendarEvent in admin-data/index.ts. Null for every stay
-that predates this feature, that was denied/never approved, or whose
-event creation failed (including on staging, which has no Google
-credentials configured at all - same pattern as its missing Twilio
-credentials, see Tech stack). Auth is a personal Gmail OAuth refresh
-token (not a service account - Google Workspace-only), obtained via a
-one-time manual authorization; see FIXES.txt for the exact steps and an
-important caveat: a refresh token issued while the Google Cloud OAuth
-consent screen is in "Testing" status expires after 7 days, not
-indefinitely - moving that consent screen to "Published" and redoing
-the one-time authorization once is a real, not-yet-done follow-up (see
-NEXT CHANGE LIST) to make this actually durable long-term.
+`stays.calendar_allday_event_id`/`calendar_dropoff_event_id`/
+`calendar_pickup_event_id` (Sept 25, 2026, on request - "each confirmed
+booking goes onto my calendar", then later the same day "add the event
+as an all-day event + add a 30m event for pickup and drop") are the
+Google Calendar API's own event ids for the 3 separate events a
+confirmed booking gets: an all-day block spanning the whole boarding
+duration (check_in through check_out inclusive - end.date is one day
+past check_out, since Google's all-day end date is exclusive), plus a
+30-minute event each at the actual drop-off time (check_in + drop_time)
+and pickup time (check_out + pickup_time). All 3 are stamped by
+admin-data's approveStay action once it successfully creates matching
+events on a dedicated "Bayview Boarding" Google Calendar (not Kim's
+primary one) - best-effort throughout, same reasoning as
+notifyOwnersOfClientText (send-confirmation): a calendar hiccup never
+blocks approving a stay. Each is kept specifically so billStay/editStay
+can find and update that SAME event (not create a duplicate) whenever a
+later correction touches check-in/check-out/drop/pickup - see
+syncStayCalendarEvent in admin-data/index.ts, which syncs all 3
+independently (a stay can have some but not all 3, e.g. right after the
+Sept 25 split, before backfillCalendarEvents below has caught it up).
+Null for every stay that predates this feature, that was denied/never
+approved, or whose event creation failed (including on staging, which
+has no Google credentials configured at all - same pattern as its
+missing Twilio credentials, see Tech stack). This column was originally
+a single `calendar_event_id` holding one timed event spanning the whole
+stay; renamed to `calendar_allday_event_id` and split into 3 the same
+day, before the feature had shipped to more than a handful of stays -
+see supabase/migrations/20260925010000_stay_calendar_events_split.sql.
+Auth is a personal Gmail OAuth refresh token (not a service account -
+Google Workspace-only), obtained via a one-time manual authorization;
+see FIXES.txt for the exact steps and an important caveat: a refresh
+token issued while the Google Cloud OAuth consent screen is in
+"Testing" status expires after 7 days, not indefinitely - moving that
+consent screen to "Published" and redoing the one-time authorization
+once is a real, not-yet-done follow-up (see NEXT CHANGE LIST) to make
+this actually durable long-term.
 
 `dogs.photo_paths`/`stay_dogs.photo_paths` (Sept 21, 2026 as a single
 `photo_path`; replaced with a jsonb array Sept 22, 2026 to allow more
@@ -435,7 +451,7 @@ call itself is dropped, not for a routine secret rotation.
 - Admin password: set as the `ADMIN_PASSWORD` Supabase secret (`supabase secrets set ADMIN_PASSWORD=...`) — never in source, checked server-side by the admin-data function
 - Twilio phone: see src/settings.js PHONE (business's own public contact number)
 - Twilio auth (Sept 21, 2026): every function that sends an outbound SMS (send-confirmation, send-contact, testers, feedback, receive-sms's own reply) authenticates with `TWILIO_API_KEY_SID`/`TWILIO_API_KEY_SECRET` if set, falling back to `TWILIO_ACCOUNT_SID`/`TWILIO_AUTH_TOKEN` otherwise — a restricted, independently-revocable API key is Twilio's own recommendation over the Auth Token (full, unscoped account access). Production has the API key set; the fallback exists for a genuine Twilio "Test Credentials" pair, which has no API-key equivalent - staging ended up with neither (see Staging environment below for why), so it currently has no Twilio credentials at all and its outbound sends just fail. `TWILIO_ACCOUNT_SID` is always required on whichever environment does have credentials (every request URL needs the real Account SID regardless of which credential authenticates it), and `TWILIO_AUTH_TOKEN` stays in use by receive-sms specifically for Twilio's webhook signature check, which only works with the real Auth Token — never an API key.
-- Google Calendar (Sept 25, 2026, admin-data only - see Data model's stays.calendar_event_id): `GOOGLE_CALENDAR_CLIENT_ID`/`GOOGLE_CALENDAR_CLIENT_SECRET`/`GOOGLE_CALENDAR_REFRESH_TOKEN`/`GOOGLE_CALENDAR_ID` Supabase secrets, production only (staging has none set, same pattern as Twilio above). A personal Gmail OAuth Client (Desktop app type, Testing publishing status) + a one-time-authorized refresh token, not a service account - Workspace-only service accounts don't work with a plain Gmail address. See FIXES.txt for the exact setup steps and the 7-day-expiry caveat while the consent screen stays in Testing status.
+- Google Calendar (Sept 25, 2026, admin-data only - see Data model's stays.calendar_allday_event_id): `GOOGLE_CALENDAR_CLIENT_ID`/`GOOGLE_CALENDAR_CLIENT_SECRET`/`GOOGLE_CALENDAR_REFRESH_TOKEN`/`GOOGLE_CALENDAR_ID` Supabase secrets, production only (staging has none set, same pattern as Twilio above). A personal Gmail OAuth Client (Desktop app type, Testing publishing status) + a one-time-authorized refresh token, not a service account - Workspace-only service accounts don't work with a plain Gmail address. See FIXES.txt for the exact setup steps and the 7-day-expiry caveat while the consent screen stays in Testing status.
 
 ## Domain (Sept 23-25, 2026)
 Production is served at its own custom domain, bayviewboarding.com
@@ -523,7 +539,15 @@ replayed from the very first migration - the two earliest migrations in
 supabase/migrations/ both assume a `stays` table that predates this
 project's migration-file history (created via the Dashboard UI before
 that workflow was adopted), so a from-scratch replay was never actually
-possible. Staging has no cron jobs scheduled (send-reminders/send-
+possible. Practical consequence, confirmed Sept 25, 2026: `supabase db
+push` while linked to staging tries to replay the ENTIRE migration
+history in order (it has no record of the bootstrap skipping the first
+few), and fails immediately on the first one staging never actually
+ran (`relation "owners" already exists`). Applying just the one new
+migration directly - `supabase db query --linked --file
+supabase/migrations/<file>.sql` - works fine and is the right move here;
+`db push` on staging should be expected to fail this way indefinitely,
+not treated as a real error each time. Staging has no cron jobs scheduled (send-reminders/send-
 pickup-reminders are deployed and manually callable, just not on a
 daily schedule - testers exercise the booking flow directly) and no
 Twilio credentials at all, by decision (Sept 21, 2026) rather than an
@@ -614,7 +638,7 @@ visitor never reads.
 - supabase/functions/send-confirmation/index.ts — Twilio SMS function (outbound); accepts an optional message_template (the admin-edited settings text, with {placeholders} filled by fillTemplate, including {dogVerb} - "is"/"are" - {billingBreakdown} - the full cost math - and {denialReason} - Sept 21, 2026, resolves to "" when no reason was given, never a literal unfilled placeholder) + packing_list from the caller; falls back to its own hardcoded 6-message-type logic (confirmation/reminder/billing/pickup/request_received/denied) if no template is given. Every dollar placeholder ({finalCost}/{estimatedCost}) is run through formatDollars() first (whole dollars, comma-separated). Has its own direct DB read (service role, fetchFooterAndPhones) for sms_footer and the 2 manager phone numbers (Sept 18, 2026) - fills {primaryManagerPhone}/{secondaryManagerPhone} and appends the filled footer once to every message, and uses the same numbers as the destination for the Kim/Estee copy of every client send (notifyOwnersOfClientText). Called directly by the client at booking time (type request_received - Sept 21, 2026), and by send-reminders/send-pickup-reminders/the admin panel (confirmation on approve, denied on deny, billing, pickup) - has its own Deno test suite (index.test.ts), added Sept 16 (5)
 - supabase/functions/receive-sms/index.ts — inbound SMS webhook: auto-reply + relay to Kim/Estee. Deploy with `--no-verify-jwt` (see comment at top of file) or Twilio's webhook calls silently fail
 - supabase/functions/_shared/contact.ts — pure text builders + Twilio signature validator, shared by send-confirmation and receive-sms, unit-tested via `deno test`
-- supabase/functions/admin-data/index.ts — server-side admin password check + every dog (profile + owner + stay history, incl. approval_status/approved_at/denied_at/denial_reason/paid_at - Sept 21, 2026) (service role key, never exposed to client). Also handles billStay (Sept 17, 2026): saves corrected check-in/out/drop/pickup/cost and marks billed_at; editStay (Sept 24, 2026, on request): the same field patch as billStay but never touches billed_at or approval_status - lets admin correct a still-pending request's details without that implying any decision was made; approveStay/denyStay (Sept 21, 2026): mark a stay approved or denied (denyStay also saves an optional trimmed denial_reason) - both patch the DB and return the refreshed dog list, the actual SMS send is always a separate client-side send-confirmation call first (App.js), same "text actually went out" ordering as billStay; markPaid (Sept 21, 2026): just sets paid_at, no text send involved at all - there's no client-facing message this action is confirming went out. approveStay also creates a Google Calendar event for the stay (Sept 25, 2026, best-effort, see syncStayCalendarEvent + Data model's stays.calendar_event_id), and billStay/editStay update that same event in place whenever they touch a date/time field. backfillCalendarEvents (Sept 25, 2026, on request - "can we update the calendar with existing stays?") is a one-time catch-up for approved stays that predate the sync above: finds every approved stay with check_out today or later and no calendar_event_id yet, and runs the same best-effort createIfMissing sync on each - triggered by an admin panel button (Site Settings > "Add Existing Stays to Calendar"), safe to click repeatedly since the query itself only ever matches un-synced stays. Every stay's photo_paths (if any) are also resolved to signed photoUrls (Sept 21, 2026 for one photo; array since Sept 22, 2026) before the response goes out, since the "dog-photos" bucket is private - a raw path alone isn't viewable; every distinct path across the WHOLE response is batch-signed once per fetch (1-hour TTL), and every stay always gets an explicit photoUrls array (empty when there are no photos), never left undefined
+- supabase/functions/admin-data/index.ts — server-side admin password check + every dog (profile + owner + stay history, incl. approval_status/approved_at/denied_at/denial_reason/paid_at - Sept 21, 2026) (service role key, never exposed to client). Also handles billStay (Sept 17, 2026): saves corrected check-in/out/drop/pickup/cost and marks billed_at; editStay (Sept 24, 2026, on request): the same field patch as billStay but never touches billed_at or approval_status - lets admin correct a still-pending request's details without that implying any decision was made; approveStay/denyStay (Sept 21, 2026): mark a stay approved or denied (denyStay also saves an optional trimmed denial_reason) - both patch the DB and return the refreshed dog list, the actual SMS send is always a separate client-side send-confirmation call first (App.js), same "text actually went out" ordering as billStay; markPaid (Sept 21, 2026): just sets paid_at, no text send involved at all - there's no client-facing message this action is confirming went out. approveStay also creates 3 Google Calendar events for the stay - an all-day block + a 30-min drop-off event + a 30-min pickup event (Sept 25, 2026, best-effort, see syncStayCalendarEvent + Data model's stays.calendar_allday_event_id), and billStay/editStay update those same 3 events in place whenever they touch a date/time field (each synced independently - a stay missing one or two of the 3 only gets those touched/created, never a duplicate of one that already exists). backfillCalendarEvents (Sept 25, 2026, on request - "can we update the calendar with existing stays?", then "add the event as an all-day event + add a 30m event for pickup and drop") is a catch-up for approved stays missing any of the 3 event ids (whether from predating the sync entirely, or predating the all-day/drop-off/pickup split): finds every approved stay with check_out today or later missing at least one, and runs the same best-effort createIfMissing sync on each - triggered by an admin panel button (Site Settings > "Add Existing Stays to Calendar"), safe to click repeatedly since the query itself only ever matches stays with something still missing. Every stay's photo_paths (if any) are also resolved to signed photoUrls (Sept 21, 2026 for one photo; array since Sept 22, 2026) before the response goes out, since the "dog-photos" bucket is private - a raw path alone isn't viewable; every distinct path across the WHOLE response is batch-signed once per fetch (1-hour TTL), and every stay always gets an explicit photoUrls array (empty when there are no photos), never left undefined
 - supabase/functions/lookup-client/index.ts — returning-client autofill by phone: vet + every dog on file (returns only safe fields, never aggression/health)
 - supabase/migrations/ — schema history, including the Sept 14 dog-profiles reorg (owners/dogs/stays/stay_dogs) and the RLS lockdown history for the old flat `stays` table
 - FIXES.txt — current fix list and backlog

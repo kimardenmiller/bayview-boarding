@@ -951,7 +951,8 @@ function AdminView({
   // 2026, on request) - a plain button rather than something that runs
   // automatically, since it's a catch-up action, not a recurring one;
   // safe to click more than once (admin-data's backfillCalendarEvents
-  // action only ever touches stays with no calendar_event_id yet).
+  // action only ever touches stays missing at least one of the 3
+  // calendar event ids - see admin-data's backfillCalendarEvents).
   const [backfillingCalendar, setBackfillingCalendar] = useState(false);
   const [backfillCalendarStatus, setBackfillCalendarStatus] = useState('');
   // "Submit Idea" queue - fetched alongside the dog list at login, shown

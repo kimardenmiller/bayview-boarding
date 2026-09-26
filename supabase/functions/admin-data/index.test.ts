@@ -45,7 +45,9 @@ const DOGS_FIXTURE = [
 // null means "not found" (a 406, matching real PostgREST .single()
 // behavior on 0 rows) - not used by default, only by tests that need it.
 const DEFAULT_STAY_ROW = {
-  calendar_event_id: null,
+  calendar_allday_event_id: null,
+  calendar_dropoff_event_id: null,
+  calendar_pickup_event_id: null,
   check_in: '2026-10-01', check_out: '2026-10-03', drop_time: '09:00:00', pickup_time: '17:00:00',
   stay_dogs: [{ name: 'Rex', dogs: { owner: { name: 'Kim Miller', phone: '4155550100' } } }],
 };
@@ -377,7 +379,7 @@ Deno.test('approveStay: sets approval_status approved and stamps approved_at', a
   }
 });
 
-Deno.test('approveStay: creates a Google Calendar event and saves its id (Sept 25, 2026, on request)', async () => {
+Deno.test('approveStay: creates 3 Google Calendar events (all-day + drop-off + pickup) and saves their ids (Sept 25, 2026, on request)', async () => {
   const stub = stubSupabase();
   try {
     const res = await handleRequest(postRequest({ password: ADMIN_PASSWORD, action: 'approveStay', stayId: 'stay-2' }));
@@ -387,20 +389,33 @@ Deno.test('approveStay: creates a Google Calendar event and saves its id (Sept 2
     assertEquals((tokenCall.body as Record<string, unknown>).refresh_token, 'test-google-refresh-token');
     assertEquals((tokenCall.body as Record<string, unknown>).grant_type, 'refresh_token');
 
-    const eventCall = stub.calls.find((c) => c.table === 'google-calendar-event')!;
-    assertEquals(eventCall.method, 'POST');
-    const eventBody = eventCall.body as Record<string, unknown>;
-    assertEquals(eventBody.summary, 'Rex — Bayview Boarding');
-    assertEquals(eventBody.description, 'Owner: Kim Miller (4155550100)');
-    assertEquals((eventBody.start as Record<string, unknown>).dateTime, '2026-10-01T09:00:00');
-    assertEquals((eventBody.end as Record<string, unknown>).dateTime, '2026-10-03T17:00:00');
+    const eventCalls = stub.calls.filter((c) => c.table === 'google-calendar-event' && c.method === 'POST');
+    assertEquals(eventCalls.length, 3);
 
-    // The event's id came back from the (stubbed) Google API and got
-    // saved on the stay in a follow-up patch.
+    const allDay = eventCalls.find((c) => (c.body as Record<string, unknown>).summary === 'Rex — Bayview Boarding')!;
+    assertEquals((allDay.body as Record<string, unknown>).description, 'Owner: Kim Miller (4155550100)');
+    assertEquals((allDay.body as { start: { date: string } }).start.date, '2026-10-01');
+    // check_out's day is exclusive on an all-day event - one day past
+    // check_out (10-04, not 10-03) or the pickup day wouldn't show as occupied.
+    assertEquals((allDay.body as { end: { date: string } }).end.date, '2026-10-04');
+
+    const dropoff = eventCalls.find((c) => (c.body as Record<string, unknown>).summary === 'Rex — Drop-off')!;
+    assertEquals((dropoff.body as { start: { dateTime: string } }).start.dateTime, '2026-10-01T09:00:00');
+    assertEquals((dropoff.body as { end: { dateTime: string } }).end.dateTime, '2026-10-01T09:30:00');
+
+    const pickup = eventCalls.find((c) => (c.body as Record<string, unknown>).summary === 'Rex — Pickup')!;
+    assertEquals((pickup.body as { start: { dateTime: string } }).start.dateTime, '2026-10-03T17:00:00');
+    assertEquals((pickup.body as { end: { dateTime: string } }).end.dateTime, '2026-10-03T17:30:00');
+
+    // All 3 event ids came back from the (stubbed) Google API and got
+    // saved on the stay in one follow-up patch.
     const patchCalls = stub.calls.filter((c) => c.table === 'stays' && c.method === 'PATCH');
     assertEquals(patchCalls.length, 2); // the approval patch, then this one
-    const calendarPatch = patchCalls.find((c) => (c.body as Record<string, unknown>).calendar_event_id)!;
-    assertEquals((calendarPatch.body as Record<string, unknown>).calendar_event_id, 'fake-event-id');
+    const calendarPatch = patchCalls.find((c) => (c.body as Record<string, unknown>).calendar_allday_event_id)!;
+    const patchBody = calendarPatch.body as Record<string, unknown>;
+    assertEquals(patchBody.calendar_allday_event_id, 'fake-event-id');
+    assertEquals(patchBody.calendar_dropoff_event_id, 'fake-event-id');
+    assertEquals(patchBody.calendar_pickup_event_id, 'fake-event-id');
   } finally {
     stub.restore();
   }
@@ -424,22 +439,31 @@ Deno.test('approveStay: still succeeds even when Google Calendar is unreachable 
   }
 });
 
-Deno.test('billStay: updates the existing calendar event when dates/times change (Sept 25, 2026)', async () => {
-  const stub = stubSupabase({ stayRow: { ...DEFAULT_STAY_ROW, calendar_event_id: 'existing-event-id' } });
+Deno.test('billStay: updates all 3 existing calendar events when dates/times change (Sept 25, 2026)', async () => {
+  const stub = stubSupabase({
+    stayRow: {
+      ...DEFAULT_STAY_ROW,
+      calendar_allday_event_id: 'existing-allday-id',
+      calendar_dropoff_event_id: 'existing-dropoff-id',
+      calendar_pickup_event_id: 'existing-pickup-id',
+    },
+  });
   try {
     await handleRequest(postRequest({
       password: ADMIN_PASSWORD, action: 'billStay', stayId: 'stay-2', checkOut: '2026-10-04',
     }));
-    const eventCall = stub.calls.find((c) => c.table === 'google-calendar-event')!;
-    assertEquals(eventCall.method, 'PATCH');
-    assertEquals(eventCall.search?.endsWith('/existing-event-id'), true);
+    const eventCalls = stub.calls.filter((c) => c.table === 'google-calendar-event' && c.method === 'PATCH');
+    assertEquals(eventCalls.length, 3);
+    assertEquals(eventCalls.some((c) => c.search?.endsWith('/existing-allday-id')), true);
+    assertEquals(eventCalls.some((c) => c.search?.endsWith('/existing-dropoff-id')), true);
+    assertEquals(eventCalls.some((c) => c.search?.endsWith('/existing-pickup-id')), true);
   } finally {
     stub.restore();
   }
 });
 
 Deno.test('billStay: never touches the calendar when only the cost changes, not dates/times', async () => {
-  const stub = stubSupabase({ stayRow: { ...DEFAULT_STAY_ROW, calendar_event_id: 'existing-event-id' } });
+  const stub = stubSupabase({ stayRow: { ...DEFAULT_STAY_ROW, calendar_allday_event_id: 'existing-event-id' } });
   try {
     await handleRequest(postRequest({ password: ADMIN_PASSWORD, action: 'billStay', stayId: 'stay-2', estimatedCost: 300 }));
     assertEquals(stub.calls.some((c) => c.table === 'google-token' || c.table === 'google-calendar-event'), false);
@@ -448,13 +472,13 @@ Deno.test('billStay: never touches the calendar when only the cost changes, not 
   }
 });
 
-Deno.test('editStay: a still-pending stay with no calendar event yet is left alone, even if dates change', async () => {
-  const stub = stubSupabase({ stayRow: DEFAULT_STAY_ROW }); // calendar_event_id: null
+Deno.test('editStay: a still-pending stay with no calendar events yet is left alone, even if dates change', async () => {
+  const stub = stubSupabase({ stayRow: DEFAULT_STAY_ROW }); // all 3 event ids: null
   try {
     await handleRequest(postRequest({
       password: ADMIN_PASSWORD, action: 'editStay', stayId: 'stay-2', checkOut: '2026-10-04',
     }));
-    // Looked the stay up (to check for an event id) but never created one -
+    // Looked the stay up (to check for event ids) but never created any -
     // editStay/billStay only ever update an existing event, never create.
     assertEquals(stub.calls.some((c) => c.table === 'google-calendar-event'), false);
   } finally {
@@ -462,7 +486,28 @@ Deno.test('editStay: a still-pending stay with no calendar event yet is left alo
   }
 });
 
-Deno.test('backfillCalendarEvents: creates an event for every due stay and reports the count (Sept 25, 2026)', async () => {
+Deno.test('editStay: creates only the missing event(s) for a stay that already has some but not all 3 (Sept 25, 2026)', async () => {
+  const stub = stubSupabase({
+    stayRow: { ...DEFAULT_STAY_ROW, calendar_allday_event_id: 'existing-allday-id' },
+  });
+  try {
+    // editStay never creates (createIfMissing: false), so with only the
+    // all-day event pre-existing, only that one gets touched - the
+    // still-missing drop-off/pickup events are left for backfillCalendarEvents
+    // (createIfMissing: true) to fill in, not silently created here.
+    await handleRequest(postRequest({
+      password: ADMIN_PASSWORD, action: 'editStay', stayId: 'stay-2', checkOut: '2026-10-04',
+    }));
+    const eventCalls = stub.calls.filter((c) => c.table === 'google-calendar-event');
+    assertEquals(eventCalls.length, 1);
+    assertEquals(eventCalls[0].method, 'PATCH');
+    assertEquals(eventCalls[0].search?.endsWith('/existing-allday-id'), true);
+  } finally {
+    stub.restore();
+  }
+});
+
+Deno.test('backfillCalendarEvents: creates all 3 events for every due stay and reports the count (Sept 25, 2026)', async () => {
   const stub = stubSupabase({ dueStays: [{ id: 'stay-2' }, { id: 'stay-3' }] });
   try {
     const res = await handleRequest(postRequest({ password: ADMIN_PASSWORD, action: 'backfillCalendarEvents' }));
@@ -470,16 +515,38 @@ Deno.test('backfillCalendarEvents: creates an event for every due stay and repor
     const data = await res.json();
     assertEquals(data.backfilledCount, 2);
 
-    // The list query itself was scoped to approved, un-synced, not-yet-
-    // over stays - not every stay in the table.
+    // The list query itself was scoped to approved, not-yet-over stays
+    // missing at least one of the 3 event ids - not every stay in the table.
     const listCall = stub.calls.find((c) => c.table === 'stays' && c.method === 'GET' && c.search?.includes('approval_status'));
     assertEquals(listCall!.search!.includes('approval_status=eq.approved'), true);
-    assertEquals(listCall!.search!.includes('calendar_event_id=is.null'), true);
+    assertEquals(listCall!.search!.includes('calendar_allday_event_id.is.null'), true);
+    assertEquals(listCall!.search!.includes('calendar_dropoff_event_id.is.null'), true);
+    assertEquals(listCall!.search!.includes('calendar_pickup_event_id.is.null'), true);
     assertEquals(listCall!.search!.includes('check_out=gte.'), true);
 
-    // One calendar event created per due stay.
+    // 3 calendar events created per due stay (all 3 ids start null on
+    // the stubbed stay row) - 2 stays x 3 events.
     const eventCalls = stub.calls.filter((c) => c.table === 'google-calendar-event' && c.method === 'POST');
-    assertEquals(eventCalls.length, 2);
+    assertEquals(eventCalls.length, 6);
+  } finally {
+    stub.restore();
+  }
+});
+
+Deno.test('backfillCalendarEvents: only creates the missing piece(s) for a stay that already has some events', async () => {
+  const stub = stubSupabase({
+    dueStays: [{ id: 'stay-2' }],
+    stayRow: { ...DEFAULT_STAY_ROW, calendar_allday_event_id: 'existing-allday-id' },
+  });
+  try {
+    await handleRequest(postRequest({ password: ADMIN_PASSWORD, action: 'backfillCalendarEvents' }));
+    // The existing all-day event gets updated (not recreated); only the
+    // 2 still-missing events (drop-off, pickup) get created.
+    const patchToAllday = stub.calls.filter((c) => c.table === 'google-calendar-event' && c.method === 'PATCH');
+    assertEquals(patchToAllday.length, 1);
+    assertEquals(patchToAllday[0].search?.endsWith('/existing-allday-id'), true);
+    const created = stub.calls.filter((c) => c.table === 'google-calendar-event' && c.method === 'POST');
+    assertEquals(created.length, 2);
   } finally {
     stub.restore();
   }
