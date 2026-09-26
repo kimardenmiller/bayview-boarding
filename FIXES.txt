@@ -1,6 +1,6 @@
 BAYVIEW BOARDING — FIX LIST
 ============================
-Last updated: September 26, 2026 (4) (Drop-off/pickup reminders now fire exactly 24 hours before each stay's real time, not once daily at a fixed hour - checked every 15 min instead of once a day)
+Last updated: September 26, 2026 (5) (Real favicon - a house with a paw print - replacing Create React App's stock default)
 
 NEXT CHANGE LIST (v1.5)
 -----------------------
@@ -43,6 +43,41 @@ DEFERRED (revisit only if it actually blocks something)
 
 COMPLETED
 ---------
+- Sept 26, 2026 (5): "What do you call the little icon that appears on
+  the browser tab? I see you came up with one, but it does not fit dog
+  boarding." That was Create React App's own stock default (the blue
+  React atom logo, favicon.ico/logo192.png/logo512.png untouched since
+  the Sept 3 scaffold) - index.html had no explicit <link rel="icon">
+  at all, so browsers were just falling back to the root /favicon.ico
+  convention. Presented 5 concepts built from the site's own palette
+  (navy header color, sage green, warm cream) as an Artifact gallery,
+  each shown at real favicon scale in a mock browser tab: a paw print,
+  a floppy-ear dog face, a house with a paw print cut into it, a dog
+  bone, and a "BB" monogram in the header's own Playfair Display serif.
+  Chose "Home & Paw" - a house shape (cream) on a navy rounded-square
+  badge, with a paw print knocked out of the house in navy - the one
+  that reads as "home-based" specifically, not just "pet business."
+
+  No SVG-to-PNG rasterizer was available in this environment (no
+  ImageMagick/rsvg-convert/headless Chrome/Python imaging libs, and
+  installing one felt heavier than the task warranted) - wrote a small
+  dependency-free Node script instead: hand-rasterizes the icon's few
+  shapes (ellipses, a triangle, a rounded rect) via supersampled
+  point-in-shape testing for antialiasing, then encodes the result as
+  PNG directly on top of Node's built-in zlib, and packs 3 sizes into a
+  real multi-resolution favicon.ico. Generated 2 treatments: a rounded
+  "app icon" badge with transparent corners for the tab favicon itself
+  (favicon.ico + 16/32px PNGs - browsers render whatever's given, so
+  the rounding is a real deliberate look), and a plain full-bleed
+  square with no pre-baked rounding for apple-touch-icon.png/logo192.
+  png/logo512.png (iOS/Android/PWA installers apply their own mask
+  shape to these, so pre-rounding would double up with it). Added the
+  explicit <link rel="icon">/<link rel="apple-touch-icon"> tags
+  index.html was missing; manifest.json needed no changes since it
+  already pointed at the same filenames.
+  Deployed: both frontend bundles rebuilt and deployed; verified the
+  new favicon.ico actually resolves (200) on both
+  bayviewboarding.com and bayviewboarding.com/staging.
 - Sept 26, 2026 (4): "The pickup reminder just went out to Tom Maddox,
   but pickup is not 24 hours away yet. Send the pickup reminder exactly
   when the stay is 24 hours away. How do we trigger these, a cron job?"
