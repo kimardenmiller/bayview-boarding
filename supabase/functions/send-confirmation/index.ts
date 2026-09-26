@@ -201,7 +201,10 @@ export async function handleRequest(req: Request): Promise<Response> {
       // same admin-reviewed dates/rate - see App.js's sendBill) comes
       // before the total, not just the total alone.
       const breakdownBlock = billing_breakdown ? `\n${billing_breakdown}\n` : "";
-      message = `Hi ${firstName}! Thank you for visiting Bayview Boarding with ${dog_name}. Here's your billing detail:${breakdownBlock}\nTotal: $${formatDollars(final_cost)}\n\nThanks for choosing Bayview Boarding! — Kim & Estee`;
+      // "Please leave us a review" (Sept 26, 2026, on request, once the
+      // Google Business Profile existed) - Google's own review-form
+      // short link, same one already on the About page.
+      message = `Hi ${firstName}! Thank you for visiting Bayview Boarding with ${dog_name}. Here's your billing detail:${breakdownBlock}\nTotal: $${formatDollars(final_cost)}\n\nThanks for choosing Bayview Boarding! Please leave us a review: https://g.page/r/CX9YK-LEWX_nEAI/review — Kim & Estee`;
     } else if (type === "pickup") {
       message = `It's been wonderful having ${dog_name}! We have you down for pick up at ${pickDate} ${pickTimeStr}. Please let us know in our shared group text thread if anything has changed. Otherwise, we'll see you tomorrow at ${pickTimeStr}. — Kim & Estee`;
     } else if (type === "request_received") {

@@ -1,6 +1,6 @@
 BAYVIEW BOARDING — FIX LIST
 ============================
-Last updated: September 26, 2026 (10) ("Leave us a Google review" link added to the About section, next to the existing Rover reviews)
+Last updated: September 26, 2026 (11) (Billing SMS text now ends with a "Please leave us a review" link too, not just the About page)
 
 NEXT CHANGE LIST (v1.5)
 -----------------------
@@ -29,6 +29,25 @@ DEFERRED (revisit only if it actually blocks something)
 
 COMPLETED
 ---------
+- Sept 26, 2026 (11): "Let's update the billing text with a 'Please
+  leave us a review' link" - the billing SMS is the one message every
+  paying client actually gets, right after a good stay, making it a
+  better ask than the on-site About page link alone (10, below).
+  Updated in 3 places to stay in sync: src/settings.js's SMS_BILLING
+  fallback default, send-confirmation's own hardcoded billing fallback
+  (used if no message_template is passed), and the LIVE `sms_billing`
+  value in both the production and staging `settings` tables directly
+  via `db query` (confirmed byte-for-byte identical to the old default
+  first, so this wasn't overwriting any of Kim's own customization).
+  Same URL as the About page link (10, below) - not a new
+  {placeholder}, since it's a fixed URL that never varies per stay.
+  Tests: updated the one exact-match Deno test on send-confirmation's
+  hardcoded billing fallback (still 32 on that function, 215 overall)
+  and confirmed the one Jest assertion touching this text (a
+  `.toContain`, not exact-match) still passes untouched. No test count
+  change either side - existing tests updated, not new ones.
+  Deployed: send-confirmation redeployed to both environments; both
+  frontend bundles rebuilt/deployed for the settings.js fallback.
 - Sept 26, 2026 (10): Business Profile finished and verified; Kim shared
   the review-form short link (https://g.page/r/CX9YK-LEWX_nEAI/review -
   note: he'd first pasted a personalized Google Search results URL with

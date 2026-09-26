@@ -76,7 +76,12 @@ export const SETTINGS = {
 
   SMS_REMINDER: `Hi {firstName}! Just a reminder that {dogName}'s stay at Bayview Boarding starts tomorrow at {dropTime}. Here's what to bring:\n{packingList}\nSee you then! — Kim & Estee`,
 
-  SMS_BILLING: `Hi {firstName}! Thank you for visiting Bayview Boarding with {dogName}. Here's your billing detail:\n{billingBreakdown}\nTotal: ${'{finalCost}'}\n\nThanks for choosing Bayview Boarding! — Kim & Estee`,
+  // "Please leave us a review" (Sept 26, 2026, on request, once the
+  // Google Business Profile existed) links straight to Google's own
+  // review-form short link - the same one already on the About page
+  // (GOOGLE_REVIEW_URL in App.js) - not a {placeholder}, since it's a
+  // fixed URL that never varies per stay.
+  SMS_BILLING: `Hi {firstName}! Thank you for visiting Bayview Boarding with {dogName}. Here's your billing detail:\n{billingBreakdown}\nTotal: ${'{finalCost}'}\n\nThanks for choosing Bayview Boarding! Please leave us a review: https://g.page/r/CX9YK-LEWX_nEAI/review — Kim & Estee`,
 
   SMS_PICKUP_REMINDER: `It's been wonderful having {dogName}! We have you down for pick up at {pickupDate} {pickupTime}. Please let us know in our shared group text thread if anything has changed. Otherwise, we'll see you tomorrow at {pickupTime}. — Kim & Estee`,
 

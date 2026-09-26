@@ -132,7 +132,7 @@ Deno.test('with no message_template, type billing: "Thank you for visiting" word
     }));
     assertEquals(
       stub.calls[0].body,
-      `Hi Kim! Thank you for visiting Bayview Boarding with Rex. Here's your billing detail:\n$105.00/day × 2.0 days × 1st dog = $210.00\n\nTotal: $1,796\n\nThanks for choosing Bayview Boarding! — Kim & Estee\n\n${FILLED_FOOTER}`,
+      `Hi Kim! Thank you for visiting Bayview Boarding with Rex. Here's your billing detail:\n$105.00/day × 2.0 days × 1st dog = $210.00\n\nTotal: $1,796\n\nThanks for choosing Bayview Boarding! Please leave us a review: https://g.page/r/CX9YK-LEWX_nEAI/review — Kim & Estee\n\n${FILLED_FOOTER}`,
     );
     assertEquals(stub.calls[0].body.includes('ready for pickup'), false);
   } finally {
