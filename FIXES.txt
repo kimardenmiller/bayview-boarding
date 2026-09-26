@@ -62,7 +62,7 @@ COMPLETED
   the count; no-op with nothing due; still returns 200 with an
   unreachable Google API) + 2 new Jest tests (shows "Added N stays..."
   / "Already up to date"). 233 Jest -> 235, 29 Deno on admin-data
-  (202 -> 204 overall).
+  (202 -> 205 overall).
 - Sept 25, 2026 (3): "Let's create a feature where each confirmed
   booking goes onto my calendar." Google Calendar chosen over Apple/
   iCloud - Kim already has Gmail, Google's Calendar API is a
