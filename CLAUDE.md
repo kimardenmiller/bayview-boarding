@@ -708,6 +708,28 @@ longer needed at all and was deleted; public/img/hero-dog.jpg is now
 the only copy, referenced everywhere (this image, og:image/
 twitter:image, the LocalBusiness JSON-LD's image field below).
 
+That preload fix alone took LCP from 15.3s to 7.7s (PageSpeed Mobile
+score 60) - real, but still "poor" by PageSpeed's bar, so 2 more
+levers (Sept 30, 2026 (2)): the hero photo itself is now 480x640 at
+65% JPEG quality (143KB, down from 750x1000/288KB - resizing, not
+quality alone, was what actually worked; recompressing at matching
+quality with `sips`, the only image tool available in this
+environment, came out LARGER than the original at every quality
+setting tried) - a deliberately aggressive crop specifically because
+it's a full-bleed atmospheric background image sitting behind a dark
+gradient overlay (`.landing-overlay`), not a detail shot. And the
+Google Fonts stylesheet (Inter + Playfair Display) switched from a
+plain `<link rel="stylesheet">` (render-blocking - nothing on the
+page paints, hero image included, until it's fetched, regardless of
+the URL's own `display=swap` param, which only affects text behavior
+once the stylesheet HAS loaded) to the standard non-blocking pattern:
+`<link rel="preload" as="style">` + the real stylesheet link loaded
+with `media="print" onload="this.media='all'"`, plus a `<noscript>`
+fallback. `decoding="async"` on the hero `<img>` was considered and
+deliberately skipped - good advice for non-critical images, but not
+for the actual LCP element itself, where decoupling decode from the
+render pipeline can delay the very paint being optimized for.
+
 `LocalBusiness` structured data (JSON-LD, Sept 23, 2026, on request) is
 injected client-side (a `useEffect` in AboutContent, src/App.js) rather
 than as a static `<script>` in public/index.html, for the same

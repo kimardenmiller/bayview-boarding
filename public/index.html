@@ -34,7 +34,21 @@
 
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Playfair+Display:wght@600&display=swap" rel="stylesheet">
+    <!-- Loaded non-render-blocking (Sept 30, 2026, on request - PageSpeed
+         Mobile score 60, LCP still 7.7s after the hero-image fix below)
+         - a plain <link rel="stylesheet"> blocks the page's FIRST PAINT
+         entirely until this file downloads, regardless of display=swap
+         (that only controls how TEXT behaves once the stylesheet has
+         already loaded, it does nothing about the stylesheet fetch
+         itself blocking render). media="print" makes the browser fetch
+         it with a non-blocking priority since print styles don't apply
+         to an on-screen render; the onload handler flips it to "all"
+         the moment it's actually loaded, applying the real fonts
+         immediately after. <noscript> covers JS-disabled visitors, who
+         never run the onload handler at all. -->
+    <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Playfair+Display:wght@600&display=swap" />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Playfair+Display:wght@600&display=swap" rel="stylesheet" media="print" onload="this.media='all'" />
+    <noscript><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Playfair+Display:wght@600&display=swap" rel="stylesheet" /></noscript>
   </head>
   <body>
     <noscript>

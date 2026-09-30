@@ -1,6 +1,6 @@
 BAYVIEW BOARDING — FIX LIST
 ============================
-Last updated: September 30, 2026 (Fixed a 15.3s mobile LCP - the hero photo wasn't discoverable until React had already rendered)
+Last updated: September 30, 2026 (2) (Mobile PageSpeed 60 -> hero image halved to 143KB, Google Fonts no longer render-blocking)
 
 NEXT CHANGE LIST (v1.5)
 -----------------------
@@ -29,6 +29,52 @@ DEFERRED (revisit only if it actually blocks something)
 
 COMPLETED
 ---------
+- Sept 30, 2026 (2): "Tiny bit better, mobile score 60" - the preload
+  fix below got LCP from 15.3s down to 7.7s (FCP 4.9->2.6s, Speed Index
+  6.1->5.5s), a real improvement but still "poor" by PageSpeed's own
+  bar. Two more concrete levers, both applied:
+  1. The hero photo itself was still 288KB. `sips` (no other image
+     tool was available in this environment - no ImageMagick/
+     cwebp/cairosvg) turned out to compress this particular JPEG WORSE
+     than its original encoding at matching quality settings (a
+     quality-only re-encode at 60-80% actually came out LARGER than
+     the 288KB original) - the real win came from resizing, not
+     quality alone. Resized to 480x640 (from 750x1000) at 65% quality -
+     143KB, roughly half - visually inspected directly and it's still
+     clean with no visible compression artifacts, and it sits behind a
+     dark gradient overlay anyway (see .landing-overlay in App.css)
+     which masks fine detail further. A gentler resize (640 wide,
+     853 tall, keeping closer to native resolution on 1x-DPR phones)
+     only got to 229KB (20% off) - went with the more aggressive crop
+     specifically because this is a full-bleed atmospheric background
+     image, not a detail/product shot, and every KB matters more under
+     PageSpeed's simulated throttled mobile connection than pixel-
+     perfect sharpness does here.
+  2. The Google Fonts stylesheet (Inter + Playfair Display) was a
+     plain <link rel="stylesheet"> - render-blocking, meaning NOTHING
+     paints (not just text - the whole page, hero image included)
+     until it's fetched, regardless of the URL's own `display=swap`
+     param (that only governs text behavior once the stylesheet has
+     already loaded - it does nothing about the fetch itself blocking
+     first paint). Switched to the standard non-blocking pattern:
+     `<link rel="preload" as="style">` + the actual stylesheet link
+     loaded with `media="print" onload="this.media='all'"` (fetches
+     without blocking render, then applies once loaded) +
+     a `<noscript>` fallback for JS-disabled visitors.
+  Considered but deliberately skipped: `decoding="async"` on the hero
+  `<img>` - the usual advice for non-critical images, but NOT
+  recommended for the actual LCP element specifically, since
+  decoupling its decode from the render pipeline can delay exactly the
+  paint you're trying to speed up.
+  No test count change - HTML/asset changes only, nothing here is
+  meaningfully unit-testable beyond what the Sept 30 (1) test already
+  covers (the <img>'s src/fetchPriority).
+  Deployed: verified byte-for-byte at the pushed gh-pages content
+  (bypassing GitHub's ~10-minute CDN cache, which showed stale content
+  immediately after the previous round's deploy too - expected, not a
+  real failure) on both environments. Kim should re-run PageSpeed
+  Insights to see the actual before/after - not verifiable from a code
+  review alone.
 - Sept 30, 2026: "Can we do some SEO? On PageSpeed > Mobile I'm getting
   ... Largest Contentful Paint 15.3 s" (FCP 4.9s, Speed Index 6.1s, TBT
   70ms, CLS 0 - those last two were already fine). Root cause: the
