@@ -846,6 +846,18 @@ describe('Landing — About Us, embedded on the home page', () => {
     expect(screen.getByText('Dog Paradise Above Loch Lomond')).toBeInTheDocument();
   });
 
+  test('the hero photo loads from a plain public/ path with high fetch priority, not a webpack-bundled import (Sept 30, 2026, on request - PageSpeed showed a 15.3s mobile LCP)', () => {
+    render(<App />);
+    const hero = screen.getByAltText('A happy dog boarding with Bayview Boarding on a Marin hillside trail');
+    // A webpack import would resolve to a content-hashed
+    // /static/media/... URL - this must stay a plain, predictable path
+    // so the matching <link rel="preload"> in index.html (a static
+    // file, unaware of any webpack hash) actually matches the same URL
+    // the browser ends up requesting.
+    expect(hero).toHaveAttribute('src', '/img/hero-dog.jpg');
+    expect(hero).toHaveAttribute('fetchPriority', 'high');
+  });
+
   test('the CTA still reads "Book My Stay" (Sept 21, 2026 - the "requests reviewed within 24 hours" note moved to the booking page itself)', () => {
     render(<App />);
     expect(screen.getAllByText('Book My Stay')[0]).toBeInTheDocument();

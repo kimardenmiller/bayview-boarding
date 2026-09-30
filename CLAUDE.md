@@ -640,10 +640,13 @@ index.html, using %PUBLIC_URL% so each build points at itself), and
 public/sitemap.xml - necessarily just the one URL, since this is a
 client-side SPA with no server-side routing and so no other distinct
 crawlable paths exist. The link-preview image (og:image/twitter:image,
-Sept 21, 2026) is the landing hero photo - public/img/hero-dog.jpg, a
-copy of src/img/hero-dog.jpg kept in sync manually (the JS-imported
-original gets a webpack content hash on every build, so it has no
-stable URL a static meta tag could reference). Every %PUBLIC_URL%-based
+Sept 21, 2026) is the landing hero photo - public/img/hero-dog.jpg, the
+single copy (App.js's own `<img>` used to import a second copy from
+src/img/hero-dog.jpg, webpack-hashed on every build so it had no stable
+URL a static meta tag could reference; that copy and the import are
+both gone now - see the LCP fix below, which needed the exact same
+stable-URL property for an unrelated reason and made the src/
+duplicate pointless). Every %PUBLIC_URL%-based
 URL (canonical/og:url/og:image, plus every image src that uses
 process.env.PUBLIC_URL, like the About page gallery) resolves to a full
 https:// URL, not a relative path - package.json's `build` script
@@ -683,6 +686,28 @@ testing and encodes straight to PNG on top of Node's built-in zlib -
 see FIXES.txt for the full account if this ever needs regenerating at
 a new size or with a different design.
 
+**Mobile page speed / LCP** (Sept 30, 2026, on request - PageSpeed
+Insights Mobile showed a 15.3s Largest Contentful Paint). The LCP
+element was the landing page's own full-bleed hero photo, and the
+15s was almost entirely a *discovery* problem, not a file-size one
+(the JPEG itself is a reasonable 288KB): it used to be a webpack
+`import` (`import heroDog from './img/hero-dog.jpg'`), which only gets
+a real, fetchable URL once React has rendered - a browser's HTML
+preload scanner can't discover an imported asset at all, so the fetch
+didn't even start until the full JS bundle had downloaded, parsed, and
+executed. Fixed by switching the `<img>` to a plain public/ path
+(`HERO_DOG_URL` in App.js, `${process.env.PUBLIC_URL}/img/hero-dog.jpg`
+- known before any JS runs at all) plus `fetchPriority="high"` on the
+tag itself, and adding a matching `<link rel="preload" as="image"
+fetchpriority="high">` in public/index.html so the browser starts
+fetching it immediately on HTML parse, in parallel with the JS bundle,
+rather than waiting for React to mount first. This also meant
+src/img/hero-dog.jpg (the old webpack-imported copy, kept in sync
+manually with the public/ one - see SEO & Analytics above) was no
+longer needed at all and was deleted; public/img/hero-dog.jpg is now
+the only copy, referenced everywhere (this image, og:image/
+twitter:image, the LocalBusiness JSON-LD's image field below).
+
 `LocalBusiness` structured data (JSON-LD, Sept 23, 2026, on request) is
 injected client-side (a `useEffect` in AboutContent, src/App.js) rather
 than as a static `<script>` in public/index.html, for the same
@@ -706,7 +731,7 @@ visitor never reads.
 - src/App.js — main app
 - src/settings.js — all configurable values (rates, vets, messages, packing list)
 - src/waiver.js — full waiver text
-- src/App.test.js — 239 passing tests (TDD), Supabase mocked via src/__mocks__/supabase.js
+- src/App.test.js — 240 passing tests (TDD), Supabase mocked via src/__mocks__/supabase.js
 - src/supabase.js — creates the Supabase client from REACT_APP_SUPABASE_URL/_KEY (falling back to production's own public values) - see Staging environment above for how the staging build overrides these
 - src/index.js — app entry point; also where Google Analytics loads (production only) and staging's noindex meta tag gets injected - see SEO & Analytics above
 - supabase/functions/send-contact/index.ts — public Contact Us form handler: relays name/email-or-phone/message to Kim & Estee by SMS (reuses KIM_PHONE/ESTEE_PHONE). Deployed normally (no --no-verify-jwt) since it's called via the Supabase JS client like settings/lookup-client/submit-booking

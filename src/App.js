@@ -2,8 +2,20 @@ import React, { useState, useEffect, useRef } from 'react';
 import { WAIVER_SECTIONS } from './waiver';
 import { supabase } from './supabase';
 import { SETTINGS } from './settings';
-import heroDog from './img/hero-dog.jpg';
 import './App.css';
+
+// A plain public/ path, not a webpack import (Sept 30, 2026, on
+// request - PageSpeed showed a 15.3s mobile LCP). A webpack-imported
+// image only gets a discoverable URL once React has rendered - the
+// browser's own HTML preload scanner can't see it at all until then,
+// so the fetch doesn't even START until the full JS bundle has
+// downloaded, parsed, and run. This is the single largest image on the
+// page (the full-bleed landing hero) and was the LCP element, so that
+// delay was directly the 15s. A public/ path is known before any JS
+// runs at all, which is what makes the <link rel="preload"> in
+// index.html (and fetchpriority="high" below) actually work - see
+// SEO & Analytics in CLAUDE.md.
+const HERO_DOG_URL = `${process.env.PUBLIC_URL}/img/hero-dog.jpg`;
 
 // Fallback defaults, used until the `settings` Edge Function's response
 // loads (App's useEffect below) and as calcCost's own parameter defaults
@@ -2600,7 +2612,7 @@ function Landing({ onStart, onLearnMore, aboutSectionRef, aboutPhotos }) {
   return (
     <>
       <div className="landing">
-        <img className="landing-img" src={heroDog} alt="A happy dog boarding with Bayview Boarding on a Marin hillside trail" />
+        <img className="landing-img" src={HERO_DOG_URL} alt="A happy dog boarding with Bayview Boarding on a Marin hillside trail" fetchPriority="high" />
         <div className="landing-overlay">
           <div className="landing-top">
             <h1 className="landing-title landing-title--link" onClick={onLearnMore}>Bayview Boarding</h1>
@@ -2727,7 +2739,11 @@ function AboutContent({ onStart, aboutPhotos }) {
       // same duplication trade-off already accepted there for og:image
       // (see CLAUDE.md's SEO & Analytics section).
       description: 'Home-based dog boarding in San Rafael, CA, run by Kim Miller and Estee Fletter. Book a stay, see photos and reviews, and get an instant cost estimate.',
-      image: `${window.location.origin}${process.env.PUBLIC_URL}/img/hero-dog.jpg`,
+      // HERO_DOG_URL is already a full absolute URL in a real build
+      // (package.json's build script sets an explicit absolute
+      // PUBLIC_URL) - window.location.origin was only ever needed
+      // because the old value here was relative.
+      image: HERO_DOG_URL,
       url: `${window.location.origin}${process.env.PUBLIC_URL}/`,
       telephone: SETTINGS.PHONE,
       address: { '@type': 'PostalAddress', addressLocality: 'San Rafael', addressRegion: 'CA', addressCountry: 'US' },

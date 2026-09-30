@@ -1,6 +1,6 @@
 BAYVIEW BOARDING — FIX LIST
 ============================
-Last updated: September 26, 2026 (11) (Billing SMS text now ends with a "Please leave us a review" link too, not just the About page)
+Last updated: September 30, 2026 (Fixed a 15.3s mobile LCP - the hero photo wasn't discoverable until React had already rendered)
 
 NEXT CHANGE LIST (v1.5)
 -----------------------
@@ -29,6 +29,39 @@ DEFERRED (revisit only if it actually blocks something)
 
 COMPLETED
 ---------
+- Sept 30, 2026: "Can we do some SEO? On PageSpeed > Mobile I'm getting
+  ... Largest Contentful Paint 15.3 s" (FCP 4.9s, Speed Index 6.1s, TBT
+  70ms, CLS 0 - those last two were already fine). Root cause: the
+  landing page's full-bleed hero photo (the actual LCP element) was a
+  webpack `import`, not a plain file path - an imported asset only gets
+  a real, fetchable URL once React has rendered, so the browser's HTML
+  preload scanner can't discover it at parse time the way it can a
+  plain <img src="..."> or <link rel="preload">; the fetch simply
+  didn't start until the whole JS bundle had downloaded, parsed, and
+  executed. The image itself was already a reasonable 288KB - this was
+  a load-ORDER problem, not a file-size one.
+  Fixed: switched the hero `<img>` to a plain public/ path
+  (HERO_DOG_URL in App.js) with fetchPriority="high", and added a
+  matching `<link rel="preload" as="image" fetchpriority="high">` in
+  public/index.html so the fetch starts immediately on HTML parse, in
+  parallel with the JS bundle, instead of waiting for React to mount.
+  Deleted src/img/hero-dog.jpg (the old webpack-imported copy, kept in
+  sync manually with public/img/hero-dog.jpg for og:image/twitter:image
+  - see CLAUDE.md's SEO & Analytics) since nothing imports it any more;
+  public/img/hero-dog.jpg is now the single copy, used everywhere
+  (og:image/twitter:image, the LocalBusiness JSON-LD image field, and
+  now the actual <img> too).
+  Tests: 1 new (the hero image's src is the plain public/ path, not a
+  webpack-hashed one, and carries fetchPriority="high"). 239 -> 240
+  Jest passing. No Deno changes - purely a frontend asset-loading
+  change.
+  Deployed: verified both the production and staging builds' preload
+  `href` byte-for-byte matches the `<img>`'s own resolved `src` (both
+  derived from the same PUBLIC_URL); both frontend bundles rebuilt and
+  deployed. Kim should re-run PageSpeed Insights after this to confirm
+  the actual LCP improvement - not something verifiable from a code
+  review alone, since it depends on real network conditions PageSpeed
+  simulates.
 - Sept 26, 2026 (11): "Let's update the billing text with a 'Please
   leave us a review' link" - the billing SMS is the one message every
   paying client actually gets, right after a good stay, making it a

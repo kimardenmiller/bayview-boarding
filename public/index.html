@@ -8,6 +8,15 @@
     <link rel="icon" href="%PUBLIC_URL%/favicon-16x16.png" type="image/png" sizes="16x16" />
     <link rel="icon" href="%PUBLIC_URL%/favicon-32x32.png" type="image/png" sizes="32x32" />
     <link rel="apple-touch-icon" href="%PUBLIC_URL%/apple-touch-icon.png" />
+    <!-- The landing page's own hero photo is the LCP (largest
+         contentful paint) element and the single biggest lever on
+         PageSpeed's mobile score (Sept 30, 2026 - a 15.3s mobile LCP
+         traced to this image not even starting its fetch until the
+         full JS bundle had loaded, parsed, and rendered - see App.js's
+         HERO_DOG_URL). Preloading it here lets the browser start
+         fetching it immediately on HTML parse, in parallel with the
+         JS bundle, rather than waiting for React to mount first. -->
+    <link rel="preload" as="image" href="%PUBLIC_URL%/img/hero-dog.jpg" fetchpriority="high" />
     <title>Bayview Boarding | Dog Boarding in San Rafael, CA</title>
     <meta name="description" content="Home-based dog boarding in San Rafael, CA, run by Kim Miller and Estee Fletter. Book a stay, see photos and reviews, and get an instant cost estimate." />
     <link rel="canonical" href="%PUBLIC_URL%/" />
