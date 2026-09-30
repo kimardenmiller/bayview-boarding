@@ -1,13 +1,17 @@
 {
   "files": {
     "main.css": "https://bayviewboarding.com/staging/static/css/main.863a30a2.css",
-    "main.js": "https://bayviewboarding.com/staging/static/js/main.fa6c68c6.js",
+    "main.js": "https://bayviewboarding.com/staging/static/js/main.e6954c34.js",
+    "static/js/755.74996156.chunk.js": "https://bayviewboarding.com/staging/static/js/755.74996156.chunk.js",
+    "static/js/993.9bd21153.chunk.js": "https://bayviewboarding.com/staging/static/js/993.9bd21153.chunk.js",
     "index.html": "https://bayviewboarding.com/staging/index.html",
     "main.863a30a2.css.map": "https://bayviewboarding.com/staging/static/css/main.863a30a2.css.map",
-    "main.fa6c68c6.js.map": "https://bayviewboarding.com/staging/static/js/main.fa6c68c6.js.map"
+    "main.e6954c34.js.map": "https://bayviewboarding.com/staging/static/js/main.e6954c34.js.map",
+    "755.74996156.chunk.js.map": "https://bayviewboarding.com/staging/static/js/755.74996156.chunk.js.map",
+    "993.9bd21153.chunk.js.map": "https://bayviewboarding.com/staging/static/js/993.9bd21153.chunk.js.map"
   },
   "entrypoints": [
     "static/css/main.863a30a2.css",
-    "static/js/main.fa6c68c6.js"
+    "static/js/main.e6954c34.js"
   ]
 }
