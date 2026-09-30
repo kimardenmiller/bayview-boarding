@@ -730,6 +730,47 @@ deliberately skipped - good advice for non-critical images, but not
 for the actual LCP element itself, where decoupling decode from the
 render pipeline can delay the very paint being optimized for.
 
+**Code-splitting** (Sept 30, 2026 (3), on request - PageSpeed Mobile
+was still scoring 60 after the image/font fixes above, with FCP/TBT
+both still elevated by a client-rendered SPA where nothing paints
+until the whole JS bundle downloads/parses/mounts): the booking flow
+and the admin panel - together roughly two-thirds of the app's JS, and
+neither needed by a visitor who's just landed on the page - are now
+`React.lazy()` + `Suspense` chunks (`src/BookingFlow.js`/
+`src/AdminPanel.js`) instead of being bundled into `main.js`. Pure
+logic with no React dependency (`calcCostBreakdown`, `formatDollars`,
+`dogIsComplete`, etc.) moved to `src/calc.js`; the admin-configurable
+fallback defaults moved to `src/defaults.js`; 2 small components used
+by BOTH lazy chunks (`CostBreakdown`, `Field`) and one shared non-pure
+helper that needs `supabase` (`aboutPhotoSrc`) each got their own tiny
+module so neither chunk has to import the other. Result: the main
+bundle dropped from 127.83 kB to 116.85 kB gzipped, with BookingFlow
+(9.48 kB) and AdminPanel (5.56 kB) now separate, on-demand chunks -
+verified by inspecting `build/static/js/` after a real production
+build. A `LoadingFallback` (`App.js`) shows briefly on the first
+"Book a Stay"/admin visit per session while its chunk downloads - a
+deliberate, accepted tradeoff (the chunk is cached after, so this is a
+one-time cost per visitor). This is also what surfaced the
+`fetchPriority` bug above: a React console warning during the Jest run
+this refactor required (crossing a `Suspense` boundary needs
+`findBy`/`waitFor` in tests, not synchronous `getBy`) is what caught
+it, not the refactor itself.
+
+**A note on building this app from this specific machine**: this
+repo lives inside a Dropbox "CloudStorage" (on-demand-download)
+folder, whose virtual filesystem has repeatedly caused `npm ci`/
+`npm test`/`npm run build` to hang indefinitely (near-zero CPU
+progress, not a real computation) or silently return
+truncated/corrupted file reads despite a correct-looking `ls -la` size
+- unpredictable, not tied to any particular command. If a build/install
+hangs here, don't just keep retrying in place: `rsync` the repo (minus
+`node_modules`/`.git`/`build`) to a location OUTSIDE Dropbox (e.g. a
+scratch tmp dir), `npm ci` + `npm run build`/`build:staging` there,
+then copy the resulting `build/` folder back before `gh-pages -d
+build`/`--dest staging`. This reliably sidesteps the stall (confirmed
+Sept 30, 2026, after 4 straight in-place build attempts all hung at
+the exact same early point).
+
 `LocalBusiness` structured data (JSON-LD, Sept 23, 2026, on request) is
 injected client-side (a `useEffect` in AboutContent, src/App.js) rather
 than as a static `<script>` in public/index.html, for the same
@@ -750,7 +791,13 @@ phrase in the page's actual visible text, not just in meta tags a
 visitor never reads.
 
 ## Key files
-- src/App.js — main app
+- src/App.js — main app: landing page, About content, nav, Contact Us/Submit Idea, and the App() shell that lazy-loads BookingFlow/AdminPanel (see Mobile page speed's Code-splitting entry)
+- src/BookingFlow.js — the booking flow (owner info through waiver/sign/confirmation), lazy-loaded
+- src/AdminPanel.js — the entire admin panel, lazy-loaded (password-gated, so never needed by a first-time visitor)
+- src/calc.js — pure cost/date calculation and formatting helpers (calcCostBreakdown, formatDollars, dogIsComplete, etc.), no React dependency, shared by App.js/BookingFlow.js/AdminPanel.js and directly unit-tested by App.test.js
+- src/defaults.js — fallback default values (rate, vets, packing list, SMS templates) used before the `settings` fetch resolves, shared by App.js and AdminPanel.js
+- src/CostBreakdown.js / src/Field.js — small shared JSX components used by both BookingFlow.js and AdminPanel.js, split into their own modules so neither lazy chunk has to import the other
+- src/aboutPhotoSrc.js — shared helper resolving an about_photos entry to a real URL, used by App.js's AboutContent and AdminPanel.js's About Photos editor
 - src/settings.js — all configurable values (rates, vets, messages, packing list)
 - src/waiver.js — full waiver text
 - src/App.test.js — 240 passing tests (TDD), Supabase mocked via src/__mocks__/supabase.js

@@ -1,6 +1,6 @@
 BAYVIEW BOARDING — FIX LIST
 ============================
-Last updated: September 30, 2026 (2) (Mobile PageSpeed 60 -> hero image halved to 143KB, Google Fonts no longer render-blocking)
+Last updated: September 30, 2026 (3) (code-splitting: booking flow + admin panel lazy-loaded, TBT 190ms -> 90ms)
 
 NEXT CHANGE LIST (v1.5)
 -----------------------
@@ -29,6 +29,63 @@ DEFERRED (revisit only if it actually blocks something)
 
 COMPLETED
 ---------
+- Sept 30, 2026 (3): "Mobile is now a 84 and desktop is now and 80" (FCP
+  2.6s, LCP 3.6s, TBT 190ms, CLS 0.001, Speed Index 2.6s) after the Sept
+  30 (2) image/font fixes below - real progress, but FCP/TBT were still
+  elevated, the signature of a client-rendered SPA where nothing paints
+  until the ENTIRE JS bundle has downloaded, parsed, and mounted.
+  "Let's look into code splitting" -> asked whether to split just the
+  admin panel or the admin panel + booking flow too; chose the more
+  aggressive option (admin panel + booking flow), accepting a brief
+  first-visit loading flicker on "Book a Stay"/Admin in exchange for a
+  smaller landing-page bundle, since that's the page every visitor
+  actually lands on first.
+  Split `src/App.js` (3353 lines, with AdminView alone over half the
+  file) into: App.js (landing/About/nav, trimmed to ~780 lines),
+  BookingFlow.js and AdminPanel.js (each `React.lazy()` + `Suspense`,
+  so webpack gives them their own downloadable chunk instead of bundling
+  them into main.js), plus 5 small shared modules so neither lazy chunk
+  has to import the other - calc.js (pure calculation/formatting logic,
+  no React dependency), defaults.js (fallback config values),
+  CostBreakdown.js/Field.js (small shared components), aboutPhotoSrc.js
+  (a helper both App.js's About page and AdminPanel's own photo editor
+  call). See CLAUDE.md's Code-splitting entry under Mobile page speed /
+  LCP for the full file-by-file breakdown.
+  Verified via a real production build: main bundle gzipped size
+  127.83 kB -> 116.85 kB, with BookingFlow (9.48 kB) and AdminPanel
+  (5.56 kB) now separate on-demand chunks in build/static/js/ - exactly
+  the intended shape.
+  Caught 2 real bugs along the way, neither previously known:
+  1. A live bug in the Sept 30 (1) LCP fix below: the hero `<img>`'s
+     `fetchPriority="high"` (camelCase) has NOT actually been reaching
+     the real DOM attribute in any browser this whole time - this
+     installed React version (18.3.1) has no special handling for that
+     camelCase prop (only added in a later React version) and just
+     warns about it. Fixed to the literal lowercase `fetchpriority`
+     JSX attribute, which React passes straight through to the DOM.
+     Caught via a console warning surfaced while fixing this refactor's
+     own test failures, not by anything code-splitting-specific.
+  2. `aboutPhotoSrc` was only kept in App.js during the initial
+     extraction (that's where it was originally defined) before a test
+     failure revealed AdminPanel's own About Photos editor calls it
+     too - fixed by giving it its own shared module.
+  Test-suite impact: all 17 admin-login test-helper call sites needed
+  `await screen.findByPlaceholderText('Password')` instead of a
+  synchronous `getBy*` (crossing a Suspense boundary is always at least
+  one async tick, even for an already-resolved chunk) - booking-flow
+  tests needed no changes, since their own shared helper was already
+  async-safe. All 240 Jest tests pass, unchanged count (nothing added,
+  existing coverage relocated/fixed in place).
+  Build note: this machine's Dropbox "CloudStorage" sync repeatedly
+  hung `npm run build` outright (near-zero CPU progress, not a real
+  hang worth waiting out) - worked around by building from an rsync'd
+  copy outside the Dropbox-synced tree, then copying `build/` back
+  before deploying; see CLAUDE.md's Code-splitting entry for the exact
+  steps if this recurs.
+  Deployed to both environments. Kim confirmed the real-world
+  improvement after this deployed: mobile TBT 190ms -> 90ms (FCP/LCP/
+  CLS/Speed Index essentially unchanged, as expected - TBT is exactly
+  the metric code-splitting targets).
 - Sept 30, 2026 (2): "Tiny bit better, mobile score 60" - the preload
   fix below got LCP from 15.3s down to 7.7s (FCP 4.9->2.6s, Speed Index
   6.1->5.5s), a real improvement but still "poor" by PageSpeed's own

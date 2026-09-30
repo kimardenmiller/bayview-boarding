@@ -1,6 +1,7 @@
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import App, { formatDate, calcAge, calcCost, calcCostBreakdown, formatCostBreakdownText, isHolidayNight, getHolidayWindows, todayISO, formatMoney } from './App';
+import App from './App';
+import { formatDate, calcAge, calcCost, calcCostBreakdown, formatCostBreakdownText, isHolidayNight, getHolidayWindows, todayISO, formatMoney } from './calc';
 import { supabase } from './supabase';
 import { SETTINGS } from './settings';
 
@@ -308,7 +309,7 @@ async function loginAsAdmin(dogs = SAMPLE_DOGS, totalStays = SAMPLE_TOTAL_STAYS)
   mockInvokeDefaults({ 'admin-data': async () => ({ data: { dogs, totalStays }, error: null }) });
   goToAdminUrl();
   render(<App />);
-  await userEvent.type(screen.getByPlaceholderText('Password'), 'correct-password');
+  await userEvent.type(await screen.findByPlaceholderText('Password'), 'correct-password');
   fireEvent.click(screen.getByText('Sign In'));
   await screen.findByText('Bayview Boarding — Admin');
 }
@@ -338,7 +339,7 @@ async function loginAsAdminWithFeedback(feedback = SAMPLE_FEEDBACK) {
   });
   goToAdminUrl();
   render(<App />);
-  await userEvent.type(screen.getByPlaceholderText('Password'), 'correct-password');
+  await userEvent.type(await screen.findByPlaceholderText('Password'), 'correct-password');
   fireEvent.click(screen.getByText('Sign In'));
   await screen.findByText('Bayview Boarding — Admin');
 }
@@ -373,7 +374,7 @@ async function loginAsAdminWithTesters(testers = SAMPLE_TESTERS) {
   });
   goToAdminUrl();
   render(<App />);
-  await userEvent.type(screen.getByPlaceholderText('Password'), 'correct-password');
+  await userEvent.type(await screen.findByPlaceholderText('Password'), 'correct-password');
   fireEvent.click(screen.getByText('Sign In'));
   await screen.findByText('Bayview Boarding — Admin');
 }
@@ -855,7 +856,7 @@ describe('Landing — About Us, embedded on the home page', () => {
     // file, unaware of any webpack hash) actually matches the same URL
     // the browser ends up requesting.
     expect(hero).toHaveAttribute('src', '/img/hero-dog.jpg');
-    expect(hero).toHaveAttribute('fetchPriority', 'high');
+    expect(hero).toHaveAttribute('fetchpriority', 'high');
   });
 
   test('the CTA still reads "Book My Stay" (Sept 21, 2026 - the "requests reviewed within 24 hours" note moved to the booking page itself)', () => {
@@ -2043,7 +2044,7 @@ describe('Admin login', () => {
   test('rejects wrong password', async () => {
     goToAdminUrl();
     render(<App />);
-    await userEvent.type(screen.getByPlaceholderText('Password'), 'wrongpassword');
+    await userEvent.type(await screen.findByPlaceholderText('Password'), 'wrongpassword');
     fireEvent.click(screen.getByText('Sign In'));
     expect(await screen.findByText('Incorrect password')).toBeInTheDocument();
     expect(supabase.functions.invoke).toHaveBeenCalledWith('admin-data', { body: { password: 'wrongpassword' } });
@@ -2077,7 +2078,7 @@ describe('Admin login', () => {
     mockInvokeDefaults({ 'admin-data': async () => ({ data: { dogs: SAMPLE_DOGS, totalStays: SAMPLE_TOTAL_STAYS }, error: null }) });
     goToAdminUrl();
     render(<App />);
-    await userEvent.type(screen.getByPlaceholderText('Password'), 'correct-password{Enter}');
+    await userEvent.type(await screen.findByPlaceholderText('Password'), 'correct-password{Enter}');
     expect(await screen.findByText('Bayview Boarding — Admin')).toBeInTheDocument();
   });
 
@@ -2160,7 +2161,7 @@ async function loginAsAdminWithUnbilled(dogs = UNBILLED_DOGS) {
   });
   goToAdminUrl();
   render(<App />);
-  await userEvent.type(screen.getByPlaceholderText('Password'), 'correct-password');
+  await userEvent.type(await screen.findByPlaceholderText('Password'), 'correct-password');
   fireEvent.click(screen.getByText('Sign In'));
   await screen.findByText('Bayview Boarding — Admin');
 }
@@ -2207,7 +2208,7 @@ async function loginAsAdminWithRequests(dogs = REQUESTS_DOGS) {
   });
   goToAdminUrl();
   render(<App />);
-  await userEvent.type(screen.getByPlaceholderText('Password'), 'correct-password');
+  await userEvent.type(await screen.findByPlaceholderText('Password'), 'correct-password');
   fireEvent.click(screen.getByText('Sign In'));
   await screen.findByText('Bayview Boarding — Admin');
 }
@@ -2288,7 +2289,7 @@ describe('Admin — logged in — Requests', () => {
     });
     goToAdminUrl();
     render(<App />);
-    await userEvent.type(screen.getByPlaceholderText('Password'), 'correct-password');
+    await userEvent.type(await screen.findByPlaceholderText('Password'), 'correct-password');
     fireEvent.click(screen.getByText('Sign In'));
     await screen.findByText('Bayview Boarding — Admin');
 
@@ -2389,7 +2390,7 @@ describe('Admin — logged in — Requests', () => {
     });
     goToAdminUrl();
     render(<App />);
-    await userEvent.type(screen.getByPlaceholderText('Password'), 'correct-password');
+    await userEvent.type(await screen.findByPlaceholderText('Password'), 'correct-password');
     fireEvent.click(screen.getByText('Sign In'));
     await screen.findByText('Bayview Boarding — Admin');
 
@@ -2523,7 +2524,7 @@ describe('Admin — logged in — Unbilled Stays', () => {
     });
     goToAdminUrl();
     render(<App />);
-    await userEvent.type(screen.getByPlaceholderText('Password'), 'correct-password');
+    await userEvent.type(await screen.findByPlaceholderText('Password'), 'correct-password');
     fireEvent.click(screen.getByText('Sign In'));
     await screen.findByText('Bayview Boarding — Admin');
 
@@ -2577,7 +2578,7 @@ async function loginAsAdminWithPhotos(aboutPhotos = SAMPLE_ABOUT_PHOTOS) {
   });
   goToAdminUrl();
   render(<App />);
-  await userEvent.type(screen.getByPlaceholderText('Password'), 'correct-password');
+  await userEvent.type(await screen.findByPlaceholderText('Password'), 'correct-password');
   fireEvent.click(screen.getByText('Sign In'));
   await screen.findByText('Bayview Boarding — Admin');
 }
@@ -2634,7 +2635,7 @@ describe('Admin — logged in — About Photos', () => {
     });
     goToAdminUrl();
     render(<App />);
-    await userEvent.type(screen.getByPlaceholderText('Password'), 'correct-password');
+    await userEvent.type(await screen.findByPlaceholderText('Password'), 'correct-password');
     fireEvent.click(screen.getByText('Sign In'));
     await screen.findByText('Bayview Boarding — Admin');
 
@@ -2673,7 +2674,7 @@ describe('Admin — logged in — About Photos', () => {
     });
     goToAdminUrl();
     render(<App />);
-    await userEvent.type(screen.getByPlaceholderText('Password'), 'correct-password');
+    await userEvent.type(await screen.findByPlaceholderText('Password'), 'correct-password');
     fireEvent.click(screen.getByText('Sign In'));
     await screen.findByText('Bayview Boarding — Admin');
 
@@ -2991,7 +2992,7 @@ describe('Admin — logged in', () => {
     });
     goToAdminUrl();
     render(<App />);
-    await userEvent.type(screen.getByPlaceholderText('Password'), 'correct-password');
+    await userEvent.type(await screen.findByPlaceholderText('Password'), 'correct-password');
     fireEvent.click(screen.getByText('Sign In'));
     await screen.findByText('Bayview Boarding — Admin');
 
@@ -3023,7 +3024,7 @@ describe('Admin — logged in', () => {
     });
     goToAdminUrl();
     render(<App />);
-    await userEvent.type(screen.getByPlaceholderText('Password'), 'correct-password');
+    await userEvent.type(await screen.findByPlaceholderText('Password'), 'correct-password');
     fireEvent.click(screen.getByText('Sign In'));
     await screen.findByText('Bayview Boarding — Admin');
 
@@ -3045,7 +3046,7 @@ describe('Admin — logged in', () => {
     });
     goToAdminUrl();
     render(<App />);
-    await userEvent.type(screen.getByPlaceholderText('Password'), 'correct-password');
+    await userEvent.type(await screen.findByPlaceholderText('Password'), 'correct-password');
     fireEvent.click(screen.getByText('Sign In'));
     await screen.findByText('Bayview Boarding — Admin');
 
@@ -3180,7 +3181,7 @@ describe('Admin — logged in', () => {
     });
     goToAdminUrl();
     render(<App />);
-    await userEvent.type(screen.getByPlaceholderText('Password'), 'correct-password');
+    await userEvent.type(await screen.findByPlaceholderText('Password'), 'correct-password');
     fireEvent.click(screen.getByText('Sign In'));
     await screen.findByText('Bayview Boarding — Admin');
 
