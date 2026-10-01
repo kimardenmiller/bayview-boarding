@@ -122,10 +122,9 @@ export default function AdminView({
   // generic, same as Unbilled Stays' own Edit.
   const [savingRequestEditId, setSavingRequestEditId] = useState(null);
   // Payment tracking (Sept 21, 2026, on request) - "billed" alone never
-  // answered "has this actually been paid?"; marking paid is a plain
-  // admin decision, not tied to any text send (unlike approve/deny/bill,
-  // which all send first, then persist) - there's no client-facing
-  // message this action is confirming actually went out.
+  // answered "has this actually been paid?". A thank-you/review-request
+  // text was added Sept 30, 2026, on request - same "send the text
+  // FIRST, then persist" ordering as approve/deny/bill below now.
   const [markingPaidId, setMarkingPaidId] = useState(null);
   const [paidStatus, setPaidStatus] = useState({});
   // Click-to-expand (Sept 17, 2026 - replaced "every field always visible
@@ -236,7 +235,7 @@ export default function AdminView({
       setAboutPhotos(data.aboutPhotos);
       setEditAboutPhotos(data.aboutPhotos);
     }
-    if (data.smsConfirmation || data.smsReminder || data.smsBilling || data.smsPickupReminder || data.smsRequestReceived || data.smsDenied) {
+    if (data.smsConfirmation || data.smsReminder || data.smsBilling || data.smsPickupReminder || data.smsRequestReceived || data.smsDenied || data.smsPaid) {
       const next = {
         confirmation: data.smsConfirmation ?? smsTemplates.confirmation,
         reminder: data.smsReminder ?? smsTemplates.reminder,
@@ -244,6 +243,7 @@ export default function AdminView({
         pickupReminder: data.smsPickupReminder ?? smsTemplates.pickupReminder,
         requestReceived: data.smsRequestReceived ?? smsTemplates.requestReceived,
         denied: data.smsDenied ?? smsTemplates.denied,
+        paid: data.smsPaid ?? smsTemplates.paid,
       };
       setSmsTemplates(next);
       setEditSms(next);
@@ -625,17 +625,30 @@ export default function AdminView({
     setTotalStays(data.totalStays);
   }
 
-  // Just a status flip, unlike approve/deny/bill above - no text to send
-  // first, so no "send then persist" ordering needed here.
+  // Sends a thank-you/review-request text FIRST (Sept 30, 2026, on
+  // request), then persists - same ordering as approve/deny/bill above,
+  // so the stay is only marked paid once the client has actually been
+  // texted.
   async function markPaid(stay) {
     setMarkingPaidId(stay.id);
     setPaidStatus(prev => ({ ...prev, [stay.id]: null }));
+    const { data: smsData, error: smsErr } = await supabase.functions.invoke('send-confirmation', {
+      body: {
+        type: 'paid', owner_name: stay.ownerName, owner_phone: stay.ownerPhone,
+        dog_name: stay.dogNames.join(' & '), message_template: smsTemplates.paid,
+      },
+    });
+    if (smsErr || smsData?.error) {
+      setMarkingPaidId(null);
+      setPaidStatus(prev => ({ ...prev, [stay.id]: 'Failed to send. Please try again.' }));
+      return;
+    }
     const { data, error: fnError } = await supabase.functions.invoke('admin-data', {
       body: { password: pw, action: 'markPaid', stayId: stay.id },
     });
     setMarkingPaidId(null);
     if (fnError || data?.error) {
-      setPaidStatus(prev => ({ ...prev, [stay.id]: 'Failed to save. Please try again.' }));
+      setPaidStatus(prev => ({ ...prev, [stay.id]: 'Sent, but failed to save - it may show as unpaid again.' }));
       return;
     }
     setDogs(data.dogs);
@@ -1666,6 +1679,7 @@ export default function AdminView({
             { key: 'reminder', label: 'Drop-off Reminder' },
             { key: 'pickupReminder', label: 'Pickup Reminder' },
             { key: 'billing', label: 'Billing' },
+            { key: 'paid', label: 'Payment Received' },
           ].map(({ key, label }) => (
             <div key={key} style={{ marginBottom: 12 }}>
               <div style={{ fontSize: '0.8rem', fontWeight: 500, color: '#2C3E50', marginBottom: 4 }}>{label}</div>

@@ -49,6 +49,7 @@ interface SettingsRow {
   sms_footer: string;
   sms_request_received: string;
   sms_denied: string;
+  sms_paid: string;
   about_photos: AboutPhoto[];
   primary_manager_phone?: string;
   secondary_manager_phone?: string;
@@ -63,7 +64,7 @@ interface SettingsRow {
 // that must never reach a public read, since those are the actual phone
 // numbers those placeholders get filled with.
 const PUBLIC_COLUMNS =
-  "day_rate, minimum_stay, multi_dog_discount, holiday_upcharge, vets, packing_list, sms_confirmation, sms_reminder, sms_billing, sms_pickup_reminder, sms_footer, sms_request_received, sms_denied, about_photos";
+  "day_rate, minimum_stay, multi_dog_discount, holiday_upcharge, vets, packing_list, sms_confirmation, sms_reminder, sms_billing, sms_pickup_reminder, sms_footer, sms_request_received, sms_denied, sms_paid, about_photos";
 const ADMIN_ONLY_COLUMNS = "primary_manager_phone, secondary_manager_phone, default_broadcast_message";
 const ADMIN_COLUMNS = `${PUBLIC_COLUMNS}, ${ADMIN_ONLY_COLUMNS}`;
 
@@ -82,6 +83,7 @@ function toClientShape(row: SettingsRow) {
     smsFooter: row.sms_footer,
     smsRequestReceived: row.sms_request_received,
     smsDenied: row.sms_denied,
+    smsPaid: row.sms_paid,
     aboutPhotos: row.about_photos,
   };
   // Only present at all when the row was fetched with ADMIN_COLUMNS -
@@ -108,6 +110,7 @@ interface UpdatesInput {
   smsFooter?: string;
   smsRequestReceived?: string;
   smsDenied?: string;
+  smsPaid?: string;
   aboutPhotos?: AboutPhoto[];
   primaryManagerPhone?: string;
   secondaryManagerPhone?: string;
@@ -196,6 +199,9 @@ function validateUpdates(updates: UpdatesInput): string[] {
   if (updates.smsDenied !== undefined && !updates.smsDenied?.trim()) {
     errors.push("smsDenied must not be blank");
   }
+  if (updates.smsPaid !== undefined && !updates.smsPaid?.trim()) {
+    errors.push("smsPaid must not be blank");
+  }
   if (updates.defaultBroadcastMessage !== undefined && !updates.defaultBroadcastMessage?.trim()) {
     errors.push("defaultBroadcastMessage must not be blank");
   }
@@ -253,6 +259,7 @@ export async function handleRequest(req: Request): Promise<Response> {
       if (updates.smsFooter !== undefined) patch.sms_footer = updates.smsFooter.trim();
       if (updates.smsRequestReceived !== undefined) patch.sms_request_received = updates.smsRequestReceived.trim();
       if (updates.smsDenied !== undefined) patch.sms_denied = updates.smsDenied.trim();
+      if (updates.smsPaid !== undefined) patch.sms_paid = updates.smsPaid.trim();
       if (updates.primaryManagerPhone !== undefined) patch.primary_manager_phone = updates.primaryManagerPhone.trim();
       if (updates.secondaryManagerPhone !== undefined) patch.secondary_manager_phone = updates.secondaryManagerPhone.trim();
       if (updates.defaultBroadcastMessage !== undefined) patch.default_broadcast_message = updates.defaultBroadcastMessage.trim();

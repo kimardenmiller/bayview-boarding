@@ -514,9 +514,10 @@ export async function handleRequest(req: Request): Promise<Response> {
       }
       return json({ ...(await fetchDogsAndTotals()), backfilledCount });
     } else if (action === "markPaid") {
-      // Just a status flip (Sept 21, 2026) - unlike billStay/approveStay/
-      // denyStay, there's no client-facing text this is confirming went
-      // out first; admin is just recording that payment was received.
+      // Just a status flip (Sept 21, 2026; a thank-you/review-request text
+      // was added Sept 30, 2026, but it's sent client-side FIRST, same
+      // "text actually went out" ordering as billStay/approveStay/
+      // denyStay - this function still only ever touches paid_at).
       if (!stayId) return json({ error: "stayId is required" }, 400);
       const { error: updateErr } = await supabase.from("stays")
         .update({ paid_at: new Date().toISOString() })

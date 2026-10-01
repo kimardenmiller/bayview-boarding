@@ -1,6 +1,6 @@
 BAYVIEW BOARDING — FIX LIST
 ============================
-Last updated: September 30, 2026 (3) (code-splitting: booking flow + admin panel lazy-loaded, TBT 190ms -> 90ms)
+Last updated: September 30, 2026 (4) (Mark Paid now sends a thank-you/review-request text first)
 
 NEXT CHANGE LIST (v1.5)
 -----------------------
@@ -29,6 +29,28 @@ DEFERRED (revisit only if it actually blocks something)
 
 COMPLETED
 ---------
+- Sept 30, 2026 (4): "Can we add a feature that sends a text when we mark
+  the stay paid?" with the exact wording to use (thank-you + a request
+  to leave a review, signed "— Kim & Estee").
+  markPaid was the one admin decision with no client-facing text at all
+  (see its own Sept 21, 2026 entry below) - now sends first, then
+  persists, same ordering as billStay/approveStay/denyStay: AdminPanel's
+  markPaid calls send-confirmation (type "paid") before admin-data's
+  markPaid action; a failed send shows an error and never marks the
+  stay paid, same as a failed billing/approval/denial send already did.
+  Added a 7th admin-editable SMS template (settings.sms_paid, "Payment
+  Received" in Admin > SMS Message Templates) - same public-read/admin-
+  write pattern as the other 6, defaulting to the client's exact
+  wording, with the Google review link reused as a fixed string (same
+  as sms_billing already does) rather than a new {placeholder}, since it
+  never varies per stay. send-confirmation also gained its own
+  hardcoded type: "paid" fallback for direct/no-template calls, matching
+  every other message type's own fallback.
+  Jest 240 -> 241 (Mark Paid's existing test updated for the new
+  send-confirmation call, plus a new failure-path test); Deno 215 -> 217
+  (a new fallback-message test in send-confirmation, a new update test
+  in settings).
+  Deployed to both environments.
 - Sept 30, 2026 (3): "Mobile is now a 84 and desktop is now and 80" (FCP
   2.6s, LCP 3.6s, TBT 190ms, CLS 0.001, Speed Index 2.6s) after the Sept
   30 (2) image/font fixes below - real progress, but FCP/TBT were still

@@ -215,6 +215,10 @@ export async function handleRequest(req: Request): Promise<Response> {
     } else if (type === "denied") {
       const reasonSuffix = denial_reason ? ` Reason: ${denial_reason}.` : "";
       message = `Hi ${firstName}! Unfortunately we're unable to accept your booking request for ${dog_name} (${dropDate} - ${pickDate}).${reasonSuffix} Please feel free to reach out with any questions. — Kim & Estee`;
+    } else if (type === "paid") {
+      // Sent when admin marks a stay Paid (Sept 30, 2026, on request) -
+      // the same fixed Google review short link sms_billing already uses.
+      message = `Hi ${firstName}! We received your payment. Thank you!\n\nIf you have not done so already, please leave us a review: https://g.page/r/CX9YK-LEWX_nEAI/review\n\nThanks for choosing Bayview Boarding, and we'll see you next time!\n\n— Kim & Estee`;
     } else {
       // Default: confirmation
       message = `Hi ${firstName}! ${dog_name}'s stay at Bayview Boarding is confirmed. Drop-off: ${dropDate} at ${dropTimeStr}. Pick-up: ${pickDate} at ${pickTimeStr}. Estimated cost: $${formatDollars(estimated_cost)}. — Kim & Estee`;

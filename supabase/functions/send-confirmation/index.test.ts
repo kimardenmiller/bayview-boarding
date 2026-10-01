@@ -363,6 +363,21 @@ Deno.test('with no message_template, type denied: reads cleanly with no reason g
   }
 });
 
+Deno.test('with no message_template, type paid: builds the thank-you/review-request message, signed off and the footer below it', async () => {
+  const stub = stubEnvironment();
+  try {
+    await handleRequest(sendRequest({
+      type: 'paid', owner_name: 'Kim Miller', owner_phone: '4155550199', dog_name: 'Rex',
+    }));
+    assertEquals(
+      stub.calls[0].body,
+      `Hi Kim! We received your payment. Thank you!\n\nIf you have not done so already, please leave us a review: https://g.page/r/CX9YK-LEWX_nEAI/review\n\nThanks for choosing Bayview Boarding, and we'll see you next time!\n\n— Kim & Estee\n\n${FILLED_FOOTER}`,
+    );
+  } finally {
+    stub.restore();
+  }
+});
+
 Deno.test('with a message_template: fills {denialReason}, blank (not the literal placeholder) when no reason given', async () => {
   const stub = stubEnvironment();
   try {

@@ -21,6 +21,7 @@ const DEFAULT_ROW = {
   sms_footer: 'Reply STOP to opt out. Text Kim {primaryManagerPhone} & Estee {secondaryManagerPhone}.',
   sms_request_received: 'Hi {firstName}! Request received for {dogName}.',
   sms_denied: 'Hi {firstName}! Sorry, we can\'t take {dogName}.{denialReason}',
+  sms_paid: 'Hi {firstName}! Payment received, thanks!',
   about_photos: [{ path: 'abc123.jpg', alt: 'Choco' }, { path: 'def456.jpg', alt: 'Milo' }],
   primary_manager_phone: '4155550101',
   secondary_manager_phone: '4155550102',
@@ -104,6 +105,7 @@ Deno.test('a plain read requires no password (public) and never includes the man
       smsFooter: DEFAULT_ROW.sms_footer,
       smsRequestReceived: DEFAULT_ROW.sms_request_received,
       smsDenied: DEFAULT_ROW.sms_denied,
+      smsPaid: DEFAULT_ROW.sms_paid,
       aboutPhotos: DEFAULT_ROW.about_photos,
     });
     assertEquals('primaryManagerPhone' in data, false);
@@ -399,6 +401,8 @@ Deno.test('rejects a blank SMS template, without touching the database', async (
     assertEquals(requestReceived.status, 400);
     const denied = await handleRequest(postRequest({ password: ADMIN_PASSWORD, updates: { smsDenied: '' } }));
     assertEquals(denied.status, 400);
+    const paid = await handleRequest(postRequest({ password: ADMIN_PASSWORD, updates: { smsPaid: '   ' } }));
+    assertEquals(paid.status, 400);
     assertEquals(stub.calls.length, 0);
   } finally {
     stub.restore();
@@ -431,6 +435,21 @@ Deno.test('updates the request-received and denied templates, trimming each', as
     const data = await res.json();
     assertEquals(data.smsRequestReceived, 'New request text');
     assertEquals(data.smsDenied, 'New denied text');
+  } finally {
+    stub.restore();
+  }
+});
+
+Deno.test('updates the payment-received template, trimming it', async () => {
+  const stub = stubSupabase();
+  try {
+    const res = await handleRequest(postRequest({
+      password: ADMIN_PASSWORD,
+      updates: { smsPaid: '  New paid text {firstName}  ' },
+    }));
+    assertEquals(res.status, 200);
+    const data = await res.json();
+    assertEquals(data.smsPaid, 'New paid text {firstName}');
   } finally {
     stub.restore();
   }

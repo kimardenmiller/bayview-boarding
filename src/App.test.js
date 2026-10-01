@@ -48,6 +48,7 @@ const DEFAULT_SETTINGS = {
   smsFooter: 'Reply STOP to opt out. Text {primaryManagerPhone}/{secondaryManagerPhone}.',
   smsRequestReceived: 'Hi {firstName}! Request received for {dogName}.',
   smsDenied: 'Hi {firstName}! Sorry, we can\'t take {dogName}.{denialReason}',
+  smsPaid: 'Hi {firstName}! Payment received, thanks!',
   primaryManagerPhone: '4155550101',
   secondaryManagerPhone: '4155550102',
   defaultBroadcastMessage: 'We just shipped something new - come try it on staging!',
@@ -3002,14 +3003,40 @@ describe('Admin — logged in', () => {
     expect(await within(budCard).findByText('Failed to send. Please try again.')).toBeInTheDocument();
   });
 
-  test('Mark Paid: moves a billed stay to Past Stays, shown as "Paid"', async () => {
+  test('Mark Paid: sends a thank-you/review-request text first, then moves the stay to Past Stays, shown as "Paid"', async () => {
     await loginAsAdmin(AWAITING_PAYMENT_DOGS, 2);
     const budCard = document.querySelector('.awaiting-payment-section .stay-card');
     fireEvent.click(within(budCard).getByText(/Bud — Kim/));
     fireEvent.click(within(budCard).getByText('Mark Paid'));
 
+    await waitFor(() => expect(supabase.functions.invoke).toHaveBeenCalledWith('send-confirmation', {
+      body: {
+        type: 'paid', owner_name: 'Kim', owner_phone: '6505551111',
+        dog_name: 'Bud', message_template: expect.any(String), // the admin-editable Payment Received template (settings.sms_paid)
+      },
+    }));
     await waitFor(() => expect(supabase.functions.invoke).toHaveBeenCalledWith('admin-data', {
       body: { password: 'correct-password', action: 'markPaid', stayId: 'stay-ap-1' },
+    }));
+  });
+
+  test('Mark Paid: shows an error and does not mark paid if the text send fails', async () => {
+    mockInvokeDefaults({
+      'admin-data': async () => ({ data: { dogs: AWAITING_PAYMENT_DOGS, totalStays: 2 }, error: null }),
+      'send-confirmation': async () => ({ data: null, error: { message: 'Twilio down' } }),
+    });
+    goToAdminUrl();
+    render(<App />);
+    await userEvent.type(await screen.findByPlaceholderText('Password'), 'correct-password');
+    fireEvent.click(screen.getByText('Sign In'));
+    await screen.findByText('Bayview Boarding — Admin');
+
+    const budCard = document.querySelector('.awaiting-payment-section .stay-card');
+    fireEvent.click(within(budCard).getByText(/Bud — Kim/));
+    fireEvent.click(within(budCard).getByText('Mark Paid'));
+    expect(await within(budCard).findByText('Failed to send. Please try again.')).toBeInTheDocument();
+    expect(supabase.functions.invoke).not.toHaveBeenCalledWith('admin-data', expect.objectContaining({
+      body: expect.objectContaining({ action: 'markPaid' }),
     }));
   });
 
@@ -3293,6 +3320,7 @@ describe('Admin — logged in', () => {
     expect(smsEditor.getByDisplayValue('Bye {dogName}! pickup at {pickupDate} {pickupTime}.')).toBeInTheDocument();
     expect(smsEditor.getByDisplayValue(DEFAULT_SETTINGS.smsRequestReceived)).toBeInTheDocument();
     expect(smsEditor.getByDisplayValue(DEFAULT_SETTINGS.smsDenied)).toBeInTheDocument();
+    expect(smsEditor.getByDisplayValue(DEFAULT_SETTINGS.smsPaid)).toBeInTheDocument();
 
     const reminderBox = smsEditor.getByDisplayValue('Hi {firstName}! reminder, bring {packingList}.');
     fireEvent.change(reminderBox, { target: { value: 'New reminder wording {firstName}' } });

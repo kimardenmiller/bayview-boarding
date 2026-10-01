@@ -95,6 +95,11 @@ export const SETTINGS = {
   // ...." (or blank) by send-confirmation - never a raw/empty placeholder.
   SMS_DENIED: `Hi {firstName}! Unfortunately we're unable to accept your booking request for {dogName} ({dropDate} - {pickDate}).{denialReason} Please feel free to reach out with any questions.`,
 
+  // Sent when admin marks a stay Paid (Sept 30, 2026, on request) - the
+  // same fixed Google review short link sms_billing already uses, not a
+  // {placeholder} (it never varies per stay).
+  SMS_PAID: `Hi {firstName}! We received your payment. Thank you!\n\nIf you have not done so already, please leave us a review: https://g.page/r/CX9YK-LEWX_nEAI/review\n\nThanks for choosing Bayview Boarding, and we'll see you next time!\n\n— Kim & Estee`,
+
   // Appended once, server-side, to the end of every outbound client SMS
   // (Sept 18, 2026 - "Text Message Footer") - not stored per-template.
   SMS_FOOTER: `Reply STOP to opt out. Replies to this number aren't monitored. For questions, please group-text Kim {primaryManagerPhone} & Estee {secondaryManagerPhone}.`,

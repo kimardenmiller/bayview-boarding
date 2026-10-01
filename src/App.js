@@ -574,7 +574,7 @@ export default function App() {
       if (typeof data.holidayUpcharge === 'number') setHolidayUpcharge(data.holidayUpcharge);
       if (Array.isArray(data.vets)) setVets(data.vets);
       if (Array.isArray(data.packingList)) setPackingList(data.packingList);
-      if (data.smsConfirmation || data.smsReminder || data.smsBilling || data.smsPickupReminder || data.smsRequestReceived || data.smsDenied) {
+      if (data.smsConfirmation || data.smsReminder || data.smsBilling || data.smsPickupReminder || data.smsRequestReceived || data.smsDenied || data.smsPaid) {
         setSmsTemplates({
           confirmation: data.smsConfirmation ?? DEFAULT_SMS_TEMPLATES.confirmation,
           reminder: data.smsReminder ?? DEFAULT_SMS_TEMPLATES.reminder,
@@ -582,6 +582,7 @@ export default function App() {
           pickupReminder: data.smsPickupReminder ?? DEFAULT_SMS_TEMPLATES.pickupReminder,
           requestReceived: data.smsRequestReceived ?? DEFAULT_SMS_TEMPLATES.requestReceived,
           denied: data.smsDenied ?? DEFAULT_SMS_TEMPLATES.denied,
+          paid: data.smsPaid ?? DEFAULT_SMS_TEMPLATES.paid,
         });
       }
       if (data.smsFooter) setSmsFooter(data.smsFooter);
