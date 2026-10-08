@@ -445,9 +445,10 @@ active tester their own personal "Hi {their first name}, " followed by
 the composed message verbatim (buildTesterMessage) - the admin compose
 box starts pre-filled with a saved default (settings.default_broadcast_
 message, admin-only column, editable via a "Save as Default" button next
-to Send - added Sept 19, 2026; DEFAULT_BROADCAST_MESSAGE in App.js is
-now only the fallback used before that admin-authenticated fetch
-resolves) that includes the staging site link and "Submit Idea"
+to Send - added Sept 19, 2026; DEFAULT_BROADCAST_MESSAGE in defaults.js
+is now only the fallback used before that admin-authenticated fetch
+resolves) that includes the live site link (staging, before it was
+retired Oct 8, 2026 - see Staging environment) and "Submit Idea"
 directions, fully editable before each send and reset back to the saved
 default afterward, rather than a fixed server-side footer (that was the
 Sept 17 design, replaced same-day once "Hi {name}," was added - a
@@ -581,7 +582,29 @@ that changed (just PUBLIC_URL; the deploy target itself didn't move).
 The old github.io URL still works too, via the same automatic
 old-domain-to-new-domain redirect.
 
-## Staging environment (Sept 19, 2026)
+## Staging environment (Sept 19, 2026 - RETIRED Oct 8, 2026)
+**Retired, on request**: the `staging` git branch never actually
+diverged from `main` in practice (every round deployed to both in
+lockstep rather than staging ever catching something before it reached
+production), while real upkeep cost kept accumulating - no Twilio/
+Calendar credentials, a `db push` that reliably fails against it (see
+below), columns that had silently gone missing from its own bootstrap,
+and it eventually auto-paused itself from inactivity with no CLI way to
+resume it (only a manual dashboard action). The tester broadcast's
+default message (`settings.default_broadcast_message`) now points
+testers at the live site instead of `bayviewboarding.com/staging` -
+deliberately keeping its "feel free to try anything, none of it
+touches real client data" wording as-is per explicit instruction, even
+though that line is no longer accurate on production (test bookings
+now land in the real database and can trigger real SMS sends). Per the
+"just stop using it" decision (not a full teardown): the `staging` git
+branch, the "Boarding Staging" Supabase project (paused), `npm run
+build:staging`/`deploy:staging`, and the staging-specific code below
+(noindex gating, etc.) are all left in place, untouched and unused,
+cheap to fully remove later if that's ever wanted - just no longer
+part of the normal deploy routine. Everything below this point
+describes that now-unused setup, kept for reference.
+
 Same repo, no second codebase: a `staging` git branch (currently
 identical to main - meant as the home for future DB-schema/RLS-risky
 work, verified live via a staging deploy before merging to main) and a
@@ -878,11 +901,8 @@ visitor never reads.
 ## Current priorities (v1.5)
 See FIXES.txt for the live list. As of Sept 21, 2026 (7) there's nothing
 outstanding beyond that file's own standing habit (check the Submit
-Idea queue). Staging deliberately has no Twilio credentials and stays
-that way - see Staging environment above for why (Twilio retired
-creating new Test Credentials, and a Subaccount would need its own paid
-phone number) - the booking flow and everything else there still works
-fully; only outbound texts silently don't send from staging.
+Idea queue). Staging was retired Oct 8, 2026 - see Staging environment
+above.
 
 ## Rules
 - Always run tests before committing (npm test -- --watchAll=false)

@@ -50,14 +50,22 @@ export const FEEDBACK_STATUSES = [
 // saveBroadcastDefault) - this constant is now only the FALLBACK, used
 // before the admin-authenticated settings fetch resolves at login, same
 // role DEFAULT_SMS_TEMPLATES/DEFAULT_SMS_FOOTER already play above.
-// Points at the staging sandbox (not production) since Sept 19, 2026,
-// once that environment existed for testers to freely book/add dogs/etc.
-// in without touching real client data - kept in sync with the
-// migration's own default wording. Distinct from "Hi {name}, " which the
-// server prepends per-recipient using each tester's own name, not
-// something typed here at all.
+// Pointed at the staging sandbox from Sept 19, 2026 (once that
+// environment existed for testers to freely book/add dogs/etc. in
+// without touching real client data) until Oct 8, 2026, on request -
+// staging was retired (never actually diverged from main in practice,
+// and had accumulated real upkeep cost: no Twilio/Calendar credentials,
+// a `db push` that reliably fails, columns that had silently gone
+// missing from its bootstrap, and it kept auto-pausing from inactivity)
+// - testers now point at the live site instead. The "feel free to try
+// anything, none of it touches real client data" wording was
+// deliberately LEFT AS-IS despite no longer being accurate (a conscious
+// choice, not an oversight) - test bookings now land in the real
+// database and can trigger real SMS sends. Distinct from "Hi {name}, "
+// which the server prepends per-recipient using each tester's own name,
+// not something typed here at all.
 export const DEFAULT_BROADCAST_MESSAGE =
   "We've made a few changes to the Bayview Boarding site below. Please have a look and tell us what you think!\n" +
-  'https://bayviewboarding.com/staging\n' +
+  'https://bayviewboarding.com\n' +
   'This is our testing sandbox - feel free to make bookings, add dogs, and try anything. None of it touches real client data.\n' +
   'Then just tap the (☰) menu and choose "Submit Idea" to share your feedback with us.';

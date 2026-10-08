@@ -1,6 +1,6 @@
 BAYVIEW BOARDING — FIX LIST
 ============================
-Last updated: October 8, 2026 (reminder "due" check was missing a lower bound - an already-past moment could fire a reminder)
+Last updated: October 8, 2026 (2) (staging retired - testers now point at the live site)
 
 NEXT CHANGE LIST (v1.5)
 -----------------------
@@ -29,6 +29,32 @@ DEFERRED (revisit only if it actually blocks something)
 
 COMPLETED
 ---------
+- Oct 8, 2026 (2): "Do we really need staging at this point?" ->
+  "I think we can retire it and update the tester url to look at the
+  live site." Staging's `staging` git branch had never actually
+  diverged from `main` in practice (every round deployed to both in
+  lockstep, so it never caught a risky schema change before production
+  the way it was meant to) - its remaining real value was as a tester
+  sandbox, and it had accumulated real upkeep cost on top of that (no
+  Twilio/Calendar credentials, a `db push` that reliably fails against
+  it, columns that had silently gone missing from its own bootstrap,
+  and it eventually auto-paused itself from inactivity with no CLI way
+  to resume it - only a manual dashboard action).
+  Retired without a full teardown, on request: updated
+  settings.default_broadcast_message (the tester broadcast's saved
+  default, both the live DB value and the defaults.js fallback
+  constant) to point at the live site instead of
+  bayviewboarding.com/staging - deliberately kept the "feel free to try
+  anything, none of it touches real client data" wording exactly as-is
+  despite it no longer being accurate on request (test bookings now
+  land in the real database and can trigger real SMS sends - a
+  conscious choice, not an oversight). The `staging` git branch, the
+  paused "Boarding Staging" Supabase project, `npm run build:staging`/
+  `deploy:staging`, and all the staging-specific code (noindex gating,
+  etc.) are left in place untouched - just no longer part of the normal
+  deploy routine - cheap to fully remove later if that's ever wanted.
+  No test/code behavior change (a data-content update + docs only) - no
+  Jest/Deno count change.
 - Oct 8, 2026: "We generated the 'We'll see you tomorrow' text just
   after we modified the Visit to end right now, after an owner changed
   the pickup from 26 hours from now to now. That might have been a
