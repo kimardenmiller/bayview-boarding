@@ -20,11 +20,15 @@ interface StayRow {
 
 // "Due" (due_dropoff_reminder_stay_ids, the real migration) means the
 // stay's actual drop-off moment - check_in + drop_time, in Pacific time
-// - is within 24 hours of now. This mock approximates Postgres's `at
-// time zone 'America/Los_Angeles'` with a fixed -07:00 (PDT) offset -
-// fine here since every fixture date in this file falls within Pacific
-// Daylight Time; the real DST-aware comparison happens in Postgres, not
-// in this mock.
+// - is coming up WITHIN THE NEXT 24 hours: strictly in the future, and
+// no more than 24h out (Oct 8, 2026 added the "still in the future"
+// lower bound - its absence was a real bug: a moment already in the
+// past, e.g. right after admin edits a date/time to "now", used to
+// still match "<= now + 24h" and get reminded). This mock approximates
+// Postgres's `at time zone 'America/Los_Angeles'` with a fixed -07:00
+// (PDT) offset - fine here since every fixture date in this file falls
+// within Pacific Daylight Time; the real DST-aware comparison happens
+// in Postgres, not in this mock.
 function dropoffMoment(stay: StayRow): Date {
   return new Date(`${stay.check_in}T${stay.drop_time ?? '09:00:00'}-07:00`);
 }
@@ -65,7 +69,10 @@ function stubEnvironment(
     if (url.pathname.endsWith('/rpc/due_dropoff_reminder_stay_ids') && method === 'POST') {
       const now = new Date();
       const dueIds = db.stays
-        .filter((s) => s.reminder_sent_at === null && dropoffMoment(s).getTime() <= now.getTime() + 24 * 60 * 60 * 1000)
+        .filter((s) => {
+          const t = dropoffMoment(s).getTime();
+          return s.reminder_sent_at === null && t > now.getTime() && t <= now.getTime() + 24 * 60 * 60 * 1000;
+        })
         .map((s) => s.id);
       return new Response(JSON.stringify(dueIds), { status: 200 });
     }
@@ -186,6 +193,25 @@ Deno.test('does not re-send to a stay that already has a reminder recorded', asy
 Deno.test('ignores a stay whose drop-off moment is more than 24 hours away', async () => {
   const time = new FakeTime('2026-10-01T18:00:00Z');
   const stub = stubEnvironment([stayDueTomorrow({ check_in: '2026-10-05' }, time)]);
+  try {
+    const res = await handleRequest(cronRequest());
+    const data = await res.json();
+    assertEquals(data.sent, 0);
+    assertEquals(stub.confirmationCalls.length, 0);
+  } finally {
+    time.restore();
+    stub.restore();
+  }
+});
+
+// The real bug report this fix addresses (Oct 8, 2026, reported against
+// the pickup-side twin of this same function): editing a date/time to
+// "now" (or anything already past) used to instantly satisfy the old
+// "<= 24h away" check with no lower bound, firing a reminder worded for
+// an upcoming moment that had actually already arrived.
+Deno.test('ignores a stay whose drop-off moment has already passed (e.g. just corrected to "now")', async () => {
+  const time = new FakeTime('2026-10-01T18:00:00Z'); // 11am Pacific
+  const stub = stubEnvironment([stayDueTomorrow({ check_in: '2026-10-01', drop_time: '10:00:00' }, time)]); // 1 hour ago
   try {
     const res = await handleRequest(cronRequest());
     const data = await res.json();

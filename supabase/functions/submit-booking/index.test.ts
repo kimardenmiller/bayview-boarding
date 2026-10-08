@@ -95,12 +95,32 @@ function stubSupabase() {
   return { db, calls, restore: () => { globalThis.fetch = original; } };
 }
 
+// Relative to whenever the suite actually runs, not a hardcoded literal
+// - a fixed past-tense "2026-10-01"/"2026-10-03" here is exactly the bug
+// class this guards against (see FIXES.txt's Oct 8, 2026 entry): once
+// real time passed those dates, every test relying on this default
+// started getting a real 400 "check-in date is in the past" rejection
+// instead of the 200 it expected. UTC-based (not Pacific/local) since
+// validBooking() sets no clientTimezone override, so the function's own
+// "today" falls back to UTC too (see the test below that exercises that
+// fallback explicitly).
+function tomorrowUTC(): string {
+  const d = new Date();
+  d.setUTCDate(d.getUTCDate() + 1);
+  return d.toISOString().slice(0, 10);
+}
+function daysFromNowUTC(n: number): string {
+  const d = new Date();
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+}
+
 function validBooking(overrides: Record<string, unknown> = {}) {
   return {
     owner: { name: 'Kim Miller', phone: '4155550100', email: 'kim@test.com', vetName: 'Marin Pet Hospital' },
     dogs: [{ name: 'Rex', breed: 'Labrador', dob: '2020-01-01', spayNeuter: 'yes' }],
-    checkIn: '2026-10-01',
-    checkOut: '2026-10-03',
+    checkIn: tomorrowUTC(),
+    checkOut: daysFromNowUTC(3),
     dropTime: '09:00',
     pickupTime: '09:00',
     notes: '',
@@ -227,7 +247,7 @@ Deno.test('allows an evening drop-off and a next-morning pick-up across differen
   const stub = stubSupabase();
   try {
     const res = await handleRequest(postRequest(validBooking({
-      checkIn: '2026-10-01', checkOut: '2026-10-02', dropTime: '17:00', pickupTime: '09:00',
+      checkIn: tomorrowUTC(), checkOut: daysFromNowUTC(2), dropTime: '17:00', pickupTime: '09:00',
     })));
     assertEquals(res.status, 200);
   } finally {

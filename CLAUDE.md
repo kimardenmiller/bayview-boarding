@@ -498,6 +498,27 @@ doesn't error on a database that never had them, e.g. staging), since a
 precise 24-hour window is meaningless if the job checking it only runs
 once a day.
 
+A second bug in these same 2 functions surfaced Oct 8, 2026: "we
+generated the 'we'll see you tomorrow' pickup text just after we
+modified the stay to end right now, after an owner changed pickup from
+26 hours from now to now." Both functions only ever checked an UPPER
+bound (`moment <= now() + 24h`) with no lower bound - a moment already
+in the PAST (negative time remaining) still satisfies that comparison,
+so correcting a stay's pickup/drop-off time to "now" (or to anything
+already past) made it instantly "due" on the very next 15-minute cron
+tick, firing a reminder worded for an upcoming moment that had actually
+already arrived. Fixed (migration
+20261008000000_reminder_due_functions_lower_bound.sql) by adding
+`moment > now()` as a lower bound to both functions - "due" now
+correctly means "coming up within the next 24 hours," not "anywhere at
+or before 24 hours from now, including the entire past." Since these
+are plain SQL functions with no JS-level logic of their own, there's no
+way to unit-test the real migration directly; the regression coverage
+instead lives in send-reminders/send-pickup-reminders' own Deno test
+mocks (which deliberately replicate the real function's comparison), so
+a future change to either SQL function should be checked against
+whether these mocks still match before trusting the tests.
+
 ## Tech stack
 - React (Create React App)
 - Supabase (database + Edge Functions)
@@ -813,9 +834,9 @@ visitor never reads.
 - supabase/functions/send-contact/index.ts — public Contact Us form handler: relays name/email-or-phone/message to Kim & Estee by SMS (reuses KIM_PHONE/ESTEE_PHONE). Deployed normally (no --no-verify-jwt) since it's called via the Supabase JS client like settings/lookup-client/submit-booking
 - supabase/functions/feedback/index.ts — "Submit Idea": public submit (no password, also texts Kim & Estee) + admin list/status-update/delete (password) for the feedback queue
 - supabase/functions/testers/index.ts — tester broadcast list: entirely admin-password-gated list/add/remove/notify (no public branch at all); notify greets each active tester by their own first name
-- supabase/functions/send-pickup-reminders/index.ts — cron target (every 15 minutes, Sept 26, 2026 - see Data model's Reminder timing), the pickup-side counterpart to send-reminders: asks due_pickup_reminder_stay_ids() (RPC) which stays are within 24 hours of their real pickup moment, texts each via send-confirmation (type "pickup"), marks pickup_reminder_sent_at. Deployed with `--no-verify-jwt` - same care needed on redeploy as send-reminders
+- supabase/functions/send-pickup-reminders/index.ts — cron target (every 15 minutes, Sept 26, 2026 - see Data model's Reminder timing), the pickup-side counterpart to send-reminders: asks due_pickup_reminder_stay_ids() (RPC) which stays are coming up within the next 24 hours of their real pickup moment (strictly future - Oct 8, 2026 fixed a missing lower bound that let an already-past moment match too), texts each via send-confirmation (type "pickup"), marks pickup_reminder_sent_at. Deployed with `--no-verify-jwt` - same care needed on redeploy as send-reminders
 - public/img/about/ — the 6 numbered photos on the About page, served from the public folder (not bundled) and referenced via process.env.PUBLIC_URL since the app is hosted at a subpath
-- supabase/functions/send-reminders/index.ts — cron target (pg_cron + pg_net, every 15 minutes, Sept 26, 2026 - see Data model's Reminder timing; was once daily): asks due_dropoff_reminder_stay_ids() (RPC) which stays are within 24 hours of their real drop-off moment, fetches the current sms_reminder template + packing_list from `settings`, texts each via send-confirmation, marks reminder_sent_at. Deployed with `--no-verify-jwt`; checks its own CRON_SECRET instead (see Data model for how that secret is set up without ever being committed) - be careful to keep that flag on every redeploy (a plain `supabase functions deploy send-reminders` silently re-enables JWT verification and would break the cron, same bug class as the receive-sms incident)
+- supabase/functions/send-reminders/index.ts — cron target (pg_cron + pg_net, every 15 minutes, Sept 26, 2026 - see Data model's Reminder timing; was once daily): asks due_dropoff_reminder_stay_ids() (RPC) which stays are coming up within the next 24 hours of their real drop-off moment (strictly future - Oct 8, 2026 fixed a missing lower bound that let an already-past moment match too), fetches the current sms_reminder template + packing_list from `settings`, texts each via send-confirmation, marks reminder_sent_at. Deployed with `--no-verify-jwt`; checks its own CRON_SECRET instead (see Data model for how that secret is set up without ever being committed) - be careful to keep that flag on every redeploy (a plain `supabase functions deploy send-reminders` silently re-enables JWT verification and would break the cron, same bug class as the receive-sms incident)
 - supabase/functions/settings/index.ts — public read (PUBLIC_COLUMNS) / password-gated read or write (ADMIN_COLUMNS) of day rate, minimum stay in days (Sept 24, 2026, must be positive), multi-dog discount, holiday upcharge, vet list, packing list, the About page's photo list (about_photos - Sept 21, 2026, just `{path, alt}` pairs; the actual files live in Storage, see about-photos below), the 7 SMS templates (confirmation/drop-off reminder/pickup reminder/billing/request-received/denied/payment-received - request-received/denied added Sept 21, 2026, payment-received added Sept 30, 2026), the shared sms_footer, and (admin-only) the 2 manager phone numbers plus the tester broadcast's default_broadcast_message
 - supabase/functions/about-photos/index.ts — manages the actual image files behind settings.about_photos (Sept 21, 2026); entirely admin-password-gated, 2 actions: upload (multipart/form-data: password, file, alt? - stores the file in the "about-photos" Storage bucket under a fresh random name, never the client's own filename, and appends {path, alt} to settings.about_photos) and delete (JSON: password, action 'delete', path - removes the file from Storage AND drops that entry from settings.about_photos in the same call). Reordering/alt-text edits for existing photos don't touch this function at all - they're just settings.about_photos array edits, saved through the settings function like everything else there
 - supabase/functions/submit-booking/index.ts — handles booking submission: find-or-create owner (by phone) and each dog (by owner+name), inserts the stay (incl. waiver_snapshot, approval_status 'pending' - Sept 21, 2026) + stay_dogs snapshot links (service role key). Each dog's optional photoPaths (Sept 21, 2026 as photoPath; array since Sept 22, 2026, from the dog-photos function's own upload responses, one call per file) is saved to dogs.photo_paths ONLY when at least one new one is given - a returning dog's existing photo set is never silently cleared - and snapshotted onto stay_dogs.photo_paths either way (falling back to whatever's currently on the dog's profile if none came with this submission)

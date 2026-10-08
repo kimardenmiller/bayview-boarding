@@ -1,7 +1,7 @@
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import App from './App';
-import { formatDate, calcAge, calcCost, calcCostBreakdown, formatCostBreakdownText, isHolidayNight, getHolidayWindows, todayISO, formatMoney } from './calc';
+import { formatDate, calcAge, calcCost, calcCostBreakdown, formatCostBreakdownText, isHolidayNight, getHolidayWindows, todayISO, formatMoney, isoFromLocalDate } from './calc';
 import { supabase } from './supabase';
 import { SETTINGS } from './settings';
 
@@ -223,10 +223,19 @@ async function fillStep2() {
   await screen.findByText('Stay Dates');
 }
 
+// Relative to whenever the suite actually runs (Oct 8, 2026: fixed
+// hardcoded literal dates here going stale and silently failing once
+// real time passed them - the exact bug class this change guards
+// against, see FIXES.txt) - 4 nights out, tomorrow through tomorrow+4,
+// same span the old '2026-10-01'/'2026-10-05' literals always had, so
+// every cost-math assertion tied to that night count still holds.
+const STAY_CHECK_IN_ISO = isoFromLocalDate(new Date(Date.now() + 24 * 60 * 60 * 1000));
+const STAY_CHECK_OUT_ISO = isoFromLocalDate(new Date(Date.now() + 5 * 24 * 60 * 60 * 1000));
+
 async function fillStep3() {
   const dateInputs = document.querySelectorAll('input[type="date"]');
-  fireEvent.change(dateInputs[0], { target: { value: '2026-10-01' } });
-  fireEvent.change(dateInputs[1], { target: { value: '2026-10-05' } });
+  fireEvent.change(dateInputs[0], { target: { value: STAY_CHECK_IN_ISO } });
+  fireEvent.change(dateInputs[1], { target: { value: STAY_CHECK_OUT_ISO } });
   const timeInputs = document.querySelectorAll('input[type="time"]');
   fireEvent.change(timeInputs[0], { target: { value: '09:00' } });
   fireEvent.change(timeInputs[1], { target: { value: '09:00' } });
@@ -1874,9 +1883,14 @@ describe('Step 5 — Signature', () => {
 
     expect(await screen.findByText("Request received, Kim!")).toBeInTheDocument();
     expect(screen.getByText(/Rex/)).toBeInTheDocument();
-    expect(screen.getByText('10/01/2026')).toBeInTheDocument();
-    expect(screen.getByText('10/05/2026')).toBeInTheDocument();
-    expect(screen.getByText('$420')).toBeInTheDocument(); // 4 nights (Oct 1-5) @ $105/day, Confirmation shows the raw number
+    // The Confirmation screen renders the mocked submit-booking RESPONSE
+    // (DEFAULT_STAY) - a static fixture, not whatever dates were typed
+    // into the form - so these check against DEFAULT_STAY's own
+    // check_in/check_out, not STAY_CHECK_IN_ISO/STAY_CHECK_OUT_ISO below
+    // (which is what was actually SUBMITTED, asserted further down).
+    expect(screen.getByText(formatDate(DEFAULT_STAY.check_in))).toBeInTheDocument();
+    expect(screen.getByText(formatDate(DEFAULT_STAY.check_out))).toBeInTheDocument();
+    expect(screen.getByText('$420')).toBeInTheDocument(); // 4 nights @ $105/day, Confirmation shows the raw number
 
     // Regression guard: submission goes through the submit-booking Edge
     // Function (server-side find-or-create under the service role key),
@@ -1886,8 +1900,8 @@ describe('Step 5 — Signature', () => {
       body: expect.objectContaining({
         owner: expect.objectContaining({ name: 'Kim Miller', phone: '4155550100', email: 'kim@test.com' }),
         dogs: [expect.objectContaining({ name: 'Rex', breed: 'Labrador' })],
-        checkIn: '2026-10-01',
-        checkOut: '2026-10-05',
+        checkIn: STAY_CHECK_IN_ISO,
+        checkOut: STAY_CHECK_OUT_ISO,
         // captured verbatim at submission (Sept 16, 2026) so a later edit
         // to waiver.js can never retroactively change what this client is
         // on record as having signed

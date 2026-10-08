@@ -1,6 +1,6 @@
 BAYVIEW BOARDING — FIX LIST
 ============================
-Last updated: September 30, 2026 (4) (Mark Paid now sends a thank-you/review-request text first)
+Last updated: October 8, 2026 (reminder "due" check was missing a lower bound - an already-past moment could fire a reminder)
 
 NEXT CHANGE LIST (v1.5)
 -----------------------
@@ -29,6 +29,30 @@ DEFERRED (revisit only if it actually blocks something)
 
 COMPLETED
 ---------
+- Oct 8, 2026: "We generated the 'We'll see you tomorrow' text just
+  after we modified the Visit to end right now, after an owner changed
+  the pickup from 26 hours from now to now. That might have been a
+  fluke, but let's check the code to see."
+  Not a fluke - a real bug in due_dropoff_reminder_stay_ids()/
+  due_pickup_reminder_stay_ids() (the Sept 26 "precise 24-hour window"
+  migration): both only ever checked an UPPER bound (moment <= now() +
+  24h), never a LOWER one. A moment already in the PAST trivially
+  satisfies "<= 24h away" too, so correcting a stay's pickup to "now"
+  made it instantly match on the very next 15-minute cron tick and get
+  texted a reminder worded for an upcoming pickup that had actually
+  already arrived.
+  Fixed by adding "moment > now()" to both SQL functions (migration
+  20261008000000_reminder_due_functions_lower_bound.sql) - "due" now
+  means "coming up in the next 24 hours," not "anywhere at or before 24
+  hours from now, including the whole past."
+  These are plain SQL functions with no JS of their own, so there's no
+  way to unit-test the real migration directly - the regression
+  coverage lives in send-reminders'/send-pickup-reminders' own Deno
+  test mocks instead (which deliberately replicate the real function's
+  comparison), each getting a new "ignores a stay whose moment has
+  already passed" test. Deno 217 -> 219.
+  Deployed (migration only - neither Edge Function's own TS changed) to
+  both environments.
 - Sept 30, 2026 (4): "Can we add a feature that sends a text when we mark
   the stay paid?" with the exact wording to use (thank-you + a request
   to leave a review, signed "— Kim & Estee").
