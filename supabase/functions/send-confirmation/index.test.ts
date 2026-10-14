@@ -7,7 +7,7 @@ Deno.env.set('TWILIO_PHONE', '+14155550100');
 Deno.env.set('SUPABASE_URL', 'https://example.supabase.co');
 Deno.env.set('SUPABASE_SERVICE_ROLE_KEY', 'test-service-role-key');
 
-const { handleRequest, fillTemplate, formatDollars, dogVerb } = await import('./index.ts');
+const { handleRequest, fillTemplate, formatDollars, formatTime12h, dogVerb } = await import('./index.ts');
 
 const DEFAULT_SETTINGS_ROW = {
   sms_footer: "Reply STOP to opt out. Replies to this number aren't monitored. For questions, please group-text Kim {primaryManagerPhone} & Estee {secondaryManagerPhone}.",
@@ -78,6 +78,15 @@ Deno.test('formatDollars: passes through empty/non-numeric input unchanged', () 
   assertEquals(formatDollars(undefined), '');
 });
 
+Deno.test('formatTime12h: 24-hour HH:MM(:SS) to AM/PM, no leading zero on the hour', () => {
+  assertEquals(formatTime12h('09:00:00'), '9:00 AM');
+  assertEquals(formatTime12h('09:00'), '9:00 AM');
+  assertEquals(formatTime12h('00:00'), '12:00 AM'); // midnight
+  assertEquals(formatTime12h('12:00'), '12:00 PM'); // noon
+  assertEquals(formatTime12h('13:30'), '1:30 PM');
+  assertEquals(formatTime12h('23:45'), '11:45 PM');
+});
+
 Deno.test('dogVerb: "is" for one dog, "are" for a shared " & "-joined stay', () => {
   assertEquals(dogVerb('Rex'), 'is');
   assertEquals(dogVerb('Don & Bob'), 'are');
@@ -115,7 +124,7 @@ Deno.test('with no message_template: builds the default confirmation message and
     assertEquals(res.status, 200);
     assertEquals(
       stub.calls[0].body,
-      `Hi Kim! Rex's stay at Bayview Boarding is confirmed. Drop-off: Thu, Oct 1 at 09:00. Pick-up: Sat, Oct 3 at 10:00. Estimated cost: $210. — Kim & Estee\n\n${FILLED_FOOTER}`,
+      `Hi Kim! Rex's stay at Bayview Boarding is confirmed. Drop-off: Thu, Oct 1 at 9:00 AM. Pick-up: Sat, Oct 3 at 10:00 AM. Estimated cost: $210. — Kim & Estee\n\n${FILLED_FOOTER}`,
     );
     assertEquals(stub.settingsCallCount, 1);
   } finally {
@@ -164,7 +173,7 @@ Deno.test('with no message_template, type reminder: bullet-list packing items (o
     }));
     assertEquals(
       stub.calls[0].body,
-      `Hi Kim! Just a reminder that Rex's stay at Bayview Boarding starts tomorrow at 09:00. Here's what to bring:\n• Food\n• Leash\nSee you then! — Kim & Estee\n\n${FILLED_FOOTER}`,
+      `Hi Kim! Just a reminder that Rex's stay at Bayview Boarding starts tomorrow at 9:00 AM. Here's what to bring:\n• Food\n• Leash\nSee you then! — Kim & Estee\n\n${FILLED_FOOTER}`,
     );
   } finally {
     stub.restore();
@@ -294,7 +303,7 @@ Deno.test('with no message_template, type pickup: builds the pickup-tomorrow mes
     }));
     assertEquals(
       stub.calls[0].body,
-      `It's been wonderful having Rex! We have you down for pick up at Sat, Oct 3 09:00. Please let us know in our shared group text thread if anything has changed. Otherwise, we'll see you tomorrow at 09:00. — Kim & Estee\n\n${FILLED_FOOTER}`,
+      `It's been wonderful having Rex! We have you down for pick up at Sat, Oct 3 9:00 AM. Please let us know in our shared group text thread if anything has changed. Otherwise, we'll see you tomorrow at 9:00 AM. — Kim & Estee\n\n${FILLED_FOOTER}`,
     );
   } finally {
     stub.restore();
@@ -309,7 +318,7 @@ Deno.test('with a message_template: fills {pickupDate}/{pickupTime} for a pickup
       check_out: '2026-10-03', pickup_time: '09:00:00',
       message_template: 'Bye {dogName}! See you {pickupDate} at {pickupTime}.',
     }));
-    assertEquals(stub.calls[0].body, `Bye Rex! See you Sat, Oct 3 at 09:00.\n\n${FILLED_FOOTER}`);
+    assertEquals(stub.calls[0].body, `Bye Rex! See you Sat, Oct 3 at 9:00 AM.\n\n${FILLED_FOOTER}`);
   } finally {
     stub.restore();
   }

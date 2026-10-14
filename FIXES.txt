@@ -1,6 +1,6 @@
 BAYVIEW BOARDING — FIX LIST
 ============================
-Last updated: October 14, 2026 (GA4 conversion events added for booking requests + Contact Us sends)
+Last updated: October 14, 2026 (2) (SMS times now show as AM/PM, not 24-hour)
 
 NEXT CHANGE LIST (v1.5)
 -----------------------
@@ -36,6 +36,21 @@ DEFERRED (revisit only if it actually blocks something)
 
 COMPLETED
 ---------
+- Oct 14, 2026 (2): "Can we make times mentioned in texts AM/PM, not
+  24-hour time." Every drop-off/pickup time in an outbound text was raw
+  24-hour ("09:00"), since send-confirmation just sliced the stored
+  HH:MM:SS value directly. Added formatTime12h() (same module, same
+  pattern as formatDollars()) and ran it over dropTimeStr/pickTimeStr
+  before they're used anywhere - both the 3 hardcoded fallback messages
+  (confirmation/reminder/pickup) and the {dropTime}/{pickTime}/
+  {pickupTime} placeholders every admin-edited template can use. "9:00
+  AM", no leading zero on the hour. Deliberately scoped to texts only -
+  the stored column and every `<input type="time">` in the admin UI
+  stay plain 24-hour HH:MM, since the native time input requires that
+  format regardless.
+  Deno 219 -> 220 (a new formatTime12h unit test, plus 4 existing
+  message-text assertions updated for the new wording). Jest unaffected
+  (frontend untouched - this is backend-only). Deployed to production.
 - Oct 14, 2026: a weekly Google Ads email showed clicks/impressions
   both down sharply and nagged to "add the Google tag to track
   conversion actions" - Ads had no signal for which clicks actually

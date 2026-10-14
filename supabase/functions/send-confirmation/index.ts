@@ -71,6 +71,20 @@ export function formatDollars(amount: unknown): string {
   return Math.round(n).toLocaleString("en-US");
 }
 
+// "09:00" / "09:00:00" -> "9:00 AM", "17:00" -> "5:00 PM" (Oct 14, 2026,
+// on request - every drop-off/pickup time in a text was raw 24-hour,
+// read oddly for a text message). No leading zero on the hour, matching
+// how someone would actually type it in a message. Non-empty input only
+// - every caller already guards with `time ? ... : ""` before this is
+// reached, same pattern as formatDollars above.
+export function formatTime12h(time24: string): string {
+  const [hStr, mStr] = time24.split(":");
+  const h24 = parseInt(hStr, 10);
+  const period = h24 >= 12 ? "PM" : "AM";
+  const h12 = h24 % 12 || 12;
+  return `${h12}:${mStr} ${period}`;
+}
+
 // "Don" -> "is", "Don & Bob" -> "are" - the billing text names every dog on
 // a shared stay joined with " & " (see App.js's sendBill), so the verb has
 // to agree with however many names actually made it in.
@@ -162,8 +176,8 @@ export async function handleRequest(req: Request): Promise<Response> {
     const firstName = owner_name?.split(" ")[0] || "there";
     const dropDate = check_in ? new Date(check_in + "T12:00:00").toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" }) : "";
     const pickDate = check_out ? new Date(check_out + "T12:00:00").toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" }) : "";
-    const dropTimeStr = drop_time ? drop_time.slice(0, 5) : "";
-    const pickTimeStr = pickup_time ? pickup_time.slice(0, 5) : "";
+    const dropTimeStr = drop_time ? formatTime12h(drop_time) : "";
+    const pickTimeStr = pickup_time ? formatTime12h(pickup_time) : "";
     // One bullet per line (Sept 19, 2026, on request - was a single
     // comma-separated run-on sentence) - a leading "• " on the first item
     // too, so it reads as a list from the very first line, not just the
