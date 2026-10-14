@@ -21,6 +21,16 @@ Element.prototype.scrollIntoView = jest.fn();
 // actual return value is re-established in mockInvokeDefaults below.
 global.URL.createObjectURL = jest.fn();
 
+// jsdom never loads the real gtag.js script (see src/index.js), so
+// window.gtag doesn't exist at all unless a test declares it - a plain
+// jest.fn() here (Oct 14, 2026, needed once trackConversion in App.js
+// started calling it on a successful booking/Contact Us submission) is
+// enough to both let those calls happen without throwing and let tests
+// assert on them. resetMocks (see mockInvokeDefaults' own comment)
+// wipes its call history before every test too, same as the two mocks
+// above.
+window.gtag = jest.fn();
+
 // The booking flow now calls three different Edge Functions through the
 // same supabase.functions.invoke() - lookup-client (StepOwner's manual
 // button + StepDog's on-mount check), submit-booking (final submit), and
@@ -1155,6 +1165,9 @@ describe('Contact Us', () => {
     });
     expect(await screen.findByText('Message sent!')).toBeInTheDocument();
     expect(screen.getByText(/Thanks, Jane/)).toBeInTheDocument();
+    // Google Ads has no conversion signal without this (Oct 14, 2026) -
+    // see trackConversion in App.js.
+    expect(window.gtag).toHaveBeenCalledWith('event', 'contact_form_submitted');
   });
 
   test('shows an error and does not claim success if the send fails', async () => {
@@ -1167,6 +1180,7 @@ describe('Contact Us', () => {
     fireEvent.click(screen.getByText('Send Message'));
     expect(await screen.findByText(/Something went wrong sending your message/)).toBeInTheDocument();
     expect(screen.queryByText('Message sent!')).not.toBeInTheDocument();
+    expect(window.gtag).not.toHaveBeenCalled();
   });
 
   test('Back returns to the landing page', async () => {
@@ -1909,6 +1923,9 @@ describe('Step 5 — Signature', () => {
       }),
     });
     expect(supabase.functions.invoke).toHaveBeenCalledWith('send-confirmation', expect.any(Object));
+    // Google Ads has no conversion signal without this (Oct 14, 2026) -
+    // see trackConversion in App.js.
+    expect(window.gtag).toHaveBeenCalledWith('event', 'booking_request_submitted');
   });
 
   test('uploaded photo paths are included in the submit-booking payload for that dog (Sept 21-22, 2026)', async () => {
@@ -1984,6 +2001,7 @@ describe('Step 5 — Signature', () => {
     expect(alertSpy).toHaveBeenCalledWith('There was an error saving. Please try again.');
     expect(screen.queryByText(/Request received/)).not.toBeInTheDocument();
     expect(screen.getByText('Sign & Submit')).toBeInTheDocument();
+    expect(window.gtag).not.toHaveBeenCalled();
 
     alertSpy.mockRestore();
   });

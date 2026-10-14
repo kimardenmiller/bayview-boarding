@@ -31,6 +31,16 @@ if (isStaging) {
   document.head.appendChild(script);
   window.dataLayer = window.dataLayer || [];
   function gtag() { window.dataLayer.push(arguments); }
+  // Exposed on window (Oct 14, 2026, on request - Google Ads flagged
+  // clicks/impressions dropping and asked to set up conversion
+  // tracking) so App.js can fire custom events at the two actual
+  // "someone converted" moments (a submitted booking request, a sent
+  // Contact Us message) without this file needing to know about them -
+  // see trackConversion in App.js. A GA4 event fired here still has to
+  // be separately marked a "key event" in the GA4 dashboard (and that
+  // property linked to the Google Ads account) before Ads will see it
+  // as a conversion; neither of those steps happens in code.
+  window.gtag = gtag;
   gtag('js', new Date());
   gtag('config', GA_ID);
 }

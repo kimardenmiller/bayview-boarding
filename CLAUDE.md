@@ -685,6 +685,24 @@ lives in JS rather than a static `<script>` in public/index.html
 because that file is a single template shared by both the production
 and staging builds, with no way to leave a tag out on its own.
 
+**Conversion tracking** (Oct 14, 2026, on request - a weekly Google
+Ads email showed clicks/impressions both down sharply, and nagged to
+"add the Google tag to track conversion actions" - Ads had no signal
+at all for which clicks actually led anywhere). Rather than bolt on a
+second, separate Google Ads tag alongside the GA4 one already here,
+`window.gtag` is now exposed globally by src/index.js (it previously
+only existed as a function-scoped closure) so `trackConversion` in
+App.js can fire a plain GA4 custom event - `booking_request_submitted`
+at the exact point `handleSubmit` gets a successful `submit-booking`
+response, `contact_form_submitted` at the exact point ContactUs's
+`handleSend` gets a successful `send-contact` response - deliberately
+with no event parameters at all, since name/phone/email would be PII
+inside Analytics, which GA4's own policy forbids. Firing the event is
+only the code half of this: it still needs manually marking as a "key
+event" in the GA4 dashboard, and that GA4 property linked to the
+Google Ads account to import it as a conversion action - neither step
+happens in code, and neither has been done yet as of this writing.
+
 Standard on-page SEO otherwise: a real meta description, Open Graph/
 Twitter card tags, a self-referencing canonical URL (all in public/
 index.html, using %PUBLIC_URL% so each build points at itself), and

@@ -153,6 +153,23 @@ const ROVER_PROFILE_URL = 'https://www.rover.com/members/kim-m-dog-paradise-abov
 // folding it into the Rover mentions.
 const GOOGLE_REVIEW_URL = 'https://g.page/r/CX9YK-LEWX_nEAI/review';
 
+// Fires a GA4 custom event at the two actual "someone converted"
+// moments (Oct 14, 2026, on request - Google Ads has no conversion
+// signal at all today) - a submitted booking request and a sent
+// Contact Us message, see handleSubmit/ContactUs below. No PII in the
+// event params (name/phone/email), just the bare event name - GA4's
+// own policy on personal data in event parameters. window.gtag only
+// exists at all when src/index.js actually loaded gtag.js (production,
+// REACT_APP_GA_MEASUREMENT_ID set) - this is a no-op everywhere else
+// (local dev without the env var, every Jest test), deliberately with
+// no separate gating check of its own here. Firing the event alone
+// doesn't make Google Ads see it as a conversion - that still needs
+// the event marked a "key event" in GA4 and that property linked to
+// the Ads account, both dashboard steps, not code.
+function trackConversion(eventName) {
+  if (typeof window.gtag === 'function') window.gtag('event', eventName);
+}
+
 // Content adapted from the Bayview Boarding Rover profile - embedded
 // directly on the Landing page (see Landing above) rather than behind
 // its own "Learn more" tap, so first-time visitors can see who they're
@@ -401,6 +418,7 @@ function ContactUs({ onBack }) {
       return;
     }
     setStatus('sent');
+    trackConversion('contact_form_submitted');
   }
 
   if (status === 'sent') {
@@ -660,6 +678,7 @@ export default function App() {
       };
       setCurrentStay(confirmation);
       setSubmitted(true);
+      trackConversion('booking_request_submitted');
       // A submission is a request now, not an instant booking (Sept 21,
       // 2026, on request - see Submit Idea from Estee) - this text just
       // acknowledges receipt; the real confirmation only goes out once

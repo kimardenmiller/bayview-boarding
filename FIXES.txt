@@ -1,6 +1,6 @@
 BAYVIEW BOARDING — FIX LIST
 ============================
-Last updated: October 8, 2026 (2) (staging retired - testers now point at the live site)
+Last updated: October 14, 2026 (GA4 conversion events added for booking requests + Contact Us sends)
 
 NEXT CHANGE LIST (v1.5)
 -----------------------
@@ -16,6 +16,13 @@ NEXT CHANGE LIST (v1.5)
    was submitted.
    This item itself never gets "done" - it's a recurring habit, not a
    one-time task.
+2. Finish wiring up Google Ads conversion tracking (Oct 14, 2026) - the
+   code half is done (booking_request_submitted/contact_form_submitted
+   GA4 events now fire, see Oct 14 COMPLETED entry below), but 2
+   dashboard-only steps remain, neither doable from code: mark both as
+   "key events" in the GA4 property, then link that GA4 property to
+   the Google Ads account (Ads > Tools > Linked accounts) so it can
+   import them as conversion actions.
 
 DEFERRED (revisit only if it actually blocks something)
 ---------------------------------------------------------
@@ -29,6 +36,27 @@ DEFERRED (revisit only if it actually blocks something)
 
 COMPLETED
 ---------
+- Oct 14, 2026: a weekly Google Ads email showed clicks/impressions
+  both down sharply and nagged to "add the Google tag to track
+  conversion actions" - Ads had no signal for which clicks actually
+  led anywhere. Asked what should count as a conversion - answer:
+  "Both" (a submitted booking request and a sent Contact Us message).
+  Rather than add a second, separate Google Ads tag alongside the GA4
+  one already on the site, exposed `window.gtag` globally from
+  src/index.js (it only existed as a function-scoped closure before)
+  so App.js's new `trackConversion` helper can fire a plain GA4 custom
+  event - `booking_request_submitted` right after handleSubmit's
+  submit-booking call succeeds, `contact_form_submitted` right after
+  ContactUs's send-contact call succeeds - deliberately with no event
+  parameters (name/phone/email would be PII inside Analytics, against
+  GA4's own policy).
+  This is only the code half: 2 dashboard-only steps still remain
+  (marking both as GA4 "key events," then linking that GA4 property to
+  the Google Ads account to import them as conversions) - see NEXT
+  CHANGE LIST item 2 above.
+  Jest 241 (unchanged count - assertions added to the existing booking-
+  success/failure and Contact-Us-success/failure tests rather than new
+  ones). Deployed to production (staging retired - see Oct 8 (2)).
 - Oct 8, 2026 (2): "Do we really need staging at this point?" ->
   "I think we can retire it and update the tester url to look at the
   live site." Staging's `staging` git branch had never actually
