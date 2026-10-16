@@ -702,11 +702,18 @@ at the exact point `handleSubmit` gets a successful `submit-booking`
 response, `contact_form_submitted` at the exact point ContactUs's
 `handleSend` gets a successful `send-contact` response - deliberately
 with no event parameters at all, since name/phone/email would be PII
-inside Analytics, which GA4's own policy forbids. Firing the event is
-only the code half of this: it still needs manually marking as a "key
-event" in the GA4 dashboard, and that GA4 property linked to the
-Google Ads account to import it as a conversion action - neither step
-happens in code, and neither has been done yet as of this writing.
+inside Analytics, which GA4's own policy forbids. Firing the event was
+only the code half of this; the 2 dashboard-only steps were finished
+Oct 16, 2026, once real traffic had made both events actually appear
+in GA4 (they can't be marked before that): both starred as GA4 "key
+events" (Admin > Data display > Events), then imported into Google Ads
+(account 359-011-2630, already linked to this GA4 property since Sept
+26, 2026 - see Tech stack) as 2 new Primary conversion actions -
+`contact_form_submitted` under the "Contact" goal category,
+`booking_request_submitted` under "Book appointment" - both sourced
+from the GA4 property (not a second, separate Ads tag), both
+"Awaiting conversions" until the next real one comes in. Conversion
+tracking is now fully wired end to end.
 
 Standard on-page SEO otherwise: a real meta description, Open Graph/
 Twitter card tags, a self-referencing canonical URL (all in public/
