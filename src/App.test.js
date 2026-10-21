@@ -2103,7 +2103,7 @@ describe('Admin login', () => {
   test('cancel button on the login screen closes the admin overlay', async () => {
     goToAdminUrl();
     render(<App />);
-    fireEvent.click(screen.getByText('Cancel'));
+    fireEvent.click(await screen.findByText('Cancel'));
     expect(screen.queryByText('Admin Access')).not.toBeInTheDocument();
   });
 
@@ -2354,12 +2354,17 @@ describe('Admin — logged in — Requests', () => {
     const card = within(requestsSection).getByText('Bud — Kim').closest('.stay-card');
     fireEvent.click(within(card).getByText('View'));
     fireEvent.click(within(card).getByText('Edit'));
+    fireEvent.change(within(card).getByDisplayValue('210'), { target: { value: '999' } });
     fireEvent.click(within(card).getByText('Cancel'));
     expect(within(card).getByText('Approve')).toBeInTheDocument();
     expect(within(card).queryByText('Save')).not.toBeInTheDocument();
     expect(supabase.functions.invoke).not.toHaveBeenCalledWith('admin-data', expect.objectContaining({
       body: expect.objectContaining({ action: 'editStay' }),
     }));
+    // Reopening shows the stored value again, not the discarded edit.
+    fireEvent.click(within(card).getByText('Edit'));
+    expect(within(card).getByDisplayValue('210')).toBeInTheDocument();
+    expect(within(card).queryByDisplayValue('999')).not.toBeInTheDocument();
   });
 
   test('a "View" button makes it obvious a request card is clickable (Sept 21, 2026)', async () => {
@@ -2525,6 +2530,38 @@ describe('Admin — logged in — Unbilled Stays', () => {
     expect(supabase.functions.invoke).not.toHaveBeenCalledWith('admin-data', expect.objectContaining({
       body: expect.objectContaining({ action: 'billStay' }),
     }));
+  });
+
+  // Oct 21, 2026, on request: one "Save" that saves + closes, instead of a
+  // separate "Done Editing" that only collapsed the card (and left the
+  // unsaved edit showing, so it looked saved when it wasn't).
+  test('an approved stay\'s editor has Save/Cancel (no "Done Editing"), and Save closes the editor', async () => {
+    await loginAsAdminWithUnbilled();
+    const card = screen.getByText('Fido & Bud — Kim').closest('.stay-card');
+    fireEvent.click(screen.getByText('Fido & Bud — Kim'));
+    fireEvent.click(within(card).getByText('Edit'));
+    expect(within(card).queryByText('Done Editing')).not.toBeInTheDocument();
+    expect(within(card).getByText('Cancel')).toBeInTheDocument();
+
+    fireEvent.click(within(card).getByText('Save'));
+    await waitFor(() => expect(within(card).queryByText('Save')).not.toBeInTheDocument());
+    expect(within(card).getByText('Edit')).toBeInTheDocument();
+  });
+
+  test('Cancel on an approved stay discards the edit without saving', async () => {
+    await loginAsAdminWithUnbilled();
+    const card = screen.getByText('Fido & Bud — Kim').closest('.stay-card');
+    fireEvent.click(screen.getByText('Fido & Bud — Kim'));
+    fireEvent.click(within(card).getByText('Edit'));
+    fireEvent.change(within(card).getByDisplayValue('17:00'), { target: { value: '15:30' } });
+    fireEvent.click(within(card).getByText('Cancel'));
+
+    expect(supabase.functions.invoke).not.toHaveBeenCalledWith('admin-data', expect.objectContaining({
+      body: expect.objectContaining({ action: 'editStay' }),
+    }));
+    fireEvent.click(within(card).getByText('Edit'));
+    expect(within(card).getByDisplayValue('17:00')).toBeInTheDocument();
+    expect(within(card).queryByDisplayValue('15:30')).not.toBeInTheDocument();
   });
 
   test('a failed Save on an approved stay shows an error and keeps the edit open', async () => {

@@ -444,6 +444,18 @@ export default function AdminView({
     return billingEdits[stay.id]?.[field] ?? fallback;
   }
 
+  // Throws away a stay's unsaved edits and closes its editor - so a
+  // reopened Edit (or the collapsed card summary) shows what's actually
+  // stored, never a leftover change that only looks saved.
+  function cancelStayEdits(stayId) {
+    setBillingEdits(prev => {
+      const { [stayId]: _discarded, ...rest } = prev;
+      return rest;
+    });
+    setRequestActionStatus(prev => ({ ...prev, [stayId]: null }));
+    setEditingStayId(null);
+  }
+
   function updateBillingField(stayId, field, value) {
     setBillingEdits(prev => ({ ...prev, [stayId]: { ...prev[stayId], [field]: value } }));
   }
@@ -1003,7 +1015,7 @@ export default function AdminView({
                   >
                     {savingStayEditId === s.id ? 'Saving...' : 'Save'}
                   </button>
-                  <button className="btn-secondary" style={{ padding: '4px 10px', fontSize: '0.78rem' }} onClick={() => setEditingStayId(null)}>
+                  <button className="btn-secondary" style={{ padding: '4px 10px', fontSize: '0.78rem' }} onClick={() => cancelStayEdits(s.id)}>
                     Cancel
                   </button>
                   {requestActionStatus[s.id] && (
@@ -1165,17 +1177,23 @@ export default function AdminView({
             )}
             {s.approval_status === 'approved' && !s.paid_at && (
               <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 8, flexWrap: 'wrap' }}>
-                <button className="btn-secondary" style={{ padding: '4px 10px', fontSize: '0.78rem' }} onClick={() => setEditingStayId(isEditing ? null : s.id)}>
-                  {isEditing ? 'Done Editing' : 'Edit'}
-                </button>
-                {isEditing && (
-                  <button
-                    className="btn-primary"
-                    style={{ padding: '4px 10px', fontSize: '0.78rem' }}
-                    disabled={savingStayEditId === s.id}
-                    onClick={() => saveStayEdits(s)}
-                  >
-                    {savingStayEditId === s.id ? 'Saving...' : 'Save'}
+                {isEditing ? (
+                  <>
+                    <button
+                      className="btn-primary"
+                      style={{ padding: '4px 10px', fontSize: '0.78rem' }}
+                      disabled={savingStayEditId === s.id}
+                      onClick={() => saveStayEdits(s)}
+                    >
+                      {savingStayEditId === s.id ? 'Saving...' : 'Save'}
+                    </button>
+                    <button className="btn-secondary" style={{ padding: '4px 10px', fontSize: '0.78rem' }} onClick={() => cancelStayEdits(s.id)}>
+                      Cancel
+                    </button>
+                  </>
+                ) : (
+                  <button className="btn-secondary" style={{ padding: '4px 10px', fontSize: '0.78rem' }} onClick={() => setEditingStayId(s.id)}>
+                    Edit
                   </button>
                 )}
                 <button

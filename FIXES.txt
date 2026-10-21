@@ -1,6 +1,6 @@
 BAYVIEW BOARDING — FIX LIST
 ============================
-Last updated: October 20, 2026 (approved stays can now Save edits without billing - fixes calendar not updating)
+Last updated: October 21, 2026 (approved-stay editor is now just Save/Cancel - "Done Editing" removed)
 
 NEXT CHANGE LIST (v1.5)
 -----------------------
@@ -29,6 +29,21 @@ DEFERRED (revisit only if it actually blocks something)
 
 COMPLETED
 ---------
+- Oct 21, 2026: "Why not just combine that same 'save' with 'Done
+  Editing', maybe just call it 'Save' and perform the db save, calendar
+  update, and close the Stay editing window?" Agreed - two buttons that
+  both "finish" editing was confusing, and "Done Editing" (collapse but
+  keep the unsaved edit on screen) was exactly what made the Oct 20 bug
+  look saved when it wasn't. The approved-stay editor now matches the
+  Requests card: Save (save + calendar sync + close) and Cancel
+  (discard + close). New cancelStayEdits() clears that stay's unsaved
+  edits, so Cancel genuinely discards - the Requests card's Cancel used
+  to only close, and a reopened Edit brought the old change back; it
+  uses cancelStayEdits too now. Also fixed a pre-existing order-
+  dependent test ("cancel button on the login screen") that only passed
+  when an earlier test had already loaded the lazy admin chunk - found
+  by running a filtered subset. Jest 243 -> 245. Deployed; verified the
+  live admin chunk has no "Done Editing".
 - Oct 20, 2026: Suggested by Estee (Submit Idea, Oct 18): "When updating
   a booking to change the pick up or drop off times, it does not update
   the calendar." Not a calendar-sync bug - the server side (admin-data's
