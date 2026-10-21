@@ -1,6 +1,6 @@
 BAYVIEW BOARDING — FIX LIST
 ============================
-Last updated: October 16, 2026 (Google Ads conversion tracking fully wired up end to end)
+Last updated: October 20, 2026 (approved stays can now Save edits without billing - fixes calendar not updating)
 
 NEXT CHANGE LIST (v1.5)
 -----------------------
@@ -29,6 +29,28 @@ DEFERRED (revisit only if it actually blocks something)
 
 COMPLETED
 ---------
+- Oct 20, 2026: Suggested by Estee (Submit Idea, Oct 18): "When updating
+  a booking to change the pick up or drop off times, it does not update
+  the calendar." Not a calendar-sync bug - the server side (admin-data's
+  billStay/editStay -> syncStayCalendarEvent) was already correct (live
+  data confirmed all recent stays had all 3 event ids and proper time
+  values). The real gap was in the admin UI: on an APPROVED stay
+  (Unbilled Stays/Awaiting Payment), Edit's only persist action was
+  "Send Billing Text" - "Done Editing" just collapsed the card, and the
+  card summary then showed the locally-edited time, so it looked saved
+  but never reached the database, and so the calendar re-sync never ran.
+  Fixed by adding a "Save" button (shown while Edit is open) that calls
+  the existing editStay action - persists the corrected dates/times/cost
+  and re-syncs the calendar, never bills, never texts. Renamed
+  AdminPanel's saveRequestEdits -> saveStayEdits since it now serves
+  both pending requests and approved stays.
+  Jest 241 -> 243 (Save persists via editStay with no text/bill; failed
+  Save shows an error and keeps the edit open). Deno 220 -> 221 (an
+  editStay pickup-time-only change on a fully-synced stay PATCHes all 3
+  existing events - the exact reported scenario). Frontend-only fix, no
+  Edge Function redeploy needed. Deployed to production; verified live
+  (Save appears next to Done Editing/Send Billing Text). Submission
+  marked On List, then Done.
 - Oct 16, 2026: "Where are we on SEO / Conversion tracking?" - finished
   the 2 dashboard-only steps the Oct 14 conversion-tracking entry below
   left outstanding (neither doable from code, and neither could be done

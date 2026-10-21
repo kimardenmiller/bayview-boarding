@@ -2504,6 +2504,51 @@ describe('Admin — logged in — Unbilled Stays', () => {
     await waitFor(() => expect(costInput.value).not.toBe(''));
   });
 
+  // Suggested by Estee via Submit Idea (Oct 18, 2026): "When updating a
+  // booking to change the pick up or drop off times, it does not update
+  // the calendar." An approved stay's Edit had no way to persist a
+  // correction short of sending the bill - "Done Editing" only collapsed
+  // the card - so nothing reached the database and the server-side
+  // calendar sync never ran.
+  test('an approved stay can Save a corrected time via editStay (which re-syncs the calendar server-side), without sending any text', async () => {
+    await loginAsAdminWithUnbilled();
+    const card = screen.getByText('Fido & Bud — Kim').closest('.stay-card');
+    fireEvent.click(screen.getByText('Fido & Bud — Kim'));
+    fireEvent.click(within(card).getByText('Edit'));
+    fireEvent.change(within(card).getByDisplayValue('17:00'), { target: { value: '15:30' } });
+    fireEvent.click(within(card).getByText('Save'));
+
+    await waitFor(() => expect(supabase.functions.invoke).toHaveBeenCalledWith('admin-data', {
+      body: expect.objectContaining({ action: 'editStay', stayId: 'stay-shared', pickupTime: '15:30', dropTime: '09:00' }),
+    }));
+    expect(supabase.functions.invoke).not.toHaveBeenCalledWith('send-confirmation', expect.anything());
+    expect(supabase.functions.invoke).not.toHaveBeenCalledWith('admin-data', expect.objectContaining({
+      body: expect.objectContaining({ action: 'billStay' }),
+    }));
+  });
+
+  test('a failed Save on an approved stay shows an error and keeps the edit open', async () => {
+    mockInvokeDefaults({
+      'admin-data': async (opts) => (opts?.body?.action === 'editStay'
+        ? { data: null, error: { message: 'db down' } }
+        : { data: { dogs: UNBILLED_DOGS, totalStays: 4 }, error: null }),
+    });
+    goToAdminUrl();
+    render(<App />);
+    await userEvent.type(await screen.findByPlaceholderText('Password'), 'correct-password');
+    fireEvent.click(screen.getByText('Sign In'));
+    await screen.findByText('Bayview Boarding — Admin');
+
+    const card = screen.getByText('Fido & Bud — Kim').closest('.stay-card');
+    fireEvent.click(screen.getByText('Fido & Bud — Kim'));
+    fireEvent.click(within(card).getByText('Edit'));
+    fireEvent.change(within(card).getByDisplayValue('17:00'), { target: { value: '15:30' } });
+    fireEvent.click(within(card).getByText('Save'));
+
+    expect(await within(card).findByText('Failed to save. Please try again.')).toBeInTheDocument();
+    expect(within(card).getByDisplayValue('15:30')).toBeInTheDocument();
+  });
+
   test('Daily Rate and Holiday Upcharge % are per-stay editable (defaulting to the site settings), with the full math shown, and drive Recalculate', async () => {
     await loginAsAdminWithUnbilled();
     const card = screen.getByText('Fido & Bud — Kim').closest('.stay-card');

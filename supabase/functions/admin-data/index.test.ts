@@ -560,6 +560,32 @@ Deno.test('billStay: never touches the calendar when only the cost changes, not 
   }
 });
 
+// Suggested by Estee via Submit Idea (Oct 18, 2026) - the admin panel now
+// saves an approved stay's corrected times through editStay (no bill
+// sent), so this is the path that has to keep the calendar in step.
+Deno.test('editStay: a pickup-time-only change on an approved, fully-synced stay updates all 3 existing events in place (Oct 20, 2026)', async () => {
+  const stub = stubSupabase({
+    stayRow: {
+      ...DEFAULT_STAY_ROW,
+      calendar_allday_event_id: 'existing-allday-id',
+      calendar_dropoff_event_id: 'existing-dropoff-id',
+      calendar_pickup_event_id: 'existing-pickup-id',
+    },
+  });
+  try {
+    const res = await handleRequest(postRequest({
+      password: ADMIN_PASSWORD, action: 'editStay', stayId: 'stay-2', pickupTime: '15:30',
+    }));
+    assertEquals(res.status, 200);
+    const patches = stub.calls.filter((c) => c.table === 'google-calendar-event' && c.method === 'PATCH');
+    assertEquals(patches.length, 3);
+    assertEquals(patches.some((c) => c.search?.endsWith('/existing-pickup-id')), true);
+    assertEquals(stub.calls.some((c) => c.table === 'google-calendar-event' && c.method === 'POST'), false);
+  } finally {
+    stub.restore();
+  }
+});
+
 Deno.test('editStay: a still-pending stay with no calendar events yet is left alone, even if dates change', async () => {
   const stub = stubSupabase({ stayRow: DEFAULT_STAY_ROW }); // all 3 event ids: null
   try {

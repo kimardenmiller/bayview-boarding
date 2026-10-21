@@ -141,7 +141,15 @@ Kim Miller and Estee Fletter at 210 Bayview Drive, San Rafael, CA.
   read as a math error once a 2nd-dog discount was actually applied,
   fixed Sept 18, 2026), + holiday-night upcharge if any, = total - see
   calcCostBreakdown) and "Send Billing Text" (works with
-  or without opening Edit first - see billed_at below). Then "Awaiting
+  or without opening Edit first - see billed_at below). While Edit is
+  open, a "Save" button (Oct 20, 2026 - Suggested by Estee: "When
+  updating a booking to change the pick up or drop off times, it does
+  not update the calendar") persists the corrections via admin-data's
+  editStay WITHOUT billing - which also re-syncs the stay's 3 Google
+  Calendar events server-side. Before this, Send Billing Text was the
+  only way to persist an approved stay's edits; "Done Editing" just
+  collapses the card (local edits stay on screen, so they LOOK saved,
+  but never reached the database or the calendar until billed). Then "Awaiting
   Payment" (Sept 21, 2026, on request) — every billed-but-not-yet-paid
   stay, same card/Edit/Send Billing Text as Unbilled Stays (in case the
   billed amount needs correcting before payment comes in), plus a new
@@ -881,7 +889,7 @@ visitor never reads.
 - src/aboutPhotoSrc.js — shared helper resolving an about_photos entry to a real URL, used by App.js's AboutContent and AdminPanel.js's About Photos editor
 - src/settings.js — all configurable values (rates, vets, messages, packing list)
 - src/waiver.js — full waiver text
-- src/App.test.js — 241 passing tests (TDD), Supabase mocked via src/__mocks__/supabase.js
+- src/App.test.js — 243 passing tests (TDD), Supabase mocked via src/__mocks__/supabase.js
 - src/supabase.js — creates the Supabase client from REACT_APP_SUPABASE_URL/_KEY (falling back to production's own public values) - see Staging environment above for how the staging build overrides these
 - src/index.js — app entry point; also where Google Analytics loads (production only) and staging's noindex meta tag gets injected - see SEO & Analytics above
 - supabase/functions/send-contact/index.ts — public Contact Us form handler: relays name/email-or-phone/message to Kim & Estee by SMS (reuses KIM_PHONE/ESTEE_PHONE). Deployed normally (no --no-verify-jwt) since it's called via the Supabase JS client like settings/lookup-client/submit-booking

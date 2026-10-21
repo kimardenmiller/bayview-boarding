@@ -120,7 +120,7 @@ export default function AdminView({
   // an edit here never does). Reuses editingStayId/billingEdits/
   // billingFieldFor/costBreakdownFor - all already keyed by stay id and
   // generic, same as Unbilled Stays' own Edit.
-  const [savingRequestEditId, setSavingRequestEditId] = useState(null);
+  const [savingStayEditId, setSavingStayEditId] = useState(null);
   // Payment tracking (Sept 21, 2026, on request) - "billed" alone never
   // answered "has this actually been paid?". A thank-you/review-request
   // text was added Sept 30, 2026, on request - same "send the text
@@ -533,20 +533,22 @@ export default function AdminView({
     setTotalStays(data.totalStays);
   }
 
-  // Saves a request's corrected dates/times/estimated cost (Sept 24,
-  // 2026, on request - "allow editing of the stay while it is still in
-  // the request stage") via admin-data's editStay action - unlike
-  // billStay/approveRequest/denyRequest below, this never sends any SMS
-  // and never touches approval_status - it's a plain field correction,
-  // still fully pending afterward, so admin can review the corrected
-  // numbers before actually deciding.
-  async function saveRequestEdits(stay) {
+  // Saves a stay's corrected dates/times/estimated cost via admin-data's
+  // editStay action - unlike billStay/approveRequest/denyRequest below,
+  // this never sends any SMS and never touches approval_status/
+  // billed_at - a plain field correction. Originally pending requests
+  // only (Sept 24, 2026); approved stays too since Oct 20, 2026 (Suggested
+  // by Estee: editing an approved stay's times "does not update the
+  // calendar" - its only persist path was sending the bill, so a time
+  // fix never reached the database, and editStay's server-side calendar
+  // re-sync never ran).
+  async function saveStayEdits(stay) {
     const checkIn = billingFieldFor(stay, 'checkIn', stay.check_in);
     const checkOut = billingFieldFor(stay, 'checkOut', stay.check_out);
     const dropTime = billingFieldFor(stay, 'dropTime', stay.drop_time ? stay.drop_time.slice(0, 5) : '');
     const pickupTime = billingFieldFor(stay, 'pickupTime', stay.pickup_time ? stay.pickup_time.slice(0, 5) : '');
     const estimatedCostRaw = billingFieldFor(stay, 'finalCost', stay.estimated_cost != null ? String(stay.estimated_cost) : '');
-    setSavingRequestEditId(stay.id);
+    setSavingStayEditId(stay.id);
     setRequestActionStatus(prev => ({ ...prev, [stay.id]: null }));
     const { data, error: fnError } = await supabase.functions.invoke('admin-data', {
       body: {
@@ -555,7 +557,7 @@ export default function AdminView({
         estimatedCost: estimatedCostRaw ? Number(estimatedCostRaw) : null,
       },
     });
-    setSavingRequestEditId(null);
+    setSavingStayEditId(null);
     if (fnError || data?.error) {
       setRequestActionStatus(prev => ({ ...prev, [stay.id]: 'Failed to save. Please try again.' }));
       return;
@@ -849,7 +851,7 @@ export default function AdminView({
   // 24, 2026, on request - "allow editing of the stay while it is still
   // in the request stage") its own Edit toggle for correcting dates/
   // times/estimated cost before deciding, via admin-data's editStay
-  // action (see saveRequestEdits - deliberately separate from
+  // action (see saveStayEdits - deliberately separate from
   // billStay/approveRequest/denyRequest: never sends any SMS, never
   // touches approval_status). Shares expandedStayId/expandedWaiver/
   // editingStayId/billingEdits with the other stay lists - a stay id
@@ -996,10 +998,10 @@ export default function AdminView({
                   <button
                     className="btn-primary"
                     style={{ padding: '4px 10px', fontSize: '0.78rem' }}
-                    disabled={savingRequestEditId === s.id}
-                    onClick={() => saveRequestEdits(s)}
+                    disabled={savingStayEditId === s.id}
+                    onClick={() => saveStayEdits(s)}
                   >
-                    {savingRequestEditId === s.id ? 'Saving...' : 'Save'}
+                    {savingStayEditId === s.id ? 'Saving...' : 'Save'}
                   </button>
                   <button className="btn-secondary" style={{ padding: '4px 10px', fontSize: '0.78rem' }} onClick={() => setEditingStayId(null)}>
                     Cancel
@@ -1166,6 +1168,16 @@ export default function AdminView({
                 <button className="btn-secondary" style={{ padding: '4px 10px', fontSize: '0.78rem' }} onClick={() => setEditingStayId(isEditing ? null : s.id)}>
                   {isEditing ? 'Done Editing' : 'Edit'}
                 </button>
+                {isEditing && (
+                  <button
+                    className="btn-primary"
+                    style={{ padding: '4px 10px', fontSize: '0.78rem' }}
+                    disabled={savingStayEditId === s.id}
+                    onClick={() => saveStayEdits(s)}
+                  >
+                    {savingStayEditId === s.id ? 'Saving...' : 'Save'}
+                  </button>
+                )}
                 <button
                   className="btn-primary"
                   style={{ padding: '4px 10px', fontSize: '0.78rem' }}
@@ -1189,6 +1201,9 @@ export default function AdminView({
                 )}
                 {paidStatus[s.id] && (
                   <span className="field-error" style={{ fontSize: '0.78rem' }}>{paidStatus[s.id]}</span>
+                )}
+                {requestActionStatus[s.id] && (
+                  <span className="field-error" style={{ fontSize: '0.78rem' }}>{requestActionStatus[s.id]}</span>
                 )}
               </div>
             )}
