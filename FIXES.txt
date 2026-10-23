@@ -37,7 +37,11 @@ COMPLETED
   Google's AI-suggested "Top picks", which showed people who aren't Kim
   or Estee). Sitelinks needed distinct destination URLs on a single-page
   site, so added ?about / ?reviews / ?contact deep links alongside the
-  existing ?book (App.js, 3 new tests).
+  existing ?book (App.js, 3 new tests). Added 4 sitelinks (Book a Stay /
+  About Kim & Estee / 5-Star Reviews / Contact Us). First deploy's
+  ?about/?reviews smooth-scrolled on mount and landed short (or not at
+  all) as the page kept loading - now they wait for window load and jump
+  instead (v1.46.1, verified live).
 - Oct 21, 2026: "Why not just combine that same 'save' with 'Done
   Editing', maybe just call it 'Save' and perform the db save, calendar
   update, and close the Stay editing window?" Agreed - two buttons that
