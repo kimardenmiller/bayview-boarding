@@ -243,7 +243,11 @@ Kim Miller and Estee Fletter at 210 Bayview Drive, San Rafael, CA.
   booking flow rather than a marketing page first) skips the landing
   page and opens straight to Owner Information - same
   `useState(() => new URLSearchParams(...))` pattern as the existing
-  `?admin` URL just below.
+  `?admin` URL just below. `?about` (scrolls to About Us), `?reviews`
+  (scrolls to the review quotes, `id="reviews"`) and `?contact` (opens
+  Contact Us) work the same way (Oct 23, 2026) - added for the Google
+  Ads Performance Max campaign's sitelinks, each of which needs its own
+  distinct URL landing on matching content.
 - "Contact Us" page — relays a name/email-or-phone/message submission to
   Kim & Estee by SMS via send-contact (Sept 16, 2026)
 - "Submit Idea" page (Sept 16 (8), simplified (9)) — one open message box
@@ -893,7 +897,7 @@ visitor never reads.
 - src/aboutPhotoSrc.js — shared helper resolving an about_photos entry to a real URL, used by App.js's AboutContent and AdminPanel.js's About Photos editor
 - src/settings.js — all configurable values (rates, vets, messages, packing list)
 - src/waiver.js — full waiver text
-- src/App.test.js — 245 passing tests (TDD), Supabase mocked via src/__mocks__/supabase.js
+- src/App.test.js — 248 passing tests (TDD), Supabase mocked via src/__mocks__/supabase.js
 - src/supabase.js — creates the Supabase client from REACT_APP_SUPABASE_URL/_KEY (falling back to production's own public values) - see Staging environment above for how the staging build overrides these
 - src/index.js — app entry point; also where Google Analytics loads (production only) and staging's noindex meta tag gets injected - see SEO & Analytics above
 - supabase/functions/send-contact/index.ts — public Contact Us form handler: relays name/email-or-phone/message to Kim & Estee by SMS (reuses KIM_PHONE/ESTEE_PHONE). Deployed normally (no --no-verify-jwt) since it's called via the Supabase JS client like settings/lookup-client/submit-booking

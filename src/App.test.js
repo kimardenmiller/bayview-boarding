@@ -1262,6 +1262,29 @@ describe('Step 1 — Owner Info', () => {
     expect(screen.queryByText('Dog Paradise Above Loch Lomond')).not.toBeInTheDocument();
   });
 
+  // Google Ads sitelinks (Oct 23, 2026) - each needs its own distinct URL
+  // landing on the matching content, same idea as ?book above.
+  test('a ?about URL opens the landing page scrolled to the About section', async () => {
+    window.history.pushState({}, '', '/?about');
+    render(<App />);
+    expect(await screen.findByText('Dog Paradise Above Loch Lomond')).toBeInTheDocument();
+    expect(Element.prototype.scrollIntoView).toHaveBeenCalled();
+  });
+
+  test('a ?reviews URL opens the landing page scrolled to the review quotes', async () => {
+    window.history.pushState({}, '', '/?reviews');
+    render(<App />);
+    expect(await screen.findByText('Dog Paradise Above Loch Lomond')).toBeInTheDocument();
+    expect(Element.prototype.scrollIntoView.mock.instances.some(el => el.id === 'reviews')).toBe(true);
+  });
+
+  test('a ?contact URL opens straight to the Contact Us page', async () => {
+    window.history.pushState({}, '', '/?contact');
+    render(<App />);
+    expect(await screen.findByText('Contact Us', { selector: 'h1' })).toBeInTheDocument();
+    expect(screen.queryByText('Dog Paradise Above Loch Lomond')).not.toBeInTheDocument();
+  });
+
   test('shows the "non-binding request" notice above Owner Information (Sept 21, 2026 - moved here from the landing page)', async () => {
     await goToOwnerStep();
     expect(screen.getByText(/non-binding booking request/)).toBeInTheDocument();

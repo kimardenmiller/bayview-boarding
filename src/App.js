@@ -311,7 +311,7 @@ function AboutContent({ onStart, aboutPhotos }) {
             21 ratings on Rover
           </a>
         </div>
-        <div className="about-reviews">
+        <div className="about-reviews" id="reviews">
           {ABOUT_REVIEWS.map((r, i) => (
             <div className="about-review" key={i}>
               <p className="about-review-stars" aria-label="5 out of 5 stars">★★★★★</p>
@@ -555,8 +555,14 @@ export default function App() {
   // below (Sept 26, 2026, on request - a direct "start booking" link
   // for Google Business Profile's booking-link field, which wants
   // customers dropped right into checkout, not a marketing page first).
-  const [showLanding, setShowLanding] = useState(() => !new URLSearchParams(window.location.search).has('book'));
-  const [showContact, setShowContact] = useState(false);
+  // ?contact and ?about (Oct 23, 2026) are the same idea for Google Ads
+  // sitelinks, each of which needs its own distinct URL landing on the
+  // matching content - see pendingScrollToAbout below for ?about.
+  const [showLanding, setShowLanding] = useState(() => {
+    const params = new URLSearchParams(window.location.search);
+    return !params.has('book') && !params.has('contact');
+  });
+  const [showContact, setShowContact] = useState(() => new URLSearchParams(window.location.search).has('contact'));
   const [showSubmitIdea, setShowSubmitIdea] = useState(false);
   const [step, setStep] = useState(0);
   // Admin has no visible entry point in the UI anymore - reached only via a
@@ -740,7 +746,7 @@ export default function App() {
   // Landing isn't currently showing, navigates there first and scrolls
   // once it's mounted (see the effect below, keyed off pendingScrollToAbout).
   const aboutSectionRef = useRef(null);
-  const [pendingScrollToAbout, setPendingScrollToAbout] = useState(false);
+  const [pendingScrollToAbout, setPendingScrollToAbout] = useState(() => new URLSearchParams(window.location.search).has('about'));
   function scrollToAbout() {
     if (showLanding && aboutSectionRef.current) {
       aboutSectionRef.current.scrollIntoView({ behavior: 'smooth' });
@@ -749,6 +755,14 @@ export default function App() {
       setPendingScrollToAbout(true);
     }
   }
+  // ?reviews (Oct 23, 2026, a Google Ads sitelink) scrolls past the
+  // About section's intro straight to the review quotes - a one-shot on
+  // first load only, unlike pendingScrollToAbout above.
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).has('reviews')) {
+      document.getElementById('reviews')?.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, []);
   useEffect(() => {
     if (showLanding && pendingScrollToAbout && aboutSectionRef.current) {
       aboutSectionRef.current.scrollIntoView({ behavior: 'smooth' });
