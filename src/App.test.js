@@ -1,7 +1,7 @@
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import App from './App';
-import { formatDate, calcAge, calcCost, calcCostBreakdown, formatCostBreakdownText, isHolidayNight, getHolidayWindows, todayISO, formatMoney, isoFromLocalDate } from './calc';
+import { formatDate, calcAge, calcCost, calcCostBreakdown, formatCostBreakdownText, isHolidayNight, getHolidayWindows, todayISO, formatMoney, isoFromLocalDate, formatTime12h, groupPortalStays } from './calc';
 import { supabase } from './supabase';
 import { SETTINGS } from './settings';
 
@@ -3528,5 +3528,163 @@ describe('Admin — logged in', () => {
         updates: { primaryManagerPhone: '4155559999', secondaryManagerPhone: '4155550102' },
       },
     }));
+  });
+});
+
+describe('formatTime12h', () => {
+  test('reformats 24-hour HH:MM as 12-hour AM/PM, no leading zero', () => {
+    expect(formatTime12h('09:00')).toBe('9:00 AM');
+    expect(formatTime12h('00:30')).toBe('12:30 AM');
+    expect(formatTime12h('12:00:00')).toBe('12:00 PM');
+    expect(formatTime12h('17:45')).toBe('5:45 PM');
+    expect(formatTime12h(null)).toBe('');
+  });
+});
+
+describe('groupPortalStays', () => {
+  const stay = (id, approval_status, check_in, check_out) => ({ id, approval_status, check_in, check_out });
+  test('splits a client\'s stays into requested/upcoming/past/declined, an in-progress stay counting as upcoming', () => {
+    const groups = groupPortalStays([
+      stay('past-old', 'approved', '2026-01-01', '2026-01-03'),
+      stay('past-new', 'approved', '2026-05-01', '2026-05-03'),
+      stay('in-progress', 'approved', '2026-10-28', '2026-10-30'),
+      stay('later', 'approved', '2026-12-20', '2026-12-27'),
+      stay('soon', 'approved', '2026-11-05', '2026-11-07'),
+      stay('pending', 'pending', '2026-11-20', '2026-11-22'),
+      stay('denied', 'denied', '2026-11-10', '2026-11-12'),
+    ], '2026-10-29');
+    expect(groups.requested.map(s => s.id)).toEqual(['pending']);
+    expect(groups.upcoming.map(s => s.id)).toEqual(['in-progress', 'soon', 'later']);
+    expect(groups.past.map(s => s.id)).toEqual(['past-new', 'past-old']);
+    expect(groups.declined.map(s => s.id)).toEqual(['denied']);
+  });
+});
+
+describe('My Stays (client portal, Oct 29, 2026)', () => {
+  const TOKEN = 'portal-session-token';
+  const PORTAL_STAYS = [
+    { id: 'up', approval_status: 'approved', check_in: '2099-01-10', check_out: '2099-01-12', drop_time: '09:00:00', pickup_time: '17:30:00', estimated_cost: 210, dogNames: ['Rex', 'Fido'], waiver_snapshot: [{ title: 'Signed Section', body: 'Signed body text' }] },
+    { id: 'req', approval_status: 'pending', check_in: '2099-02-01', check_out: '2099-02-03', drop_time: '10:00:00', pickup_time: '16:00:00', estimated_cost: 315.5, dogNames: ['Rex'] },
+    { id: 'past', approval_status: 'approved', check_in: '2020-03-01', check_out: '2020-03-04', drop_time: '08:00:00', pickup_time: '12:00:00', estimated_cost: 1795.5, billed_at: '2020-03-04T20:00:00Z', paid_at: '2020-03-05T20:00:00Z', dogNames: ['Rex'] },
+    { id: 'no', approval_status: 'denied', check_in: '2099-03-01', check_out: '2099-03-02', drop_time: '09:00:00', pickup_time: '09:00:00', estimated_cost: 105, denial_reason: 'We are full that week', dogNames: ['Rex'] },
+  ];
+
+  // Mimics the real portal function: code 123456 is the only right one.
+  function mockPortal({ staysResponse } = {}) {
+    const calls = [];
+    mockInvokeDefaults({
+      portal: (opts) => {
+        const body = opts.body;
+        calls.push(body);
+        if (body.action === 'requestCode') return Promise.resolve({ data: { success: true }, error: null });
+        if (body.action === 'verifyCode') {
+          if (body.code !== '123456') {
+            return Promise.resolve({ data: null, error: { context: { json: () => Promise.resolve({ error: "That code isn't right. Check the text and try again." }) } } });
+          }
+          return Promise.resolve({ data: { token: TOKEN }, error: null });
+        }
+        if (body.action === 'stays') {
+          return Promise.resolve(staysResponse || { data: { ownerName: 'Jane Smith', stays: PORTAL_STAYS }, error: null });
+        }
+        return Promise.resolve({ data: { success: true }, error: null });
+      },
+    });
+    return calls;
+  }
+
+  beforeEach(() => { localStorage.clear(); });
+
+  async function logIn() {
+    window.history.pushState({}, '', '/?portal');
+    render(<App />);
+    fireEvent.change(await screen.findByPlaceholderText('(415) 555-0100'), { target: { value: '(415) 555-0199' } });
+    fireEvent.click(screen.getByText('Text Me a Code'));
+    fireEvent.change(await screen.findByPlaceholderText('123456'), { target: { value: '123456' } });
+    fireEvent.click(screen.getByText('Log In'));
+    await screen.findByText('Hi Jane!');
+  }
+
+  test('the nav menu\'s "My Stays" opens the portal\'s phone login', async () => {
+    mockPortal();
+    render(<App />);
+    fireEvent.click(screen.getByLabelText('Open menu'));
+    fireEvent.click(screen.getByText('My Stays'));
+    expect(await screen.findByText('My Stays', { selector: 'h1' })).toBeInTheDocument();
+    expect(screen.getByText('Text Me a Code')).toBeInTheDocument();
+  });
+
+  test('a ?portal URL opens straight to My Stays, not the landing page', async () => {
+    mockPortal();
+    window.history.pushState({}, '', '/?portal');
+    render(<App />);
+    expect(await screen.findByText('My Stays', { selector: 'h1' })).toBeInTheDocument();
+    expect(screen.queryByText('Dog Paradise Above Loch Lomond')).not.toBeInTheDocument();
+  });
+
+  test('logging in with phone + texted code shows the client\'s stays, grouped, and remembers the login', async () => {
+    const calls = mockPortal();
+    await logIn();
+    expect(calls[0]).toEqual({ action: 'requestCode', phone: '(415) 555-0199' });
+    expect(calls[1]).toEqual({ action: 'verifyCode', phone: '(415) 555-0199', code: '123456' });
+    expect(calls[2]).toEqual({ action: 'stays', token: TOKEN });
+    expect(localStorage.getItem('bayviewPortalToken')).toBe(TOKEN);
+
+    for (const heading of ['Requested', 'Upcoming', 'Past Stays', 'Declined']) {
+      expect(screen.getByText(heading, { selector: 'h2' })).toBeInTheDocument();
+    }
+    expect(screen.getByText('Rex & Fido')).toBeInTheDocument();
+    expect(screen.getByText('01/10/2099 9:00 AM → 01/12/2099 5:30 PM')).toBeInTheDocument();
+    expect(screen.getByText('Estimate $210')).toBeInTheDocument();
+    expect(screen.getByText('Estimate $316')).toBeInTheDocument();
+    expect(screen.getByText('Paid $1,796')).toBeInTheDocument();
+    expect(screen.getByText('"We are full that week"')).toBeInTheDocument();
+  });
+
+  test('a wrong code shows the function\'s own error message and doesn\'t log in', async () => {
+    mockPortal();
+    window.history.pushState({}, '', '/?portal');
+    render(<App />);
+    fireEvent.change(await screen.findByPlaceholderText('(415) 555-0100'), { target: { value: '4155550199' } });
+    fireEvent.click(screen.getByText('Text Me a Code'));
+    fireEvent.change(await screen.findByPlaceholderText('123456'), { target: { value: '999999' } });
+    fireEvent.click(screen.getByText('Log In'));
+    expect(await screen.findByText("That code isn't right. Check the text and try again.")).toBeInTheDocument();
+    expect(localStorage.getItem('bayviewPortalToken')).toBeNull();
+  });
+
+  test('a remembered login skips straight to the stays', async () => {
+    const calls = mockPortal();
+    localStorage.setItem('bayviewPortalToken', TOKEN);
+    window.history.pushState({}, '', '/?portal');
+    render(<App />);
+    expect(await screen.findByText('Hi Jane!')).toBeInTheDocument();
+    expect(calls).toEqual([{ action: 'stays', token: TOKEN }]);
+  });
+
+  test('an expired remembered login is cleared and falls back to the phone login', async () => {
+    mockPortal({ staysResponse: { data: null, error: { context: { json: () => Promise.resolve({ error: 'expired', expired: true }) } } } });
+    localStorage.setItem('bayviewPortalToken', TOKEN);
+    window.history.pushState({}, '', '/?portal');
+    render(<App />);
+    expect(await screen.findByText('Your login has expired. Please log in again.')).toBeInTheDocument();
+    expect(screen.getByText('Text Me a Code')).toBeInTheDocument();
+    expect(localStorage.getItem('bayviewPortalToken')).toBeNull();
+  });
+
+  test('each stay can show the waiver exactly as signed', async () => {
+    mockPortal();
+    await logIn();
+    fireEvent.click(screen.getByText('View waiver as signed'));
+    expect(screen.getByText('Signed Section')).toBeInTheDocument();
+    expect(screen.getByText('Signed body text')).toBeInTheDocument();
+  });
+
+  test('Log out ends the session server-side and forgets it locally', async () => {
+    const calls = mockPortal();
+    await logIn();
+    fireEvent.click(screen.getByText('Log out'));
+    expect(await screen.findByText('Text Me a Code')).toBeInTheDocument();
+    expect(calls[calls.length - 1]).toEqual({ action: 'logout', token: TOKEN });
+    expect(localStorage.getItem('bayviewPortalToken')).toBeNull();
   });
 });

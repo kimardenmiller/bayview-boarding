@@ -266,3 +266,29 @@ export function emptyDog() {
 export function dogIsComplete(dog) {
   return !!(dog.name.trim() && dog.breed.trim() && dog.dob && dog.spayNeuter && dog.aggressionHistory && dog.healthConcerns);
 }
+
+// "09:00" -> "9:00 AM" - the client-side twin of send-confirmation's own
+// formatTime12h (same output a client already sees in their texts), used
+// by the client portal (Oct 29, 2026). Empty in, empty out.
+export function formatTime12h(time24) {
+  if (!time24) return '';
+  const [hStr, mStr] = time24.split(':');
+  const h24 = parseInt(hStr, 10);
+  return `${h24 % 12 || 12}:${mStr} ${h24 >= 12 ? 'PM' : 'AM'}`;
+}
+
+// Sorts a client's own stays (from the portal Edge Function) into the
+// "My Stays" page's sections (Oct 29, 2026). An approved stay counts as
+// upcoming through its check-out day (so one in progress still shows
+// there), past only once check-out has gone by. today is an ISO date
+// (todayISO()) - a parameter, not read inside, so this stays pure.
+export function groupPortalStays(stays, today) {
+  const byCheckIn = (a, b) => a.check_in.localeCompare(b.check_in);
+  const approved = stays.filter(s => s.approval_status === 'approved');
+  return {
+    requested: stays.filter(s => s.approval_status === 'pending').sort(byCheckIn),
+    upcoming: approved.filter(s => s.check_out >= today).sort(byCheckIn),
+    past: approved.filter(s => s.check_out < today).sort((a, b) => byCheckIn(b, a)),
+    declined: stays.filter(s => s.approval_status === 'denied').sort((a, b) => byCheckIn(b, a)),
+  };
+}

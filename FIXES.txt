@@ -1,6 +1,6 @@
 BAYVIEW BOARDING — FIX LIST
 ============================
-Last updated: October 23, 2026 (Google Ads assets + ?about/?reviews/?contact deep links for sitelinks)
+Last updated: October 29, 2026 (client portal phase 1 - My Stays)
 
 NEXT CHANGE LIST (v1.5)
 -----------------------
@@ -17,6 +17,68 @@ NEXT CHANGE LIST (v1.5)
    This item itself never gets "done" - it's a recurring habit, not a
    one-time task.
 
+2. CLIENT PORTAL (spec agreed Oct 29, 2026 - not started). Requested by
+   Kim. Build in 3 phases, each shipped/deployed on its own.
+
+   Auth:
+   - Log in by phone number + a 6-digit code texted to that phone (no
+     password - a password would still need a texted code for "forgot
+     password", so this is the same security with less to build).
+     Only phones already in `owners` can log in.
+   - Codes: 10-minute expiry, single use, stored hashed; max ~5 code
+     requests/hour per phone and ~5 wrong guesses per code (lockout).
+   - Session: random token, stored hashed in a new `portal_sessions`
+     table, expires 6 months after login (revocable from Admin). Sent
+     as a request header from localStorage, not a cookie (the API is
+     on supabase.co, a different site, so cookies would be third-party
+     and blocked). Known limit: iPhone Safari wipes site storage after
+     7 days without a visit, so Safari users re-enter a code then.
+   - Everything through a new `portal` Edge Function (service role),
+     every query scoped to the session's own owner_id. No RLS policy
+     changes - tables stay locked.
+   - Google sign-in: not for v1 (gives an email, not a phone, so would
+     still need a phone code once to link; doesn't avoid the Safari
+     limit). Revisit if clients ask.
+
+   Phase 1 - read-only portal: SHIPPED Oct 29, 2026 (v1.47.0) - see
+   COMPLETED below.
+   - Nav menu "My Stays" + ?portal deep link.
+   - Lists the owner's stays: Requested (pending), Upcoming, Past
+     (incl. billed/paid amounts), Declined (with reason), Cancelled.
+   - Each stay: dates/times, dogs, estimate or billed amount, and the
+     waiver as signed (waiver_snapshot).
+
+   Phase 2 - cancellation:
+   - Pending request: always free to withdraw.
+   - Approved stay: fee = a % of the stay's estimated_cost, by hours
+     left before the drop-off moment (check_in + drop_time, Pacific -
+     same calculation as due_dropoff_reminder_stay_ids()).
+   - Exactly 3 tiers, admin-editable in `settings` (hours + %), always
+     the CURRENT policy (no per-stay snapshot - Kim handles policy
+     changes manually). Defaults, from "free >72h, 50% refund <72h,
+     25% refund <24h": 0% fee >72h, 50% fee <72h, 75% fee <24h
+     (confirmed Oct 29).
+   - Portal shows the exact fee before the client confirms.
+   - Policy text shown on the booking form and in the portal.
+   - On cancel: approval_status 'cancelled' + cancelled_at +
+     cancellation_fee; texts the client (new admin-editable template)
+     and Kim/Estee; deletes the 3 Google Calendar events; reminders
+     stop (the due_* functions only pick approved stays).
+   - A fee > 0 puts the stay in Unbilled Stays, billed via the normal
+     billing text; admin can waive the fee (sets it to 0 -> Past Stays
+     as "Cancelled").
+   - No cancelling after drop-off from the portal (contact us instead).
+
+   Phase 3 - extras:
+   - Change dates: submits a NEW pending request (prefilled); the old
+     stay stays as-is until the new one is approved, then is cancelled
+     with NO fee (confirmed Oct 29 - a date change never incurs one).
+   - Edit dog profiles (breed/DOB/vet/health/aggression/photos) -
+     updates `dogs` only, never past stay_dogs snapshots.
+   - Rebook: one tap opens the booking form prefilled from a past stay.
+
+   Not in v1: shared households across 2 phones (wait and see).
+
 DEFERRED (revisit only if it actually blocks something)
 ---------------------------------------------------------
 - Migrate off Create React App (react-scripts) to Vite. CRA was
@@ -29,6 +91,22 @@ DEFERRED (revisit only if it actually blocks something)
 
 COMPLETED
 ---------
+- Oct 29, 2026 (v1.47.0): Client portal phase 1 ("My Stays", read-only)
+  - see NEXT CHANGE LIST item 2 for the full spec. Nav menu "My Stays" +
+  ?portal deep link. Login = phone + 6-digit texted code (no password),
+  via a new public `portal` Edge Function (requestCode/verifyCode/stays/
+  logout); codes and session tokens stored only as SHA-256 hashes in 2
+  new RLS-locked tables (migration 20261029000000_client_portal_auth.sql);
+  sessions last 183 days, token kept in localStorage (iPhone Safari
+  clears that after 7 days without a visit - re-login is just a code).
+  Limits: 5 codes/hour/phone, 5 wrong tries/code, 10-minute expiry.
+  Shows Requested / Upcoming / Past Stays / Declined, each with dog
+  names, dates/times, estimate/billed/paid amount, decline reason, and
+  the waiver as signed. src/ClientPortal.js (own lazy chunk),
+  groupPortalStays/formatTime12h in calc.js. 13 Deno tests (portal) +
+  10 Jest tests (258 total). Live-checked with a 555-01XX number (404,
+  nothing texted or written) and anon REST reads of both new tables
+  (empty).
 - Oct 22-23, 2026: Google Ads "You need more assets" email. Filled out
   Asset Group 1 of the "Dog Boarding in San Rafael, CA" Performance Max
   campaign (dashboard-only): 13 headlines (was 3), 3 long headlines, 5

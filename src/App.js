@@ -38,6 +38,8 @@ import Field from './Field';
 // visitor actually lands on first). See BookingFlow.js/AdminPanel.js.
 const BookingFlow = lazy(() => import('./BookingFlow'));
 const AdminPanel = lazy(() => import('./AdminPanel'));
+// "My Stays" client portal (Oct 29, 2026) - see ClientPortal.js.
+const ClientPortal = lazy(() => import('./ClientPortal'));
 
 // Deliberately minimal - the gap it fills is normally just the time a
 // chunk takes to download once, the first time a visitor crosses into
@@ -340,7 +342,7 @@ function AboutContent({ onStart, aboutPhotos }) {
 // earlier "no visible Admin entry point" decision (v1.5.13) per explicit
 // request - it's still fully password-gated server-side (see AdminView),
 // so this trades obscurity for convenience, not security.
-function NavMenu({ onAbout, onContact, onSubmitIdea, onBookStay, onAdmin }) {
+function NavMenu({ onAbout, onContact, onSubmitIdea, onBookStay, onMyStays, onAdmin }) {
   const [open, setOpen] = useState(false);
 
   function go(handler) {
@@ -363,6 +365,7 @@ function NavMenu({ onAbout, onContact, onSubmitIdea, onBookStay, onAdmin }) {
           <div className="nav-menu-backdrop" onClick={() => setOpen(false)} />
           <div className="nav-menu-panel">
             <button className="nav-menu-item" onClick={() => go(onBookStay)}>Book a Stay</button>
+            <button className="nav-menu-item" onClick={() => go(onMyStays)}>My Stays</button>
             <button className="nav-menu-item" onClick={() => go(onAbout)}>About Us</button>
             <button className="nav-menu-item" onClick={() => go(onContact)}>Contact Us</button>
             <button className="nav-menu-item" onClick={() => go(onSubmitIdea)}>Submit Idea</button>
@@ -560,10 +563,13 @@ export default function App() {
   // content - see the ?about/?reviews scroll effect below for the others.
   const [showLanding, setShowLanding] = useState(() => {
     const params = new URLSearchParams(window.location.search);
-    return !params.has('book') && !params.has('contact');
+    return !params.has('book') && !params.has('contact') && !params.has('portal');
   });
   const [showContact, setShowContact] = useState(() => new URLSearchParams(window.location.search).has('contact'));
   const [showSubmitIdea, setShowSubmitIdea] = useState(false);
+  // ?portal (Oct 29, 2026) opens "My Stays" directly - e.g. a link in a
+  // text to a client.
+  const [showPortal, setShowPortal] = useState(() => new URLSearchParams(window.location.search).has('portal'));
   const [step, setStep] = useState(0);
   // Admin has no visible entry point in the UI anymore - reached only via a
   // bookmarked URL (?admin), e.g. https://.../bayview-boarding/?admin
@@ -737,10 +743,11 @@ export default function App() {
   // showing. About is no longer its own view (see Landing/AboutContent
   // above) - scrollToAbout below is what "About Us" and "Learn more"
   // both call instead of a goToAbout nav function.
-  function goToLanding() { setShowLanding(true); setShowContact(false); setShowSubmitIdea(false); }
-  function goToContact() { setShowContact(true); setShowLanding(false); setShowSubmitIdea(false); }
-  function goToSubmitIdea() { setShowSubmitIdea(true); setShowLanding(false); setShowContact(false); }
-  function goToBooking() { setShowLanding(false); setShowContact(false); setShowSubmitIdea(false); }
+  function goToLanding() { setShowLanding(true); setShowContact(false); setShowSubmitIdea(false); setShowPortal(false); }
+  function goToContact() { setShowContact(true); setShowLanding(false); setShowSubmitIdea(false); setShowPortal(false); }
+  function goToSubmitIdea() { setShowSubmitIdea(true); setShowLanding(false); setShowContact(false); setShowPortal(false); }
+  function goToBooking() { setShowLanding(false); setShowContact(false); setShowSubmitIdea(false); setShowPortal(false); }
+  function goToPortal() { setShowPortal(true); setShowLanding(false); setShowContact(false); setShowSubmitIdea(false); }
 
   // Scrolls to the embedded About section on the Landing page - if
   // Landing isn't currently showing, navigates there first and scrolls
@@ -780,11 +787,17 @@ export default function App() {
   }, [showLanding, pendingScrollToAbout]);
 
   const navMenu = (
-    <NavMenu onAbout={scrollToAbout} onContact={goToContact} onSubmitIdea={goToSubmitIdea} onBookStay={goToBooking} onAdmin={() => setShowAdmin(true)} />
+    <NavMenu onAbout={scrollToAbout} onContact={goToContact} onSubmitIdea={goToSubmitIdea} onBookStay={goToBooking} onMyStays={goToPortal} onAdmin={() => setShowAdmin(true)} />
   );
 
   let pageContent;
-  if (showContact) {
+  if (showPortal) {
+    pageContent = (
+      <Suspense fallback={<LoadingFallback />}>
+        <ClientPortal onBack={goToLanding} onBookStay={goToBooking} />
+      </Suspense>
+    );
+  } else if (showContact) {
     pageContent = <ContactUs onBack={goToLanding} />;
   } else if (showSubmitIdea) {
     pageContent = <SubmitIdea onBack={goToLanding} />;
