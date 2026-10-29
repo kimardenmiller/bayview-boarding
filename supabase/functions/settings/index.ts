@@ -35,6 +35,18 @@ interface AboutPhoto {
   alt: string;
 }
 
+// Client portal cancellation policy (Oct 29, 2026) - exactly 3 tiers by
+// hours left before drop-off: more than lateHours -> earlyFeePercent,
+// within lateHours -> lateFeePercent, within lastMinuteHours ->
+// lastMinuteFeePercent. Stored as-is (jsonb), same as about_photos.
+interface CancellationPolicy {
+  lateHours: number;
+  lastMinuteHours: number;
+  earlyFeePercent: number;
+  lateFeePercent: number;
+  lastMinuteFeePercent: number;
+}
+
 interface SettingsRow {
   day_rate: number;
   minimum_stay: number;
@@ -50,6 +62,9 @@ interface SettingsRow {
   sms_request_received: string;
   sms_denied: string;
   sms_paid: string;
+  sms_cancelled: string;
+  sms_cancellation_fee: string;
+  cancellation_policy: CancellationPolicy;
   about_photos: AboutPhoto[];
   primary_manager_phone?: string;
   secondary_manager_phone?: string;
@@ -64,7 +79,7 @@ interface SettingsRow {
 // that must never reach a public read, since those are the actual phone
 // numbers those placeholders get filled with.
 const PUBLIC_COLUMNS =
-  "day_rate, minimum_stay, multi_dog_discount, holiday_upcharge, vets, packing_list, sms_confirmation, sms_reminder, sms_billing, sms_pickup_reminder, sms_footer, sms_request_received, sms_denied, sms_paid, about_photos";
+  "day_rate, minimum_stay, multi_dog_discount, holiday_upcharge, vets, packing_list, sms_confirmation, sms_reminder, sms_billing, sms_pickup_reminder, sms_footer, sms_request_received, sms_denied, sms_paid, sms_cancelled, sms_cancellation_fee, cancellation_policy, about_photos";
 const ADMIN_ONLY_COLUMNS = "primary_manager_phone, secondary_manager_phone, default_broadcast_message";
 const ADMIN_COLUMNS = `${PUBLIC_COLUMNS}, ${ADMIN_ONLY_COLUMNS}`;
 
@@ -84,6 +99,9 @@ function toClientShape(row: SettingsRow) {
     smsRequestReceived: row.sms_request_received,
     smsDenied: row.sms_denied,
     smsPaid: row.sms_paid,
+    smsCancelled: row.sms_cancelled,
+    smsCancellationFee: row.sms_cancellation_fee,
+    cancellationPolicy: row.cancellation_policy,
     aboutPhotos: row.about_photos,
   };
   // Only present at all when the row was fetched with ADMIN_COLUMNS -
@@ -111,6 +129,9 @@ interface UpdatesInput {
   smsRequestReceived?: string;
   smsDenied?: string;
   smsPaid?: string;
+  smsCancelled?: string;
+  smsCancellationFee?: string;
+  cancellationPolicy?: CancellationPolicy;
   aboutPhotos?: AboutPhoto[];
   primaryManagerPhone?: string;
   secondaryManagerPhone?: string;
@@ -143,6 +164,22 @@ function validateStringList(list: unknown, fieldName: string): string[] {
 
 // Only the fields actually present in `updates` are validated/applied -
 // an admin editing just the vet list shouldn't have to resend the rate.
+function validateCancellationPolicy(policy: unknown): string[] {
+  const p = policy as Partial<CancellationPolicy> | null;
+  const isNum = (v: unknown) => typeof v === "number" && Number.isFinite(v);
+  if (!p || typeof p !== "object") return ["cancellationPolicy must be an object"];
+  const errors: string[] = [];
+  if (!isNum(p.lateHours) || !isNum(p.lastMinuteHours) || p.lastMinuteHours! <= 0 || p.lateHours! <= p.lastMinuteHours!) {
+    errors.push("cancellationPolicy hours must be positive, with the first cutoff further out than the second (e.g. 72 and 24)");
+  }
+  for (const key of ["earlyFeePercent", "lateFeePercent", "lastMinuteFeePercent"] as const) {
+    if (!isNum(p[key]) || p[key]! < 0 || p[key]! > 100) {
+      errors.push(`cancellationPolicy.${key} must be a percent from 0 to 100`);
+    }
+  }
+  return errors;
+}
+
 function validateUpdates(updates: UpdatesInput): string[] {
   const errors: string[] = [];
 
@@ -202,6 +239,15 @@ function validateUpdates(updates: UpdatesInput): string[] {
   if (updates.smsPaid !== undefined && !updates.smsPaid?.trim()) {
     errors.push("smsPaid must not be blank");
   }
+  if (updates.smsCancelled !== undefined && !updates.smsCancelled?.trim()) {
+    errors.push("smsCancelled must not be blank");
+  }
+  if (updates.smsCancellationFee !== undefined && !updates.smsCancellationFee?.trim()) {
+    errors.push("smsCancellationFee must not be blank");
+  }
+  if (updates.cancellationPolicy !== undefined) {
+    errors.push(...validateCancellationPolicy(updates.cancellationPolicy));
+  }
   if (updates.defaultBroadcastMessage !== undefined && !updates.defaultBroadcastMessage?.trim()) {
     errors.push("defaultBroadcastMessage must not be blank");
   }
@@ -260,6 +306,12 @@ export async function handleRequest(req: Request): Promise<Response> {
       if (updates.smsRequestReceived !== undefined) patch.sms_request_received = updates.smsRequestReceived.trim();
       if (updates.smsDenied !== undefined) patch.sms_denied = updates.smsDenied.trim();
       if (updates.smsPaid !== undefined) patch.sms_paid = updates.smsPaid.trim();
+      if (updates.smsCancelled !== undefined) patch.sms_cancelled = updates.smsCancelled.trim();
+      if (updates.smsCancellationFee !== undefined) patch.sms_cancellation_fee = updates.smsCancellationFee.trim();
+      if (updates.cancellationPolicy !== undefined) {
+        const { lateHours, lastMinuteHours, earlyFeePercent, lateFeePercent, lastMinuteFeePercent } = updates.cancellationPolicy;
+        patch.cancellation_policy = { lateHours, lastMinuteHours, earlyFeePercent, lateFeePercent, lastMinuteFeePercent };
+      }
       if (updates.primaryManagerPhone !== undefined) patch.primary_manager_phone = updates.primaryManagerPhone.trim();
       if (updates.secondaryManagerPhone !== undefined) patch.secondary_manager_phone = updates.secondaryManagerPhone.trim();
       if (updates.defaultBroadcastMessage !== undefined) patch.default_broadcast_message = updates.defaultBroadcastMessage.trim();

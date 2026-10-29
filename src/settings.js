@@ -100,6 +100,16 @@ export const SETTINGS = {
   // {placeholder} (it never varies per stay).
   SMS_PAID: `Hi {firstName}! We received your payment. Thank you!\n\nIf you have not done so already, please leave us a review: https://g.page/r/CX9YK-LEWX_nEAI/review\n\nThanks for choosing Bayview Boarding, and we'll see you next time!\n\n— Kim & Estee`,
 
+  // Client portal cancellation (Oct 29, 2026) - sent when a client cancels
+  // from My Stays ({cancellationFeeNote} disappears for a free one), and
+  // when admin bills a cancellation fee. Same defaults as the migration.
+  SMS_CANCELLED: `Hi {firstName}! Your stay for {dogName} ({dropDate} - {pickDate}) has been cancelled.{cancellationFeeNote}\n— Kim & Estee`,
+  SMS_CANCELLATION_FEE: `Hi {firstName}! Here's the cancellation fee for {dogName}'s stay ({dropDate} - {pickDate}), per our cancellation policy:\n{billingBreakdown}\nTotal: \${finalCost}\n\nYou can make payment on Venmo @Kim-Miller or Zelle @(650) 302-0731.\n\n— Kim & Estee`,
+
+  // Exactly 3 tiers by hours left before drop-off (see calc.js's
+  // formatCancellationPolicy) - admin-editable, this is the fallback.
+  CANCELLATION_POLICY: { lateHours: 72, lastMinuteHours: 24, earlyFeePercent: 0, lateFeePercent: 50, lastMinuteFeePercent: 75 },
+
   // Appended once, server-side, to the end of every outbound client SMS
   // (Sept 18, 2026 - "Text Message Footer") - not stored per-template.
   SMS_FOOTER: `Reply STOP to opt out. Replies to this number aren't monitored. For questions, please group-text Kim {primaryManagerPhone} & Estee {secondaryManagerPhone}.`,

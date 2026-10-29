@@ -821,6 +821,46 @@ Deno.test('markPaid: sets paid_at, nothing else', async () => {
   }
 });
 
+Deno.test('billStay/editStay refuse a cancelled stay, without patching it or touching the calendar (Oct 29, 2026)', async () => {
+  for (const action of ['billStay', 'editStay']) {
+    const stub = stubSupabase({ stayRow: { ...DEFAULT_STAY_ROW, approval_status: 'cancelled' } });
+    try {
+      const res = await handleRequest(postRequest({ password: ADMIN_PASSWORD, action, stayId: 'stay-2', checkIn: '2026-12-01', estimatedCost: 50 }));
+      assertEquals(res.status, 400);
+      assertEquals(stub.calls.some((c) => c.method === 'PATCH'), false);
+      assertEquals(stub.calls.some((c) => c.table === 'google-calendar-event'), false);
+    } finally {
+      stub.restore();
+    }
+  }
+});
+
+for (const [action, column] of [['billCancellationFee', 'billed_at'], ['waiveCancellationFee', 'cancellation_fee_waived_at']]) {
+  Deno.test(`${action}: requires stayId`, async () => {
+    const stub = stubSupabase();
+    try {
+      const res = await handleRequest(postRequest({ password: ADMIN_PASSWORD, action }));
+      assertEquals(res.status, 400);
+    } finally {
+      stub.restore();
+    }
+  });
+
+  Deno.test(`${action}: sets only ${column}, and only on a cancelled stay`, async () => {
+    const stub = stubSupabase();
+    try {
+      const res = await handleRequest(postRequest({ password: ADMIN_PASSWORD, action, stayId: 'stay-2' }));
+      assertEquals(res.status, 200);
+      const patchCall = stub.calls.find((c) => c.table === 'stays' && c.method === 'PATCH')!;
+      assertEquals(patchCall.search, '?id=eq.stay-2&approval_status=eq.cancelled');
+      assertEquals(Object.keys(patchCall.body as Record<string, unknown>), [column]);
+      assertEquals(stub.calls.some((c) => c.table === 'google-calendar-event'), false);
+    } finally {
+      stub.restore();
+    }
+  });
+}
+
 Deno.test('rejects an unknown action', async () => {
   const stub = stubSupabase();
   try {

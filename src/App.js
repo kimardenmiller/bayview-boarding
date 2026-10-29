@@ -26,7 +26,7 @@ const HERO_DOG_URL = `${process.env.PUBLIC_URL}/img/hero-dog.jpg`;
 // migration and supabase/functions/settings/index.ts. Split into their
 // own module (Sept 30, 2026, code-splitting - see defaults.js) since
 // both this file and the lazy-loaded AdminPanel.js need them.
-import { DEFAULT_RATE, DEFAULT_MINIMUM_STAY, DEFAULT_MULTI_DOG_DISCOUNT, DEFAULT_HOLIDAY_UPCHARGE, DEFAULT_VETS, DEFAULT_PACKING_LIST, DEFAULT_SMS_TEMPLATES, DEFAULT_SMS_FOOTER } from './defaults';
+import { DEFAULT_RATE, DEFAULT_MINIMUM_STAY, DEFAULT_MULTI_DOG_DISCOUNT, DEFAULT_HOLIDAY_UPCHARGE, DEFAULT_VETS, DEFAULT_PACKING_LIST, DEFAULT_SMS_TEMPLATES, DEFAULT_SMS_FOOTER, DEFAULT_CANCELLATION_POLICY } from './defaults';
 import { calcCostBreakdown, emptyDog } from './calc';
 import Field from './Field';
 
@@ -586,6 +586,7 @@ export default function App() {
   const [aboutPhotos, setAboutPhotos] = useState(DEFAULT_ABOUT_PHOTOS);
   const [smsTemplates, setSmsTemplates] = useState(DEFAULT_SMS_TEMPLATES);
   const [smsFooter, setSmsFooter] = useState(DEFAULT_SMS_FOOTER);
+  const [cancellationPolicy, setCancellationPolicy] = useState(DEFAULT_CANCELLATION_POLICY);
 
   // Admin-configurable settings (day rate, multi-dog discount, holiday
   // upcharge, vet list, packing list, SMS templates - Sept 16, 2026 added
@@ -604,6 +605,7 @@ export default function App() {
       if (typeof data.holidayUpcharge === 'number') setHolidayUpcharge(data.holidayUpcharge);
       if (Array.isArray(data.vets)) setVets(data.vets);
       if (Array.isArray(data.packingList)) setPackingList(data.packingList);
+      if (data.cancellationPolicy && typeof data.cancellationPolicy === 'object') setCancellationPolicy(data.cancellationPolicy);
       if (data.smsConfirmation || data.smsReminder || data.smsBilling || data.smsPickupReminder || data.smsRequestReceived || data.smsDenied || data.smsPaid) {
         setSmsTemplates({
           confirmation: data.smsConfirmation ?? DEFAULT_SMS_TEMPLATES.confirmation,
@@ -613,6 +615,8 @@ export default function App() {
           requestReceived: data.smsRequestReceived ?? DEFAULT_SMS_TEMPLATES.requestReceived,
           denied: data.smsDenied ?? DEFAULT_SMS_TEMPLATES.denied,
           paid: data.smsPaid ?? DEFAULT_SMS_TEMPLATES.paid,
+          cancelled: data.smsCancelled ?? DEFAULT_SMS_TEMPLATES.cancelled,
+          cancellationFee: data.smsCancellationFee ?? DEFAULT_SMS_TEMPLATES.cancellationFee,
         });
       }
       if (data.smsFooter) setSmsFooter(data.smsFooter);
@@ -735,6 +739,7 @@ export default function App() {
     aboutPhotos, setAboutPhotos,
     smsTemplates, setSmsTemplates,
     smsFooter, setSmsFooter,
+    cancellationPolicy, setCancellationPolicy,
   };
 
   // Mutually-exclusive top-level views. Each nav function clears the
@@ -817,6 +822,7 @@ export default function App() {
           form={form} onChange={update}
           vets={vets} multiDogDiscount={multiDogDiscount}
           rate={rate} minimumStay={minimumStay} holidayUpcharge={holidayUpcharge}
+          cancellationPolicy={cancellationPolicy}
           onSubmit={handleSubmit} submitting={submitting}
           currentStay={currentStay} onNewBooking={reset}
         />

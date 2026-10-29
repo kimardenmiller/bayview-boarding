@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { googleAccessToken } from "../_shared/googleCalendar.ts";
 
 // The admin password lives only as a Supabase secret (see `supabase secrets
 // set ADMIN_PASSWORD=...`) — it is never shipped in the client JS bundle,
@@ -15,9 +16,6 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 // crash this function's module load entirely. A personal Gmail account,
 // not Workspace, so this uses a one-time-authorized OAuth refresh token
 // (see FIXES.txt for how it was generated) rather than a service account.
-const GOOGLE_CALENDAR_CLIENT_ID = Deno.env.get("GOOGLE_CALENDAR_CLIENT_ID");
-const GOOGLE_CALENDAR_CLIENT_SECRET = Deno.env.get("GOOGLE_CALENDAR_CLIENT_SECRET");
-const GOOGLE_CALENDAR_REFRESH_TOKEN = Deno.env.get("GOOGLE_CALENDAR_REFRESH_TOKEN");
 const GOOGLE_CALENDAR_ID = Deno.env.get("GOOGLE_CALENDAR_ID");
 
 const corsHeaders = {
@@ -76,7 +74,7 @@ function shapeDog(d: RawDog) {
 }
 
 const DOGS_SELECT =
-  "id, name, breed, dob, spay_neuter, aggression_history, aggression_detail, health_concerns, health_detail, owner:owners(name, phone, email), stay_dogs(name, breed, dob, spay_neuter, aggression_history, aggression_detail, health_concerns, health_detail, photo_paths, stay:stays(id, check_in, check_out, drop_time, pickup_time, notes, estimated_cost, number_of_dogs, submitted_at, waiver_snapshot, billed_at, paid_at, approval_status, approved_at, denied_at, denial_reason))";
+  "id, name, breed, dob, spay_neuter, aggression_history, aggression_detail, health_concerns, health_detail, owner:owners(name, phone, email), stay_dogs(name, breed, dob, spay_neuter, aggression_history, aggression_detail, health_concerns, health_detail, photo_paths, stay:stays(id, check_in, check_out, drop_time, pickup_time, notes, estimated_cost, number_of_dogs, submitted_at, waiver_snapshot, billed_at, paid_at, approval_status, approved_at, denied_at, denial_reason, cancelled_at, cancellation_fee, cancellation_fee_waived_at))";
 
 const DOG_PHOTOS_BUCKET = "dog-photos";
 // A dog photo's Storage bucket is private (see the Sept 21, 2026
@@ -90,26 +88,8 @@ const SIGNED_URL_TTL_SECONDS = 60 * 60;
 
 // Best-effort throughout, same reasoning as notifyOwnersOfClientText
 // (send-confirmation): a calendar hiccup should never block approving a
-// stay or saving a date/time correction. Exchanges the long-lived
-// refresh token for a fresh (1-hour) access token on every call rather
-// than caching one across requests - this function's own instance
-// doesn't live long enough for that to matter, and it keeps the logic
-// simple (no cache invalidation to get wrong).
-async function googleAccessToken(): Promise<string> {
-  const res = await fetch("https://oauth2.googleapis.com/token", {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      client_id: GOOGLE_CALENDAR_CLIENT_ID ?? "",
-      client_secret: GOOGLE_CALENDAR_CLIENT_SECRET ?? "",
-      refresh_token: GOOGLE_CALENDAR_REFRESH_TOKEN ?? "",
-      grant_type: "refresh_token",
-    }),
-  });
-  const data = await res.json();
-  if (!res.ok) throw new Error(`Google token refresh failed: ${JSON.stringify(data)}`);
-  return data.access_token as string;
-}
+// stay or saving a date/time correction. googleAccessToken lives in
+// _shared/googleCalendar.ts (Oct 29, 2026) - portal needs it too.
 
 interface CalendarEventDetails {
   dogNames: string[];
@@ -417,6 +397,19 @@ export async function handleRequest(req: Request): Promise<Response> {
       return false;
     }
 
+    // A cancelled stay's dates/cost are a closed record now, and its
+    // calendar events were deleted on cancel - billStay/editStay's
+    // calendar re-sync would otherwise quietly recreate them (Oct 29,
+    // 2026). Its fee has its own actions below instead.
+    if ((action === "billStay" || action === "editStay") && stayId) {
+      const { data: current, error: currentErr } = await supabase
+        .from("stays").select("approval_status").eq("id", stayId).single();
+      if (currentErr) throw currentErr;
+      if ((current as { approval_status: string }).approval_status === "cancelled") {
+        return json({ error: "This stay was cancelled - bill or waive its cancellation fee instead." }, 400);
+      }
+    }
+
     if (action === "billStay") {
       // "Review and edit, then send the bill" (Sept 17, 2026) - any of
       // the date/time/cost fields the admin corrected are saved here
@@ -513,6 +506,26 @@ export async function handleRequest(req: Request): Promise<Response> {
         if (await syncStayCalendarEvent(s.id, { createIfMissing: true })) backfilledCount++;
       }
       return json({ ...(await fetchDogsAndTotals()), backfilledCount });
+    } else if (action === "billCancellationFee") {
+      // A client cancelled from My Stays and owes a fee (Oct 29, 2026) -
+      // the fee text itself is sent client-side FIRST (send-confirmation
+      // type "cancellation_fee"), same "text actually went out" ordering
+      // as billStay; this just stamps billed_at, moving it from Unbilled
+      // Stays to Awaiting Payment. Mark Paid then works unchanged.
+      if (!stayId) return json({ error: "stayId is required" }, 400);
+      const { error: updateErr } = await supabase.from("stays")
+        .update({ billed_at: new Date().toISOString() })
+        .eq("id", stayId).eq("approval_status", "cancelled");
+      if (updateErr) throw updateErr;
+    } else if (action === "waiveCancellationFee") {
+      // Admin forgives the fee (e.g. an emergency) - no text, Kim/Estee
+      // tell the client personally. The amount stays on record; the stay
+      // just moves to Past Stays as "Cancelled - fee waived".
+      if (!stayId) return json({ error: "stayId is required" }, 400);
+      const { error: updateErr } = await supabase.from("stays")
+        .update({ cancellation_fee_waived_at: new Date().toISOString() })
+        .eq("id", stayId).eq("approval_status", "cancelled");
+      if (updateErr) throw updateErr;
     } else if (action === "markPaid") {
       // Just a status flip (Sept 21, 2026; a thank-you/review-request text
       // was added Sept 30, 2026, but it's sent client-side FIRST, same

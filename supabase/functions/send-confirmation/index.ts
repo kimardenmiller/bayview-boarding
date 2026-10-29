@@ -170,7 +170,7 @@ export async function handleRequest(req: Request): Promise<Response> {
     const {
       type, owner_name, owner_phone, dog_name, check_in, check_out,
       drop_time, pickup_time, estimated_cost, final_cost,
-      message_template, packing_list, billing_breakdown, denial_reason,
+      message_template, packing_list, billing_breakdown, denial_reason, cancellation_fee,
     } = JSON.parse(text);
 
     const firstName = owner_name?.split(" ")[0] || "there";
@@ -198,6 +198,11 @@ export async function handleRequest(req: Request): Promise<Response> {
       // reason was given - {denialReason} just disappears cleanly when
       // blank instead of leaving an awkward gap (Sept 21, 2026).
       denialReason: denial_reason ? ` Reason: ${denial_reason}.` : "",
+      // Same idea for a client cancelling from My Stays (Oct 29, 2026):
+      // disappears cleanly for a free cancellation.
+      cancellationFeeNote: Number(cancellation_fee) > 0
+        ? ` Per our cancellation policy, a cancellation fee of $${formatDollars(cancellation_fee)} applies - we'll text you the details.`
+        : "",
     };
 
     let message = "";
@@ -233,6 +238,14 @@ export async function handleRequest(req: Request): Promise<Response> {
       // Sent when admin marks a stay Paid (Sept 30, 2026, on request) -
       // the same fixed Google review short link sms_billing already uses.
       message = `Hi ${firstName}! We received your payment. Thank you!\n\nIf you have not done so already, please leave us a review: https://g.page/r/CX9YK-LEWX_nEAI/review\n\nThanks for choosing Bayview Boarding, and we'll see you next time!\n\n— Kim & Estee`;
+    } else if (type === "cancelled") {
+      // A client cancelled from My Stays (Oct 29, 2026).
+      message = `Hi ${firstName}! Your stay for ${dog_name} (${dropDate} - ${pickDate}) has been cancelled.${templateVars.cancellationFeeNote}\n— Kim & Estee`;
+    } else if (type === "cancellation_fee") {
+      // Admin billing that cancellation's fee (Oct 29, 2026) - its own
+      // text, since the regular billing one thanks them for a visit.
+      const breakdownBlock = billing_breakdown ? `\n${billing_breakdown}` : "";
+      message = `Hi ${firstName}! Here's the cancellation fee for ${dog_name}'s stay (${dropDate} - ${pickDate}), per our cancellation policy:${breakdownBlock}\nTotal: $${formatDollars(final_cost)}\n\n— Kim & Estee`;
     } else {
       // Default: confirmation
       message = `Hi ${firstName}! ${dog_name}'s stay at Bayview Boarding is confirmed. Drop-off: ${dropDate} at ${dropTimeStr}. Pick-up: ${pickDate} at ${pickTimeStr}. Estimated cost: $${formatDollars(estimated_cost)}. — Kim & Estee`;

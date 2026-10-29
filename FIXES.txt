@@ -1,6 +1,6 @@
 BAYVIEW BOARDING — FIX LIST
 ============================
-Last updated: October 29, 2026 (client portal phase 1 - My Stays)
+Last updated: October 29, 2026 (client portal phase 2 - cancellation)
 
 NEXT CHANGE LIST (v1.5)
 -----------------------
@@ -48,7 +48,7 @@ NEXT CHANGE LIST (v1.5)
    - Each stay: dates/times, dogs, estimate or billed amount, and the
      waiver as signed (waiver_snapshot).
 
-   Phase 2 - cancellation:
+   Phase 2 - cancellation: SHIPPED Oct 29, 2026 (v1.48.0) - see COMPLETED.
    - Pending request: always free to withdraw.
    - Approved stay: fee = a % of the stay's estimated_cost, by hours
      left before the drop-off moment (check_in + drop_time, Pacific -
@@ -91,6 +91,40 @@ DEFERRED (revisit only if it actually blocks something)
 
 COMPLETED
 ---------
+- Oct 29, 2026 (v1.48.0): Client portal phase 2 - cancellation (spec:
+  NEXT CHANGE LIST item 2). My Stays shows "Cancel stay" (approved) /
+  "Withdraw request" (pending) with the exact fee before confirming;
+  the portal function quotes and recomputes it server-side (new
+  `cancel` action; a fee that changed since the page loaded -> 409,
+  re-confirm). Pending = always free; approved = % of estimated_cost by
+  hours left before drop-off (new stay_hours_until_dropoff() SQL fn,
+  Pacific time); not cancellable online after drop-off. On cancel:
+  approval_status 'cancelled' (new 4th value) + cancelled_at +
+  cancellation_fee, the 3 calendar events deleted (_shared/
+  googleCalendar.ts, token helper moved there from admin-data), client
+  texted (new sms_cancelled template, {cancellationFeeNote}) with the
+  usual Kim/Estee copy - persisted first, text best-effort (client did
+  it themselves). Policy: settings.cancellation_policy jsonb, 3 tiers
+  (default 0%/50% within 72h/75% within 24h), editable in Admin > Site
+  Settings > Cancellation Policy, always current; shown on the booking
+  form's Stay Dates step and in My Stays. Admin: an owed fee shows in
+  Unbilled Stays ("Cancelled" badge) with Send Fee Text (new
+  sms_cancellation_fee template, admin-data billCancellationFee) / Waive
+  Fee (waiveCancellationFee, no text); billed -> Awaiting Payment with
+  Mark Paid; free/waived/paid -> Past Stays. billStay/editStay now
+  refuse a cancelled stay (their calendar re-sync would have recreated
+  the deleted events).
+  ALSO FIXED (found while doing this): due_dropoff_/
+  due_pickup_reminder_stay_ids() never checked approval_status - a
+  pending or denied stay would have been sent drop-off/pickup reminders
+  (none had been yet - checked live; Estee's pending Nov 16 test stay
+  would have been the first). Approved-only now, same migration
+  (20261029010000_stay_cancellation.sql), reminder test mocks updated.
+  Tests: 272 Jest (+14), Deno portal 22 / settings 33 / admin-data 41 /
+  send-confirmation +3 / both reminder suites +1. Note: `deno test`
+  across ALL functions at once has 1 pre-existing failure
+  (send-confirmation's fallback test - env vars leak between files in
+  one process); it passes run on its own, as every suite here is.
 - Oct 29, 2026 (v1.47.0): Client portal phase 1 ("My Stays", read-only)
   - see NEXT CHANGE LIST item 2 for the full spec. Nav menu "My Stays" +
   ?portal deep link. Login = phone + 6-digit texted code (no password),

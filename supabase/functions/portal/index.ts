@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { deleteCalendarEvent } from "../_shared/googleCalendar.ts";
 
 // Client portal ("My Stays", Oct 29, 2026, on request - see FIXES.txt
 // NEXT CHANGE LIST item 2). Public/unauthenticated like lookup-client -
@@ -17,6 +18,8 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 //   verifyCode  {phone, code}   -> {token, ownerName}
 //   stays       {token}         -> {ownerName, stays}
 //   logout      {token}         -> deletes the session
+//   cancel      {token, stayId, expectedFee} -> cancels one of their stays
+//               (phase 2, Oct 29, 2026 - see cancelStay below)
 //
 // Every stays query is scoped to the session's own owner_id - RLS stays
 // locked with zero policies on every table (service role key, server-
@@ -180,7 +183,61 @@ async function sessionOwnerId(supabase: Supabase, token: unknown): Promise<strin
 }
 
 const STAYS_SELECT =
-  "id, check_in, check_out, drop_time, pickup_time, estimated_cost, number_of_dogs, approval_status, denial_reason, billed_at, paid_at, submitted_at, waiver_snapshot, stay_dogs(name)";
+  "id, check_in, check_out, drop_time, pickup_time, estimated_cost, number_of_dogs, approval_status, denial_reason, billed_at, paid_at, submitted_at, waiver_snapshot, cancelled_at, cancellation_fee, cancellation_fee_waived_at, stay_dogs(name)";
+
+// Admin-editable in settings.cancellation_policy (see the settings
+// function for the tier rules); this is only the fallback if that read
+// fails, matching the migration's own column default.
+export interface CancellationPolicy {
+  lateHours: number;
+  lastMinuteHours: number;
+  earlyFeePercent: number;
+  lateFeePercent: number;
+  lastMinuteFeePercent: number;
+}
+export const DEFAULT_CANCELLATION_POLICY: CancellationPolicy = {
+  lateHours: 72, lastMinuteHours: 24, earlyFeePercent: 0, lateFeePercent: 50, lastMinuteFeePercent: 75,
+};
+
+// Exactly at a cutoff counts as inside it ("within 72 hours" includes 72).
+// The fee is a % of the stay's estimate, to the cent.
+export function cancellationFeeFor(policy: CancellationPolicy, hoursLeft: number, estimatedCost: number | null) {
+  const percent = hoursLeft > policy.lateHours ? policy.earlyFeePercent
+    : hoursLeft > policy.lastMinuteHours ? policy.lateFeePercent
+    : policy.lastMinuteFeePercent;
+  return { percent, fee: Math.round((Number(estimatedCost) || 0) * percent) / 100 };
+}
+
+async function loadPolicyAndTemplate(supabase: Supabase): Promise<{ policy: CancellationPolicy; template: string | null }> {
+  const { data, error } = await supabase.from("settings").select("cancellation_policy, sms_cancelled").eq("id", true).limit(1);
+  if (error) console.error("portal: couldn't read cancellation policy, using the default", error);
+  return {
+    policy: data?.[0]?.cancellation_policy ?? DEFAULT_CANCELLATION_POLICY,
+    template: data?.[0]?.sms_cancelled ?? null,
+  };
+}
+
+// Hours left before each stay's drop-off moment, computed in Postgres in
+// Pacific time (stay_hours_until_dropoff - DST-safe, same moment the
+// reminder cron uses).
+async function hoursUntilDropoff(supabase: Supabase, stayIds: string[]): Promise<Map<string, number>> {
+  if (stayIds.length === 0) return new Map();
+  const { data, error } = await supabase.rpc("stay_hours_until_dropoff", { stay_ids: stayIds });
+  if (error) throw error;
+  return new Map((data || []).map((r: { id: string; hours: number }) => [r.id, Number(r.hours)]));
+}
+
+// What cancelling right now would cost: a pending request is always free;
+// an approved one by the policy; nothing is cancellable from here once
+// drop-off has passed (contact us instead).
+function cancellationQuote(stay: { approval_status: string; estimated_cost: number | null }, hoursLeft: number | undefined, policy: CancellationPolicy) {
+  const cancellable = (stay.approval_status === "pending" || stay.approval_status === "approved") &&
+    hoursLeft !== undefined && hoursLeft > 0;
+  if (!cancellable) return { canCancel: false };
+  if (stay.approval_status === "pending") return { canCancel: true, cancelFee: 0, cancelFeePercent: 0 };
+  const { percent, fee } = cancellationFeeFor(policy, hoursLeft!, stay.estimated_cost);
+  return { canCancel: true, cancelFee: fee, cancelFeePercent: percent };
+}
 
 async function listStays(supabase: Supabase, token: unknown): Promise<Response> {
   const ownerId = await sessionOwnerId(supabase, token);
@@ -193,13 +250,103 @@ async function listStays(supabase: Supabase, token: unknown): Promise<Response> 
   if (ownerError) throw ownerError;
   if (staysError) throw staysError;
 
+  const { policy } = await loadPolicyAndTemplate(supabase);
+  // deno-lint-ignore no-explicit-any
+  const open = (stays || []).filter((s: any) => s.approval_status === "pending" || s.approval_status === "approved");
+  // deno-lint-ignore no-explicit-any
+  const hours = await hoursUntilDropoff(supabase, open.map((s: any) => s.id));
+
   return json({
     ownerName: owners?.[0]?.name ?? "",
-    stays: (stays || []).map(({ stay_dogs, ...s }: { stay_dogs?: { name: string }[] }) => ({
+    cancellationPolicy: policy,
+    // deno-lint-ignore no-explicit-any
+    stays: (stays || []).map(({ stay_dogs, ...s }: any) => ({
       ...s,
-      dogNames: (stay_dogs || []).map((d) => d.name),
+      dogNames: (stay_dogs || []).map((d: { name: string }) => d.name),
+      ...cancellationQuote(s, hours.get(s.id), policy),
     })),
   });
+}
+
+// A client cancelling their own stay (phase 2, Oct 29, 2026). The fee is
+// always recomputed here, never taken from the client - expectedFee (what
+// the portal showed them) only guards against a cutoff passing between
+// showing it and confirming: if it no longer matches, nothing changes and
+// the new fee comes back for them to re-confirm.
+//
+// Unlike admin's approve/deny/bill, this persists FIRST and texts after,
+// best-effort: the client did this themselves and sees the result on
+// screen, so a Twilio hiccup shouldn't make the cancellation itself fail.
+// send-confirmation copies Kim & Estee on the text as usual.
+async function cancelStay(supabase: Supabase, token: unknown, stayId: unknown, expectedFee: unknown): Promise<Response> {
+  const ownerId = await sessionOwnerId(supabase, token);
+  if (!ownerId) return json({ error: "Your login has expired. Please log in again.", expired: true }, 401);
+  if (typeof stayId !== "string" || !stayId) return json({ error: "stayId is required" }, 400);
+
+  const { data: rows, error } = await supabase
+    .from("stays")
+    .select("id, approval_status, estimated_cost, check_in, check_out, calendar_allday_event_id, calendar_dropoff_event_id, calendar_pickup_event_id, owners(name, phone), stay_dogs(name)")
+    .eq("id", stayId).eq("owner_id", ownerId).limit(1);
+  if (error) throw error;
+  const stay = rows?.[0];
+  // Someone else's stay looks exactly like a missing one.
+  if (!stay) return json({ error: "Stay not found." }, 404);
+
+  const { policy, template } = await loadPolicyAndTemplate(supabase);
+  const hours = await hoursUntilDropoff(supabase, [stay.id]);
+  const quote = cancellationQuote(stay, hours.get(stay.id), policy);
+  if (!quote.canCancel) {
+    return json({ error: "This stay can't be cancelled online any more. Please text us instead." }, 400);
+  }
+  if (expectedFee !== undefined && Math.abs(Number(expectedFee) - quote.cancelFee!) > 0.005) {
+    return json({
+      error: "The cancellation fee has changed since you opened this page. Please review it and confirm again.",
+      cancelFee: quote.cancelFee, cancelFeePercent: quote.cancelFeePercent,
+    }, 409);
+  }
+
+  // Conditional on the status we just checked, so a simultaneous admin
+  // approve/deny (or a double tap) can't be overwritten.
+  const { data: updated, error: updateErr } = await supabase
+    .from("stays")
+    .update({ approval_status: "cancelled", cancelled_at: new Date().toISOString(), cancellation_fee: quote.cancelFee })
+    .eq("id", stay.id).eq("approval_status", stay.approval_status)
+    .select("id");
+  if (updateErr) throw updateErr;
+  if (!updated?.length) return json({ error: "This stay just changed. Please refresh and try again." }, 409);
+
+  // Off the calendar - only the ids actually deleted get cleared, so a
+  // failed delete still leaves a trail to the stale event.
+  const cleared: Record<string, null> = {};
+  for (const column of ["calendar_allday_event_id", "calendar_dropoff_event_id", "calendar_pickup_event_id"]) {
+    if (stay[column] && await deleteCalendarEvent(stay[column])) cleared[column] = null;
+  }
+  if (Object.keys(cleared).length > 0) {
+    const { error: clearErr } = await supabase.from("stays").update(cleared).eq("id", stay.id);
+    if (clearErr) console.error("portal: deleted calendar events but couldn't clear their ids", clearErr);
+  }
+
+  let textSent = false;
+  try {
+    const res = await fetch(`${SUPABASE_URL}/functions/v1/send-confirmation`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}` },
+      body: JSON.stringify({
+        type: "cancelled",
+        owner_name: stay.owners?.name, owner_phone: stay.owners?.phone,
+        dog_name: (stay.stay_dogs || []).map((d: { name: string }) => d.name).join(" & "),
+        check_in: stay.check_in, check_out: stay.check_out,
+        cancellation_fee: quote.cancelFee,
+        message_template: template,
+      }),
+    });
+    textSent = res.ok;
+    if (!res.ok) console.error("portal: cancellation text failed", await res.text());
+  } catch (err) {
+    console.error("portal: cancellation text failed", err);
+  }
+
+  return json({ success: true, cancelFee: quote.cancelFee, textSent });
 }
 
 export async function handleRequest(req: Request): Promise<Response> {
@@ -207,12 +354,13 @@ export async function handleRequest(req: Request): Promise<Response> {
   if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
 
   try {
-    const { action, phone, code, token } = await req.json();
+    const { action, phone, code, token, stayId, expectedFee } = await req.json();
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
     if (action === "requestCode") return await requestCode(supabase, normalizePhone(phone));
     if (action === "verifyCode") return await verifyCode(supabase, normalizePhone(phone), code);
     if (action === "stays") return await listStays(supabase, token);
+    if (action === "cancel") return await cancelStay(supabase, token, stayId, expectedFee);
     if (action === "logout") {
       if (typeof token === "string" && token) {
         await supabase.from("portal_sessions").delete().eq("token_hash", await sha256Hex(token));

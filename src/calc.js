@@ -290,5 +290,17 @@ export function groupPortalStays(stays, today) {
     upcoming: approved.filter(s => s.check_out >= today).sort(byCheckIn),
     past: approved.filter(s => s.check_out < today).sort((a, b) => byCheckIn(b, a)),
     declined: stays.filter(s => s.approval_status === 'denied').sort((a, b) => byCheckIn(b, a)),
+    cancelled: stays.filter(s => s.approval_status === 'cancelled').sort((a, b) => byCheckIn(b, a)),
   };
+}
+
+// One plain-English line for the 3-tier cancellation policy (Oct 29,
+// 2026), shown on the booking form and in My Stays - e.g. "Free
+// cancellation more than 72 hours before drop-off · 50% fee within 72
+// hours · 75% fee within 24 hours".
+export function formatCancellationPolicy(p) {
+  const early = p.earlyFeePercent > 0
+    ? `${p.earlyFeePercent}% fee more than ${p.lateHours} hours before drop-off`
+    : `Free cancellation more than ${p.lateHours} hours before drop-off`;
+  return `${early} · ${p.lateFeePercent}% fee within ${p.lateHours} hours · ${p.lastMinuteFeePercent}% fee within ${p.lastMinuteHours} hours`;
 }

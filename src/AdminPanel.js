@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { supabase } from './supabase';
-import { formatDate, calcAge, calcCostBreakdown, formatCostBreakdownText, formatMoney } from './calc';
+import { formatDate, calcAge, calcCostBreakdown, formatCostBreakdownText, formatMoney, formatCancellationPolicy } from './calc';
 import { DEFAULT_BROADCAST_MESSAGE, DEFAULT_SMS_FOOTER, DEFAULT_SMS_TEMPLATES, FEEDBACK_STATUSES } from './defaults';
 import CostBreakdown from './CostBreakdown';
 import Field from './Field';
@@ -15,12 +15,26 @@ import aboutPhotoSrc from './aboutPhotoSrc';
 // someone actually opens the nav menu's "Admin" item or lands on the
 // bookmarked ?admin URL.
 
+// The cancellation policy editor's 5 number fields, as input strings.
+const POLICY_FIELDS = ['lateHours', 'lastMinuteHours', 'earlyFeePercent', 'lateFeePercent', 'lastMinuteFeePercent'];
+function policyToStrings(policy) {
+  return Object.fromEntries(POLICY_FIELDS.map(k => [k, String(policy[k])]));
+}
+
+// A cancelled stay (Oct 29, 2026 - a client cancelled from My Stays)
+// either owes a fee or doesn't: none was charged, it was waived, or it's
+// been paid. Only an owed one shows up in Unbilled Stays/Awaiting Payment.
+function cancellationFeeOwed(s) {
+  return s.approval_status === 'cancelled' && Number(s.cancellation_fee) > 0 && !s.cancellation_fee_waived_at;
+}
+
 export default function AdminView({
   onClose, rate, setRate, minimumStay, setMinimumStay, multiDogDiscount, setMultiDogDiscount,
   holidayUpcharge, setHolidayUpcharge, vets, setVets,
   packingList, setPackingList, aboutPhotos, setAboutPhotos,
   smsTemplates, setSmsTemplates,
   smsFooter, setSmsFooter,
+  cancellationPolicy, setCancellationPolicy,
 }) {
   const [pw, setPw] = useState('');
   const [authed, setAuthed] = useState(false);
@@ -51,6 +65,7 @@ export default function AdminView({
   const [deletingPhotoPath, setDeletingPhotoPath] = useState(null);
   const [photoActionError, setPhotoActionError] = useState('');
   const [editSms, setEditSms] = useState(smsTemplates);
+  const [editPolicy, setEditPolicy] = useState(() => policyToStrings(cancellationPolicy));
   const [editSmsFooter, setEditSmsFooter] = useState(smsFooter);
   // Manager phone numbers (Sept 18, 2026) - unlike every other field
   // here, these are never in the public settings fetch (see
@@ -192,6 +207,7 @@ export default function AdminView({
     setEditAboutPhotos(aboutPhotos);
     setEditSms(smsTemplates);
     setEditSmsFooter(smsFooter);
+    setEditPolicy(policyToStrings(cancellationPolicy));
   }
 
   // Shared save path for every settings field below - persists to
@@ -235,6 +251,10 @@ export default function AdminView({
       setAboutPhotos(data.aboutPhotos);
       setEditAboutPhotos(data.aboutPhotos);
     }
+    if (data.cancellationPolicy) {
+      setCancellationPolicy(data.cancellationPolicy);
+      setEditPolicy(policyToStrings(data.cancellationPolicy));
+    }
     if (data.smsConfirmation || data.smsReminder || data.smsBilling || data.smsPickupReminder || data.smsRequestReceived || data.smsDenied || data.smsPaid) {
       const next = {
         confirmation: data.smsConfirmation ?? smsTemplates.confirmation,
@@ -244,6 +264,8 @@ export default function AdminView({
         requestReceived: data.smsRequestReceived ?? smsTemplates.requestReceived,
         denied: data.smsDenied ?? smsTemplates.denied,
         paid: data.smsPaid ?? smsTemplates.paid,
+        cancelled: data.smsCancelled ?? smsTemplates.cancelled,
+        cancellationFee: data.smsCancellationFee ?? smsTemplates.cancellationFee,
       };
       setSmsTemplates(next);
       setEditSms(next);
@@ -545,6 +567,59 @@ export default function AdminView({
     setTotalStays(data.totalStays);
   }
 
+  // A client cancelled and owes a fee (Oct 29, 2026): same "text FIRST,
+  // then persist" ordering as sendBill, with its own fee text (the regular
+  // billing one thanks them for a visit) and a one-line breakdown instead
+  // of the stay's nightly math. billCancellationFee just stamps billed_at.
+  async function sendCancellationFee(stay) {
+    setSendingBillId(stay.id);
+    setBillingSendStatus(prev => ({ ...prev, [stay.id]: null }));
+    const fee = Number(stay.cancellation_fee);
+    const pct = stay.estimated_cost ? Math.round((fee / Number(stay.estimated_cost)) * 100) : null;
+    const { data: smsData, error: smsErr } = await supabase.functions.invoke('send-confirmation', {
+      body: {
+        type: 'cancellation_fee', owner_name: stay.ownerName, owner_phone: stay.ownerPhone,
+        dog_name: stay.dogNames.join(' & '), check_in: stay.check_in, check_out: stay.check_out,
+        final_cost: fee, message_template: smsTemplates.cancellationFee,
+        billing_breakdown: pct !== null
+          ? `Cancellation fee: ${pct}% of your $${formatMoney(stay.estimated_cost)} estimate = $${formatMoney(fee)}`
+          : `Cancellation fee: $${formatMoney(fee)}`,
+      },
+    });
+    if (smsErr || smsData?.error) {
+      setSendingBillId(null);
+      setBillingSendStatus(prev => ({ ...prev, [stay.id]: 'Failed to send. Please try again.' }));
+      return;
+    }
+    const { data, error: fnError } = await supabase.functions.invoke('admin-data', {
+      body: { password: pw, action: 'billCancellationFee', stayId: stay.id },
+    });
+    setSendingBillId(null);
+    if (fnError || data?.error) {
+      setBillingSendStatus(prev => ({ ...prev, [stay.id]: 'Sent, but failed to save - it may show as unbilled again.' }));
+      return;
+    }
+    setDogs(data.dogs);
+    setTotalStays(data.totalStays);
+  }
+
+  // No text - waiving is a personal call (e.g. an emergency), so Kim or
+  // Estee tells the client themselves. Moves the stay to Past Stays.
+  async function waiveCancellationFee(stay) {
+    setSendingBillId(stay.id);
+    setBillingSendStatus(prev => ({ ...prev, [stay.id]: null }));
+    const { data, error: fnError } = await supabase.functions.invoke('admin-data', {
+      body: { password: pw, action: 'waiveCancellationFee', stayId: stay.id },
+    });
+    setSendingBillId(null);
+    if (fnError || data?.error) {
+      setBillingSendStatus(prev => ({ ...prev, [stay.id]: 'Failed to waive. Please try again.' }));
+      return;
+    }
+    setDogs(data.dogs);
+    setTotalStays(data.totalStays);
+  }
+
   // Saves a stay's corrected dates/times/estimated cost via admin-data's
   // editStay action - unlike billStay/approveRequest/denyRequest below,
   // this never sends any SMS and never touches approval_status/
@@ -771,7 +846,7 @@ export default function AdminView({
   const unbilledByStayId = new Map();
   dogs.forEach(d => {
     (d.stays || []).forEach(s => {
-      if (s.approval_status === 'approved' && !s.billed_at) {
+      if ((s.approval_status === 'approved' || cancellationFeeOwed(s)) && !s.billed_at) {
         if (unbilledByStayId.has(s.id)) {
           const entry = unbilledByStayId.get(s.id);
           entry.dogNames.push(d.name);
@@ -796,7 +871,7 @@ export default function AdminView({
   const awaitingPaymentByStayId = new Map();
   dogs.forEach(d => {
     (d.stays || []).forEach(s => {
-      if (s.approval_status === 'approved' && s.billed_at && !s.paid_at) {
+      if ((s.approval_status === 'approved' || cancellationFeeOwed(s)) && s.billed_at && !s.paid_at) {
         if (awaitingPaymentByStayId.has(s.id)) {
           const entry = awaitingPaymentByStayId.get(s.id);
           entry.dogNames.push(d.name);
@@ -831,7 +906,8 @@ export default function AdminView({
     (d.stays || []).forEach(s => {
       const isPaid = s.approval_status === 'approved' && s.billed_at && s.paid_at;
       const isDenied = s.approval_status === 'denied';
-      if (!isPaid && !isDenied) return;
+      const isSettledCancellation = s.approval_status === 'cancelled' && (!cancellationFeeOwed(s) || s.paid_at);
+      if (!isPaid && !isDenied && !isSettledCancellation) return;
       if (!pastStaysByOwnerPhone.has(phone)) {
         pastStaysByOwnerPhone.set(phone, { ownerName: d.owner?.name, ownerPhone: phone, staysById: new Map() });
       }
@@ -1062,6 +1138,9 @@ export default function AdminView({
             {s.approval_status === 'denied' && (
               <span className="stay-flag" style={{ marginLeft: 8, verticalAlign: 'middle' }}>Rejected</span>
             )}
+            {s.approval_status === 'cancelled' && (
+              <span className="stay-flag" style={{ marginLeft: 8, verticalAlign: 'middle' }}>Cancelled</span>
+            )}
             {s.paid_at && (
               <span className="stay-paid-badge" style={{ marginLeft: 8, verticalAlign: 'middle' }}>Paid</span>
             )}
@@ -1089,18 +1168,32 @@ export default function AdminView({
                 ))}
               </div>
             )}
+            {s.approval_status === 'cancelled' && (
+              <div className="stay-meta">
+                Cancelled by the client{s.cancelled_at ? ` on ${formatDate(s.cancelled_at.slice(0, 10))}` : ''} · {
+                  Number(s.cancellation_fee) > 0
+                    ? `Cancellation fee: $${formatMoney(s.cancellation_fee)} of a $${formatMoney(s.estimated_cost)} estimate${s.cancellation_fee_waived_at ? ' (waived)' : ''}`
+                    : 'No cancellation fee'
+                }
+              </div>
+            )}
             {!isEditing ? (
               <>
                 <div className="stay-meta">
                   Drop-off: {billingFieldFor(s, 'dropTime', s.drop_time ? s.drop_time.slice(0, 5) : '') || '—'} · Pickup: {billingFieldFor(s, 'pickupTime', s.pickup_time ? s.pickup_time.slice(0, 5) : '') || '—'}
                 </div>
-                <div className="stay-meta">
-                  {s.paid_at ? 'Paid cost' : s.billed_at ? 'Billed cost' : 'Estimated cost'}: {(() => {
-                    const fc = billingFieldFor(s, 'finalCost', s.estimated_cost != null ? String(s.estimated_cost) : '');
-                    return fc ? `$${formatMoney(fc)}` : '—';
-                  })()}
-                </div>
-                <CostBreakdown breakdown={breakdown} multiDogDiscount={multiDogDiscount} />
+                {/* A cancelled stay's money is its fee (shown above), not the stay's own cost. */}
+                {s.approval_status !== 'cancelled' && (
+                  <>
+                    <div className="stay-meta">
+                      {s.paid_at ? 'Paid cost' : s.billed_at ? 'Billed cost' : 'Estimated cost'}: {(() => {
+                        const fc = billingFieldFor(s, 'finalCost', s.estimated_cost != null ? String(s.estimated_cost) : '');
+                        return fc ? `$${formatMoney(fc)}` : '—';
+                      })()}
+                    </div>
+                    <CostBreakdown breakdown={breakdown} multiDogDiscount={multiDogDiscount} />
+                  </>
+                )}
                 {s.perDog.map((pd, i) => (
                   <div key={i}>
                     {(pd.breed || pd.dob) && (
@@ -1174,6 +1267,39 @@ export default function AdminView({
                   <button className="btn-secondary" style={{ padding: '4px 10px', fontSize: '0.78rem' }} onClick={() => recalculateBilling(s)}>Recalculate</button>
                 </div>
               </>
+            )}
+            {cancellationFeeOwed(s) && !s.paid_at && (
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 8, flexWrap: 'wrap' }}>
+                <button
+                  className="btn-primary"
+                  style={{ padding: '4px 10px', fontSize: '0.78rem' }}
+                  disabled={sendingBillId === s.id}
+                  onClick={() => sendCancellationFee(s)}
+                >
+                  {sendingBillId === s.id ? 'Sending...' : s.billed_at ? 'Resend Fee Text' : 'Send Fee Text'}
+                </button>
+                {!s.billed_at && (
+                  <button className="btn-secondary" style={{ padding: '4px 10px', fontSize: '0.78rem' }} disabled={sendingBillId === s.id} onClick={() => waiveCancellationFee(s)}>
+                    Waive Fee
+                  </button>
+                )}
+                {s.billed_at && (
+                  <button
+                    className="btn-primary"
+                    style={{ padding: '4px 10px', fontSize: '0.78rem', background: '#7D9B76' }}
+                    disabled={markingPaidId === s.id}
+                    onClick={() => markPaid(s)}
+                  >
+                    {markingPaidId === s.id ? 'Saving...' : 'Mark Paid'}
+                  </button>
+                )}
+                {billingSendStatus[s.id] && (
+                  <span className="field-error" style={{ fontSize: '0.78rem' }}>{billingSendStatus[s.id]}</span>
+                )}
+                {paidStatus[s.id] && (
+                  <span className="field-error" style={{ fontSize: '0.78rem' }}>{paidStatus[s.id]}</span>
+                )}
+              </div>
             )}
             {s.approval_status === 'approved' && !s.paid_at && (
               <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 8, flexWrap: 'wrap' }}>
@@ -1499,6 +1625,46 @@ export default function AdminView({
           <div style={{ fontSize: '0.75rem', color: '#6B7A8A', marginTop: 4 }}>On holiday nights (New Year's, MLK, Ski Week, etc.) · Current: {holidayUpcharge * 100}%</div>
         </div>
 
+        {/* Client portal cancellation policy (Oct 29, 2026) - exactly 3
+            tiers, counted back from drop-off; the fee is a % of the stay's
+            estimate. Always the current policy, applied when the client
+            cancels (no per-stay snapshot). */}
+        <div className="rate-setting cancellation-policy-editor">
+          <label className="field-label">Cancellation Policy</label>
+          {[
+            { label: 'More than', hoursKey: 'lateHours', feeKey: 'earlyFeePercent' },
+            { label: 'Within', hoursKey: 'lateHours', feeKey: 'lateFeePercent' },
+            { label: 'Within', hoursKey: 'lastMinuteHours', feeKey: 'lastMinuteFeePercent' },
+          ].map(({ label, hoursKey, feeKey }, i) => (
+            <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 6, flexWrap: 'wrap' }}>
+              <span style={{ width: 70 }}>{label}</span>
+              <input
+                type="number" aria-label={`Tier ${i + 1} hours`}
+                value={editPolicy[hoursKey]}
+                onChange={e => setEditPolicy(p => ({ ...p, [hoursKey]: e.target.value }))}
+                style={{ width: 70, padding: '6px 10px', border: '1.5px solid #D5D9DE', borderRadius: 6, fontSize: '0.95rem' }}
+              />
+              <span>hours before drop-off:</span>
+              <input
+                type="number" aria-label={`Tier ${i + 1} fee percent`}
+                value={editPolicy[feeKey]}
+                onChange={e => setEditPolicy(p => ({ ...p, [feeKey]: e.target.value }))}
+                style={{ width: 70, padding: '6px 10px', border: '1.5px solid #D5D9DE', borderRadius: 6, fontSize: '0.95rem' }}
+              />
+              <span>% fee</span>
+            </div>
+          ))}
+          <button
+            className="btn-primary" style={{ padding: '6px 14px' }} disabled={savingSettings}
+            onClick={() => saveSettings({ cancellationPolicy: Object.fromEntries(POLICY_FIELDS.map(k => [k, Number(editPolicy[k])])) })}
+          >
+            Save Cancellation Policy
+          </button>
+          <div style={{ fontSize: '0.75rem', color: '#6B7A8A', marginTop: 4 }}>
+            Fee is a % of the stay's estimate. A pending request can always be withdrawn free. Current: {formatCancellationPolicy(cancellationPolicy)}
+          </div>
+        </div>
+
         <div className="rate-setting vet-editor">
           <label className="field-label">Vet Clinics (booking form dropdown)</label>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 8 }}>
@@ -1638,7 +1804,7 @@ export default function AdminView({
         <div className="rate-setting sms-editor">
           <label className="field-label">SMS Message Templates</label>
           <div style={{ fontSize: '0.72rem', color: '#6B7A8A', marginBottom: 10 }}>
-            Placeholders: {'{firstName} {dogName} {dogVerb} {dropDate} {dropTime} {pickDate} {pickTime} {estimatedCost} {finalCost} {billingBreakdown} {packingList} {primaryManagerPhone} {secondaryManagerPhone} {denialReason} (Booking Declined only)'}
+            Placeholders: {'{firstName} {dogName} {dogVerb} {dropDate} {dropTime} {pickDate} {pickTime} {estimatedCost} {finalCost} {billingBreakdown} {packingList} {primaryManagerPhone} {secondaryManagerPhone} {denialReason} (Booking Declined only) {cancellationFeeNote} (Stay Cancelled only)'}
           </div>
 
           <div className="text-footer-editor" style={{ marginBottom: 12 }}>
@@ -1713,6 +1879,8 @@ export default function AdminView({
             { key: 'pickupReminder', label: 'Pickup Reminder' },
             { key: 'billing', label: 'Billing' },
             { key: 'paid', label: 'Payment Received' },
+            { key: 'cancelled', label: 'Stay Cancelled (by client)' },
+            { key: 'cancellationFee', label: 'Cancellation Fee Bill' },
           ].map(({ key, label }) => (
             <div key={key} style={{ marginBottom: 12 }}>
               <div style={{ fontSize: '0.8rem', fontWeight: 500, color: '#2C3E50', marginBottom: 4 }}>{label}</div>

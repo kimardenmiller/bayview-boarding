@@ -22,6 +22,9 @@ const DEFAULT_ROW = {
   sms_request_received: 'Hi {firstName}! Request received for {dogName}.',
   sms_denied: 'Hi {firstName}! Sorry, we can\'t take {dogName}.{denialReason}',
   sms_paid: 'Hi {firstName}! Payment received, thanks!',
+  sms_cancelled: 'Hi {firstName}! Cancelled.{cancellationFeeNote}',
+  sms_cancellation_fee: 'Hi {firstName}! Fee: ${finalCost}.',
+  cancellation_policy: { lateHours: 72, lastMinuteHours: 24, earlyFeePercent: 0, lateFeePercent: 50, lastMinuteFeePercent: 75 },
   about_photos: [{ path: 'abc123.jpg', alt: 'Choco' }, { path: 'def456.jpg', alt: 'Milo' }],
   primary_manager_phone: '4155550101',
   secondary_manager_phone: '4155550102',
@@ -106,6 +109,9 @@ Deno.test('a plain read requires no password (public) and never includes the man
       smsRequestReceived: DEFAULT_ROW.sms_request_received,
       smsDenied: DEFAULT_ROW.sms_denied,
       smsPaid: DEFAULT_ROW.sms_paid,
+      smsCancelled: DEFAULT_ROW.sms_cancelled,
+      smsCancellationFee: DEFAULT_ROW.sms_cancellation_fee,
+      cancellationPolicy: DEFAULT_ROW.cancellation_policy,
       aboutPhotos: DEFAULT_ROW.about_photos,
     });
     assertEquals('primaryManagerPhone' in data, false);
@@ -450,6 +456,57 @@ Deno.test('updates the payment-received template, trimming it', async () => {
     assertEquals(res.status, 200);
     const data = await res.json();
     assertEquals(data.smsPaid, 'New paid text {firstName}');
+  } finally {
+    stub.restore();
+  }
+});
+
+Deno.test('updates the cancellation policy (Oct 29, 2026), keeping only its 5 known fields', async () => {
+  const stub = stubSupabase();
+  try {
+    const policy = { lateHours: 96, lastMinuteHours: 48, earlyFeePercent: 10, lateFeePercent: 60, lastMinuteFeePercent: 100 };
+    const res = await handleRequest(postRequest({ password: ADMIN_PASSWORD, updates: { cancellationPolicy: { ...policy, extra: 'dropped' } } }));
+    assertEquals(res.status, 200);
+    assertEquals((await res.json()).cancellationPolicy, policy);
+  } finally {
+    stub.restore();
+  }
+});
+
+Deno.test('rejects a cancellation policy with out-of-order hours or a percent outside 0-100', async () => {
+  const stub = stubSupabase();
+  try {
+    const good = { lateHours: 72, lastMinuteHours: 24, earlyFeePercent: 0, lateFeePercent: 50, lastMinuteFeePercent: 75 };
+    for (const bad of [
+      { ...good, lateHours: 24, lastMinuteHours: 72 },
+      { ...good, lastMinuteHours: 0 },
+      { ...good, lateFeePercent: 120 },
+      { ...good, earlyFeePercent: -5 },
+      { ...good, lastMinuteFeePercent: '75' },
+      null,
+    ]) {
+      const res = await handleRequest(postRequest({ password: ADMIN_PASSWORD, updates: { cancellationPolicy: bad } }));
+      assertEquals(res.status, 400, JSON.stringify(bad));
+    }
+  } finally {
+    stub.restore();
+  }
+});
+
+Deno.test('updates the 2 cancellation templates, trimming them, and rejects blank ones', async () => {
+  const stub = stubSupabase();
+  try {
+    const res = await handleRequest(postRequest({
+      password: ADMIN_PASSWORD,
+      updates: { smsCancelled: '  Cancelled {dogName}  ', smsCancellationFee: '  Fee ${finalCost}  ' },
+    }));
+    const data = await res.json();
+    assertEquals(data.smsCancelled, 'Cancelled {dogName}');
+    assertEquals(data.smsCancellationFee, 'Fee ${finalCost}');
+    for (const key of ['smsCancelled', 'smsCancellationFee']) {
+      const blank = await handleRequest(postRequest({ password: ADMIN_PASSWORD, updates: { [key]: '  ' } }));
+      assertEquals(blank.status, 400);
+    }
   } finally {
     stub.restore();
   }

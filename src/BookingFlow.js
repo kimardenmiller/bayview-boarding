@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { supabase } from './supabase';
 import { WAIVER_SECTIONS } from './waiver';
-import { formatDate, calcAge, todayISO, calcCostBreakdown, formatMoney, emptyDog, dogIsComplete, vetDropdownOptions } from './calc';
+import { formatDate, calcAge, todayISO, calcCostBreakdown, formatMoney, emptyDog, dogIsComplete, vetDropdownOptions, formatCancellationPolicy } from './calc';
 import CostBreakdown from './CostBreakdown';
 import Field from './Field';
 
@@ -354,7 +354,7 @@ function StepDogPage({ data, onChange, index, onNext, onBack }) {
   );
 }
 
-function StepDates({ data, onChange, onNext, onBack, rate, minimumStay, multiDogDiscount, holidayUpcharge }) {
+function StepDates({ data, onChange, onNext, onBack, rate, minimumStay, multiDogDiscount, holidayUpcharge, cancellationPolicy }) {
   const [errors, setErrors] = useState({});
 
   function getErrors() {
@@ -423,6 +423,9 @@ function StepDates({ data, onChange, onNext, onBack, rate, minimumStay, multiDog
             {data.dogs.length > 1 && ` · ${multiDogDiscount * 100}% off each additional dog`}
             {' '}· Final invoice at pickup
           </div>
+          {cancellationPolicy && (
+            <div className="cost-note">Cancellation policy: {formatCancellationPolicy(cancellationPolicy)}. A request can be withdrawn free until it's confirmed.</div>
+          )}
         </div>
       )}
       <Field label="Notes (medications, feeding schedule, special instructions)">
@@ -548,7 +551,7 @@ function Confirmation({ stay, onNewBooking }) {
 // this component is pure presentation/step-routing over what it's given.
 export default function BookingFlow({
   onTitleClick, step, setStep, submitted, form, onChange, vets,
-  multiDogDiscount, rate, minimumStay, holidayUpcharge,
+  multiDogDiscount, rate, minimumStay, holidayUpcharge, cancellationPolicy,
   onSubmit, submitting, currentStay, onNewBooking,
 }) {
   return (
@@ -577,6 +580,7 @@ export default function BookingFlow({
                 minimumStay={minimumStay}
                 multiDogDiscount={multiDogDiscount}
                 holidayUpcharge={holidayUpcharge}
+                cancellationPolicy={cancellationPolicy}
               />
             )}
             {step === 2 && <StepWaiver onNext={() => setStep(step + 1)} onBack={() => setStep(step - 1)} />}

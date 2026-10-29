@@ -1,7 +1,7 @@
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import App from './App';
-import { formatDate, calcAge, calcCost, calcCostBreakdown, formatCostBreakdownText, isHolidayNight, getHolidayWindows, todayISO, formatMoney, isoFromLocalDate, formatTime12h, groupPortalStays } from './calc';
+import { formatDate, calcAge, calcCost, calcCostBreakdown, formatCostBreakdownText, isHolidayNight, getHolidayWindows, todayISO, formatMoney, isoFromLocalDate, formatTime12h, groupPortalStays, formatCancellationPolicy } from './calc';
 import { supabase } from './supabase';
 import { SETTINGS } from './settings';
 
@@ -59,6 +59,9 @@ const DEFAULT_SETTINGS = {
   smsRequestReceived: 'Hi {firstName}! Request received for {dogName}.',
   smsDenied: 'Hi {firstName}! Sorry, we can\'t take {dogName}.{denialReason}',
   smsPaid: 'Hi {firstName}! Payment received, thanks!',
+  smsCancelled: 'Hi {firstName}! Cancelled {dogName}.{cancellationFeeNote}',
+  smsCancellationFee: 'Hi {firstName}! Fee for {dogName}: ${finalCost}.',
+  cancellationPolicy: { lateHours: 72, lastMinuteHours: 24, earlyFeePercent: 0, lateFeePercent: 50, lastMinuteFeePercent: 75 },
   primaryManagerPhone: '4155550101',
   secondaryManagerPhone: '4155550102',
   defaultBroadcastMessage: 'We just shipped something new - come try it on staging!',
@@ -3558,6 +3561,35 @@ describe('groupPortalStays', () => {
     expect(groups.past.map(s => s.id)).toEqual(['past-new', 'past-old']);
     expect(groups.declined.map(s => s.id)).toEqual(['denied']);
   });
+
+  test('cancelled stays get their own group, newest first (phase 2)', () => {
+    const groups = groupPortalStays([
+      stay('c-old', 'cancelled', '2026-01-01', '2026-01-02'),
+      stay('c-new', 'cancelled', '2026-12-01', '2026-12-02'),
+    ], '2026-10-29');
+    expect(groups.cancelled.map(s => s.id)).toEqual(['c-new', 'c-old']);
+    expect(groups.upcoming).toEqual([]);
+  });
+});
+
+describe('formatCancellationPolicy', () => {
+  const policy = { lateHours: 72, lastMinuteHours: 24, earlyFeePercent: 0, lateFeePercent: 50, lastMinuteFeePercent: 75 };
+  test('reads the 3 tiers in plain English, calling a 0% first tier "free"', () => {
+    expect(formatCancellationPolicy(policy)).toBe('Free cancellation more than 72 hours before drop-off · 50% fee within 72 hours · 75% fee within 24 hours');
+    expect(formatCancellationPolicy({ ...policy, earlyFeePercent: 10 })).toBe('10% fee more than 72 hours before drop-off · 50% fee within 72 hours · 75% fee within 24 hours');
+  });
+
+  test('is shown on the booking form\'s Stay Dates step, under the estimate', async () => {
+    await fillStep1();
+    await fillStep2();
+    const dateInputs = document.querySelectorAll('input[type="date"]');
+    fireEvent.change(dateInputs[0], { target: { value: STAY_CHECK_IN_ISO } });
+    fireEvent.change(dateInputs[1], { target: { value: STAY_CHECK_OUT_ISO } });
+    const timeInputs = document.querySelectorAll('input[type="time"]');
+    fireEvent.change(timeInputs[0], { target: { value: '09:00' } });
+    fireEvent.change(timeInputs[1], { target: { value: '09:00' } });
+    expect(await screen.findByText(/Cancellation policy: Free cancellation more than 72 hours before drop-off/)).toBeInTheDocument();
+  });
 });
 
 describe('My Stays (client portal, Oct 29, 2026)', () => {
@@ -3686,5 +3718,197 @@ describe('My Stays (client portal, Oct 29, 2026)', () => {
     expect(await screen.findByText('Text Me a Code')).toBeInTheDocument();
     expect(calls[calls.length - 1]).toEqual({ action: 'logout', token: TOKEN });
     expect(localStorage.getItem('bayviewPortalToken')).toBeNull();
+  });
+});
+
+describe('My Stays — cancelling (client portal phase 2, Oct 29, 2026)', () => {
+  const TOKEN = 'portal-session-token';
+  const POLICY = { lateHours: 72, lastMinuteHours: 24, earlyFeePercent: 0, lateFeePercent: 50, lastMinuteFeePercent: 75 };
+  const base = { check_out: '2099-01-12', drop_time: '09:00:00', pickup_time: '17:00:00', dogNames: ['Rex'] };
+
+  // Mimics the portal function: a cancel moves the stay to cancelled with
+  // whatever fee it was quoted, unless `feeNowIs` says the fee has changed.
+  function mockPortalCancel({ stays, feeNowIs } = {}) {
+    let current = stays;
+    const calls = [];
+    mockInvokeDefaults({
+      portal: async ({ body }) => {
+        calls.push(body);
+        if (body.action === 'stays') return { data: { ownerName: 'Jane Smith', cancellationPolicy: POLICY, stays: current }, error: null };
+        if (body.action === 'cancel') {
+          const target = current.find(x => x.id === body.stayId);
+          if (feeNowIs !== undefined && feeNowIs !== body.expectedFee) {
+            return { data: null, error: { context: { json: async () => ({ error: 'The cancellation fee has changed since you opened this page. Please review it and confirm again.', cancelFee: feeNowIs, cancelFeePercent: 75 }) } } };
+          }
+          current = current.map(x => (x.id === target.id ? { ...x, approval_status: 'cancelled', cancellation_fee: body.expectedFee, canCancel: false } : x));
+          return { data: { success: true, cancelFee: body.expectedFee, textSent: true }, error: null };
+        }
+        return { data: { success: true }, error: null };
+      },
+    });
+    return calls;
+  }
+
+  async function openPortal() {
+    localStorage.setItem('bayviewPortalToken', TOKEN);
+    window.history.pushState({}, '', '/?portal');
+    render(<App />);
+    await screen.findByText('Hi Jane!');
+  }
+
+  beforeEach(() => { localStorage.clear(); });
+
+  test('shows the current policy under the list', async () => {
+    mockPortalCancel({ stays: [] });
+    await openPortal();
+    expect(screen.getByText(/Cancellation policy: Free cancellation more than 72 hours before drop-off · 50% fee within 72 hours · 75% fee within 24 hours, counted back/)).toBeInTheDocument();
+  });
+
+  test('cancelling an approved stay shows its fee first, then cancels it and moves it to Cancelled', async () => {
+    const calls = mockPortalCancel({
+      stays: [{ ...base, id: 'up', approval_status: 'approved', check_in: '2099-01-10', estimated_cost: 210, canCancel: true, cancelFee: 105, cancelFeePercent: 50 }],
+    });
+    await openPortal();
+    fireEvent.click(screen.getByText('Cancel stay'));
+    expect(screen.getByText('Under our cancellation policy, a fee of $105 (50% of your $210 estimate) applies.')).toBeInTheDocument();
+    fireEvent.click(screen.getByText('Yes, Cancel Stay'));
+    expect(await screen.findByText("Your stay has been cancelled. We've texted you a confirmation.")).toBeInTheDocument();
+    expect(calls.find(c => c.action === 'cancel')).toEqual({ action: 'cancel', token: TOKEN, stayId: 'up', expectedFee: 105 });
+    expect(screen.getByText('Cancelled', { selector: 'h2' })).toBeInTheDocument();
+    expect(screen.getByText('Cancelled · $105 cancellation fee')).toBeInTheDocument();
+    expect(screen.queryByText('Cancel stay')).not.toBeInTheDocument();
+  });
+
+  test('"Keep It" backs out without cancelling anything', async () => {
+    const calls = mockPortalCancel({
+      stays: [{ ...base, id: 'up', approval_status: 'approved', check_in: '2099-01-10', estimated_cost: 210, canCancel: true, cancelFee: 0, cancelFeePercent: 0 }],
+    });
+    await openPortal();
+    fireEvent.click(screen.getByText('Cancel stay'));
+    expect(screen.getByText('There is no cancellation fee at this point.')).toBeInTheDocument();
+    fireEvent.click(screen.getByText('Keep It'));
+    expect(screen.getByText('Cancel stay')).toBeInTheDocument();
+    expect(calls.some(c => c.action === 'cancel')).toBe(false);
+  });
+
+  test('a pending request is withdrawn free', async () => {
+    mockPortalCancel({
+      stays: [{ ...base, id: 'req', approval_status: 'pending', check_in: '2099-02-01', estimated_cost: 210, canCancel: true, cancelFee: 0, cancelFeePercent: 0 }],
+    });
+    await openPortal();
+    fireEvent.click(screen.getByText('Withdraw request'));
+    expect(screen.getByText("This request hasn't been confirmed yet, so there's no fee to withdraw it.")).toBeInTheDocument();
+    fireEvent.click(screen.getByText('Yes, Withdraw Request'));
+    expect(await screen.findByText('Cancelled · no fee')).toBeInTheDocument();
+  });
+
+  test('if the fee changed before confirming, nothing is cancelled and the new fee is shown to confirm again', async () => {
+    mockPortalCancel({
+      stays: [{ ...base, id: 'up', approval_status: 'approved', check_in: '2099-01-10', estimated_cost: 210, canCancel: true, cancelFee: 105, cancelFeePercent: 50 }],
+      feeNowIs: 157.5,
+    });
+    await openPortal();
+    fireEvent.click(screen.getByText('Cancel stay'));
+    fireEvent.click(screen.getByText('Yes, Cancel Stay'));
+    expect(await screen.findByText('The cancellation fee has changed since you opened this page. Please review it and confirm again.')).toBeInTheDocument();
+    expect(screen.getByText('Under our cancellation policy, a fee of $158 (75% of your $210 estimate) applies.')).toBeInTheDocument();
+    expect(screen.queryByText('Cancelled', { selector: 'h2' })).not.toBeInTheDocument();
+  });
+
+  test('a stay that can no longer be cancelled online has no Cancel button', async () => {
+    mockPortalCancel({
+      stays: [{ ...base, id: 'started', approval_status: 'approved', check_in: '2020-01-10', check_out: '2099-01-12', estimated_cost: 210, canCancel: false }],
+    });
+    await openPortal();
+    expect(screen.getByText('Upcoming', { selector: 'h2' })).toBeInTheDocument();
+    expect(screen.queryByText('Cancel stay')).not.toBeInTheDocument();
+  });
+});
+
+describe('Admin — cancelled stays (client portal phase 2, Oct 29, 2026)', () => {
+  const owner = { name: 'Kim', phone: '6505551111', email: 'kim@test.com' };
+  const cancelledStay = (id, extra) => ({
+    id, check_in: daysFromToday(3), check_out: daysFromToday(5), drop_time: '09:00:00', pickup_time: '09:00:00',
+    estimated_cost: 210, number_of_dogs: 1, submitted_at: '2026-01-01T00:00:00Z', approval_status: 'cancelled',
+    cancelled_at: '2026-10-29T15:00:00Z', billed_at: null, paid_at: null, cancellation_fee_waived_at: null, ...extra,
+  });
+  const dogWith = (stays) => [{
+    id: 'dog-bud', name: 'Bud', breed: 'Labrador', dob: null, spay_neuter: 'yes',
+    aggression_history: 'no', aggression_detail: '', health_concerns: 'no', health_detail: '', owner, stays,
+  }];
+
+  async function loginWith(dogs) {
+    const adminCalls = [];
+    mockInvokeDefaults({
+      'admin-data': async (opts) => {
+        adminCalls.push(opts.body);
+        if (opts.body.action) return { data: { dogs: [], totalStays: 0 }, error: null };
+        return { data: { dogs, totalStays: 1 }, error: null };
+      },
+    });
+    goToAdminUrl();
+    render(<App />);
+    await userEvent.type(await screen.findByPlaceholderText('Password'), 'correct-password');
+    fireEvent.click(screen.getByText('Sign In'));
+    await screen.findByText('Bayview Boarding — Admin');
+    return adminCalls;
+  }
+
+  test('a cancellation that owes a fee is in Unbilled Stays; Send Fee Text texts the fee then marks it billed', async () => {
+    const adminCalls = await loginWith(dogWith([cancelledStay('c1', { cancellation_fee: 105 })]));
+    const section = document.querySelector('.unbilled-section');
+    expect(within(section).getByText('Cancelled')).toBeInTheDocument();
+    fireEvent.click(within(section).getByText('View'));
+    expect(within(section).getByText(/Cancellation fee: \$105 of a \$210 estimate/)).toBeInTheDocument();
+    expect(within(section).queryByText('Edit')).not.toBeInTheDocument();
+    fireEvent.click(within(section).getByText('Send Fee Text'));
+    await waitFor(() => expect(adminCalls.some(c => c.action === 'billCancellationFee')).toBe(true));
+    const sms = supabase.functions.invoke.mock.calls.find(([fn, o]) => fn === 'send-confirmation' && o.body.type === 'cancellation_fee')[1].body;
+    expect(sms.final_cost).toBe(105);
+    expect(sms.billing_breakdown).toBe('Cancellation fee: 50% of your $210 estimate = $105');
+    expect(sms.message_template).toBe(DEFAULT_SETTINGS.smsCancellationFee);
+    expect(adminCalls.find(c => c.action === 'billCancellationFee').stayId).toBe('c1');
+  });
+
+  test('Waive Fee waives it without texting anyone', async () => {
+    const adminCalls = await loginWith(dogWith([cancelledStay('c1', { cancellation_fee: 105 })]));
+    const section = document.querySelector('.unbilled-section');
+    fireEvent.click(within(section).getByText('View'));
+    fireEvent.click(within(section).getByText('Waive Fee'));
+    await waitFor(() => expect(adminCalls.some(c => c.action === 'waiveCancellationFee' && c.stayId === 'c1')).toBe(true));
+    expect(supabase.functions.invoke.mock.calls.some(([fn]) => fn === 'send-confirmation')).toBe(false);
+  });
+
+  test('a billed cancellation fee waits in Awaiting Payment with Mark Paid', async () => {
+    await loginWith(dogWith([cancelledStay('c1', { cancellation_fee: 105, billed_at: '2026-10-29T16:00:00Z' })]));
+    const section = document.querySelector('.awaiting-payment-section');
+    fireEvent.click(within(section).getByText('View'));
+    expect(within(section).getByText('Mark Paid')).toBeInTheDocument();
+    expect(within(section).getByText('Resend Fee Text')).toBeInTheDocument();
+    expect(within(section).queryByText('Waive Fee')).not.toBeInTheDocument();
+  });
+
+  test('free, waived and paid cancellations are closed records in Past Stays, not in either billing list', async () => {
+    await loginWith(dogWith([
+      cancelledStay('free', { cancellation_fee: 0 }),
+      cancelledStay('waived', { cancellation_fee: 105, cancellation_fee_waived_at: '2026-10-29T17:00:00Z' }),
+      cancelledStay('paid', { cancellation_fee: 105, billed_at: '2026-10-29T16:00:00Z', paid_at: '2026-10-30T16:00:00Z' }),
+    ]));
+    expect(screen.getByText('Nothing to bill right now.')).toBeInTheDocument();
+    expect(screen.getByText('Nothing billed and awaiting payment right now.')).toBeInTheDocument();
+    const past = document.querySelector('.past-stays-section');
+    expect(within(past).getByText('3 stays')).toBeInTheDocument();
+  });
+
+  test('the Cancellation Policy editor saves all 3 tiers', async () => {
+    await loginWith([]);
+    fireEvent.change(screen.getByLabelText('Tier 2 fee percent'), { target: { value: '60' } });
+    fireEvent.change(screen.getByLabelText('Tier 3 hours'), { target: { value: '12' } });
+    fireEvent.click(screen.getByText('Save Cancellation Policy'));
+    await waitFor(() => {
+      const save = supabase.functions.invoke.mock.calls.find(([fn, o]) => fn === 'settings' && o?.body?.updates?.cancellationPolicy);
+      expect(save[1].body.updates.cancellationPolicy).toEqual({ lateHours: 72, lastMinuteHours: 12, earlyFeePercent: 0, lateFeePercent: 60, lastMinuteFeePercent: 75 });
+    });
+    expect(await screen.findByText(/Current: Free cancellation more than 72 hours before drop-off · 60% fee within 72 hours · 75% fee within 12 hours/)).toBeInTheDocument();
   });
 });

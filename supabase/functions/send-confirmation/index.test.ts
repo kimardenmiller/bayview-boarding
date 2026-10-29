@@ -387,6 +387,65 @@ Deno.test('with no message_template, type paid: builds the thank-you/review-requ
   }
 });
 
+Deno.test('with no message_template, type cancelled: names the fee when there is one, and reads cleanly for a free cancellation', async () => {
+  const stub = stubEnvironment();
+  try {
+    await handleRequest(sendRequest({
+      type: 'cancelled', owner_name: 'Kim Miller', owner_phone: '4155550199', dog_name: 'Rex',
+      check_in: '2026-10-01', check_out: '2026-10-03', cancellation_fee: 105.5,
+    }));
+    assertEquals(
+      stub.calls[0].body,
+      `Hi Kim! Your stay for Rex (Thu, Oct 1 - Sat, Oct 3) has been cancelled. Per our cancellation policy, a cancellation fee of $106 applies - we'll text you the details.\n— Kim & Estee\n\n${FILLED_FOOTER}`,
+    );
+  } finally {
+    stub.restore();
+  }
+  const free = stubEnvironment();
+  try {
+    await handleRequest(sendRequest({
+      type: 'cancelled', owner_name: 'Kim Miller', owner_phone: '4155550199', dog_name: 'Rex',
+      check_in: '2026-10-01', check_out: '2026-10-03', cancellation_fee: 0,
+    }));
+    assertEquals(free.calls[0].body, `Hi Kim! Your stay for Rex (Thu, Oct 1 - Sat, Oct 3) has been cancelled.\n— Kim & Estee\n\n${FILLED_FOOTER}`);
+  } finally {
+    free.restore();
+  }
+});
+
+Deno.test('with a message_template: fills {cancellationFeeNote}', async () => {
+  const stub = stubEnvironment();
+  try {
+    await handleRequest(sendRequest({
+      owner_name: 'Kim Miller', owner_phone: '4155550199', dog_name: 'Rex',
+      message_template: 'Cancelled {dogName}.{cancellationFeeNote}', cancellation_fee: 1795.5,
+    }));
+    assertEquals(
+      stub.calls[0].body,
+      `Cancelled Rex. Per our cancellation policy, a cancellation fee of $1,796 applies - we'll text you the details.\n\n${FILLED_FOOTER}`,
+    );
+  } finally {
+    stub.restore();
+  }
+});
+
+Deno.test('with no message_template, type cancellation_fee: bills the fee with its breakdown, not the "thanks for visiting" billing text', async () => {
+  const stub = stubEnvironment();
+  try {
+    await handleRequest(sendRequest({
+      type: 'cancellation_fee', owner_name: 'Kim Miller', owner_phone: '4155550199', dog_name: 'Rex',
+      check_in: '2026-10-01', check_out: '2026-10-03', final_cost: 105,
+      billing_breakdown: 'Cancellation fee: 50% of $210 estimate',
+    }));
+    assertEquals(
+      stub.calls[0].body,
+      `Hi Kim! Here's the cancellation fee for Rex's stay (Thu, Oct 1 - Sat, Oct 3), per our cancellation policy:\nCancellation fee: 50% of $210 estimate\nTotal: $105\n\n— Kim & Estee\n\n${FILLED_FOOTER}`,
+    );
+  } finally {
+    stub.restore();
+  }
+});
+
 Deno.test('with a message_template: fills {denialReason}, blank (not the literal placeholder) when no reason given', async () => {
   const stub = stubEnvironment();
   try {

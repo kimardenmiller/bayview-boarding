@@ -14,6 +14,8 @@ interface StayRow {
   check_in: string;
   drop_time: string | null;
   reminder_sent_at: string | null;
+  // Defaults to 'approved' when omitted (see the mock's RPC filter below).
+  approval_status?: string;
   owners: { name: string; phone: string };
   stay_dogs: { name: string }[];
 }
@@ -71,7 +73,7 @@ function stubEnvironment(
       const dueIds = db.stays
         .filter((s) => {
           const t = dropoffMoment(s).getTime();
-          return s.reminder_sent_at === null && t > now.getTime() && t <= now.getTime() + 24 * 60 * 60 * 1000;
+          return s.reminder_sent_at === null && (s.approval_status ?? 'approved') === 'approved' && t > now.getTime() && t <= now.getTime() + 24 * 60 * 60 * 1000;
         })
         .map((s) => s.id);
       return new Response(JSON.stringify(dueIds), { status: 200 });
@@ -201,6 +203,26 @@ Deno.test('ignores a stay whose drop-off moment is more than 24 hours away', asy
   } finally {
     time.restore();
     stub.restore();
+  }
+});
+
+// Oct 29, 2026: the real due_*_reminder_stay_ids() never checked
+// approval_status, so a pending, denied or cancelled stay would have been
+// reminded too - it's approved-only now (migration
+// 20261029010000_stay_cancellation.sql), and this mock matches.
+Deno.test('ignores a pending, denied or cancelled stay, even inside the 24-hour window', async () => {
+  for (const approval_status of ['pending', 'denied', 'cancelled']) {
+    const time = new FakeTime('2026-10-01T18:00:00Z');
+    const stub = stubEnvironment([stayDueTomorrow({ approval_status }, time)]);
+    try {
+      const res = await handleRequest(cronRequest());
+      const data = await res.json();
+      assertEquals(data.sent, 0);
+      assertEquals(stub.confirmationCalls.length, 0);
+    } finally {
+      time.restore();
+      stub.restore();
+    }
   }
 });
 
