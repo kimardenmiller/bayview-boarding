@@ -1,6 +1,8 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { deleteCalendarEvent } from "../_shared/googleCalendar.ts";
+import { sessionOwnerId, sha256Hex } from "../_shared/portalSession.ts";
+export { sha256Hex };
 
 // Client portal ("My Stays", Oct 29, 2026, on request - see FIXES.txt
 // NEXT CHANGE LIST item 2). Public/unauthenticated like lookup-client -
@@ -20,6 +22,13 @@ import { deleteCalendarEvent } from "../_shared/googleCalendar.ts";
 //   logout      {token}         -> deletes the session
 //   cancel      {token, stayId, expectedFee} -> cancels one of their stays
 //               (phase 2, Oct 29, 2026 - see cancelStay below)
+//   updateDog   {token, dog}        -> saves one of their dogs' profile
+//   updateOwner {token, owner}      -> saves their email + vet
+//               (phase 3, Oct 30, 2026 - both return the same payload as
+//               `stays`, which also carries the owner's info and every
+//               dog's full current profile, so the portal can prefill a
+//               rebook/date change. A date change itself is submitted
+//               through submit-booking - see replacesStayId there.)
 //
 // Every stays query is scoped to the session's own owner_id - RLS stays
 // locked with zero policies on every table (service role key, server-
@@ -59,11 +68,6 @@ export function normalizePhone(phone: unknown): string | null {
   const digits = String(phone ?? "").replace(/\D/g, "");
   const ten = digits.length === 11 && digits.startsWith("1") ? digits.slice(1) : digits;
   return ten.length === 10 ? ten : null;
-}
-
-export async function sha256Hex(text: string): Promise<string> {
-  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
-  return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
 function randomCode(): string {
@@ -168,22 +172,21 @@ async function verifyCode(supabase: Supabase, phone: string | null, code: unknow
   return json({ token });
 }
 
-async function sessionOwnerId(supabase: Supabase, token: unknown): Promise<string | null> {
-  if (typeof token !== "string" || !token) return null;
-  const tokenHash = await sha256Hex(token);
-  const { data, error } = await supabase
-    .from("portal_sessions").select("owner_id")
-    .eq("token_hash", tokenHash).gt("expires_at", new Date().toISOString()).limit(1);
-  if (error) throw error;
-  const ownerId = data?.[0]?.owner_id ?? null;
-  if (ownerId) {
-    await supabase.from("portal_sessions").update({ last_used_at: new Date().toISOString() }).eq("token_hash", tokenHash);
-  }
-  return ownerId;
-}
-
 const STAYS_SELECT =
-  "id, check_in, check_out, drop_time, pickup_time, estimated_cost, number_of_dogs, approval_status, denial_reason, billed_at, paid_at, submitted_at, waiver_snapshot, cancelled_at, cancellation_fee, cancellation_fee_waived_at, stay_dogs(name)";
+  "id, check_in, check_out, drop_time, pickup_time, estimated_cost, number_of_dogs, approval_status, denial_reason, billed_at, paid_at, submitted_at, waiver_snapshot, notes, replaces_stay_id, cancelled_at, cancellation_fee, cancellation_fee_waived_at, stay_dogs(name, dog_id)";
+
+const DOGS_SELECT =
+  "id, name, breed, dob, spay_neuter, aggression_history, aggression_detail, health_concerns, health_detail, photo_paths";
+
+// Dog photos live in a private bucket (see admin-data) - signed for an hour
+// so the portal can show a dog's current photos while editing its profile
+// or prefilling a rebook. Best-effort: a failed signing just shows none.
+const DOG_PHOTOS_BUCKET = "dog-photos";
+const SIGNED_URL_TTL_SECONDS = 60 * 60;
+// dog-photos always names an upload "<uuid>.<ext>" - anything else isn't
+// one of ours.
+const PHOTO_PATH = /^[A-Za-z0-9-]+\.[A-Za-z0-9]+$/;
+const MAX_PHOTOS_PER_DOG = 30;
 
 // Admin-editable in settings.cancellation_policy (see the settings
 // function for the tier rules); this is only the fallback if that read
@@ -243,29 +246,146 @@ async function listStays(supabase: Supabase, token: unknown): Promise<Response> 
   const ownerId = await sessionOwnerId(supabase, token);
   if (!ownerId) return json({ error: "Your login has expired. Please log in again.", expired: true }, 401);
 
-  const [{ data: owners, error: ownerError }, { data: stays, error: staysError }] = await Promise.all([
-    supabase.from("owners").select("name").eq("id", ownerId).limit(1),
+  return json(await portalPayload(supabase, ownerId));
+}
+
+// Everything My Stays shows: the owner, their dogs' current profiles, and
+// every stay with its cancel/change options. Shared by `stays` and the
+// profile edits, which hand back the refreshed state.
+async function portalPayload(supabase: Supabase, ownerId: string) {
+  const [{ data: owners, error: ownerError }, { data: stays, error: staysError }, { data: dogs, error: dogsError }] = await Promise.all([
+    supabase.from("owners").select("name, phone, email, vet_name").eq("id", ownerId).limit(1),
     supabase.from("stays").select(STAYS_SELECT).eq("owner_id", ownerId).order("check_in", { ascending: false }),
+    supabase.from("dogs").select(DOGS_SELECT).eq("owner_id", ownerId).order("name"),
   ]);
   if (ownerError) throw ownerError;
   if (staysError) throw staysError;
+  if (dogsError) throw dogsError;
 
   const { policy } = await loadPolicyAndTemplate(supabase);
   // deno-lint-ignore no-explicit-any
   const open = (stays || []).filter((s: any) => s.approval_status === "pending" || s.approval_status === "approved");
   // deno-lint-ignore no-explicit-any
   const hours = await hoursUntilDropoff(supabase, open.map((s: any) => s.id));
+  // A stay with a date change already waiting on us can't be changed again
+  // until that one's decided (withdraw it first).
+  const pendingChangeFor = new Set(
+    // deno-lint-ignore no-explicit-any
+    (stays || []).filter((s: any) => s.approval_status === "pending" && s.replaces_stay_id).map((s: any) => s.replaces_stay_id),
+  );
+  const owner = owners?.[0];
 
-  return json({
-    ownerName: owners?.[0]?.name ?? "",
+  return {
+    ownerName: owner?.name ?? "",
+    owner: owner ? { name: owner.name, phone: owner.phone, email: owner.email ?? "", vetName: owner.vet_name ?? "" } : null,
+    dogs: await shapeDogs(supabase, dogs || []),
     cancellationPolicy: policy,
     // deno-lint-ignore no-explicit-any
-    stays: (stays || []).map(({ stay_dogs, ...s }: any) => ({
-      ...s,
-      dogNames: (stay_dogs || []).map((d: { name: string }) => d.name),
-      ...cancellationQuote(s, hours.get(s.id), policy),
-    })),
-  });
+    stays: (stays || []).map(({ stay_dogs, ...s }: any) => {
+      const quote = cancellationQuote(s, hours.get(s.id), policy);
+      return {
+        ...s,
+        dogNames: (stay_dogs || []).map((d: { name: string }) => d.name),
+        dogIds: (stay_dogs || []).map((d: { dog_id: string }) => d.dog_id).filter(Boolean),
+        ...quote,
+        // Same window as cancelling (open, before drop-off) - a date
+        // change is a new request, so no fee is ever involved. A pending
+        // change can't itself be changed (approving that would retire only
+        // the change, not the original) - withdraw it and start again.
+        canChangeDates: quote.canCancel && !pendingChangeFor.has(s.id) &&
+          !(s.approval_status === "pending" && s.replaces_stay_id),
+      };
+    }),
+  };
+}
+
+// The booking form's own dog shape (camelCase), so the portal can drop a
+// profile straight into a rebook/date change. A logged-in client sees
+// their own aggression/health answers - unlike lookup-client, whose phone-
+// only lookup proves nothing about who's asking.
+// deno-lint-ignore no-explicit-any
+async function shapeDogs(supabase: Supabase, dogs: any[]) {
+  const paths = [...new Set(dogs.flatMap((d) => (Array.isArray(d.photo_paths) ? d.photo_paths : [])))] as string[];
+  const urlByPath = new Map<string, string>();
+  if (paths.length > 0) {
+    const { data: signed, error } = await supabase.storage.from(DOG_PHOTOS_BUCKET).createSignedUrls(paths, SIGNED_URL_TTL_SECONDS);
+    if (error) console.error("portal: couldn't sign dog photos", error);
+    for (const s of signed ?? []) if (s.signedUrl) urlByPath.set(s.path ?? "", s.signedUrl);
+  }
+  return dogs.map((d) => ({
+    id: d.id,
+    name: d.name,
+    breed: d.breed ?? "",
+    dob: d.dob ?? "",
+    spayNeuter: d.spay_neuter ?? "",
+    aggressionHistory: d.aggression_history ?? "",
+    aggressionDetail: d.aggression_detail ?? "",
+    healthConcerns: d.health_concerns ?? "",
+    healthDetail: d.health_detail ?? "",
+    photos: (Array.isArray(d.photo_paths) ? d.photo_paths : []).map((path: string) => ({ path, url: urlByPath.get(path) ?? null })),
+  }));
+}
+
+const YES_NO = ["yes", "no"];
+const SPAY_NEUTER = ["yes", "no", "under1"];
+
+// A client editing one of their own dogs' profile (phase 3). Updates
+// `dogs` only - every past stay keeps its own stay_dogs snapshot of what
+// was declared for it. Name isn't editable here: dogs are matched by name
+// when booking, so a rename belongs on the booking form. Same required
+// answers as the booking form's dog page.
+async function updateDog(supabase: Supabase, token: unknown, dog: unknown): Promise<Response> {
+  const ownerId = await sessionOwnerId(supabase, token);
+  if (!ownerId) return json({ error: "Your login has expired. Please log in again.", expired: true }, 401);
+  // deno-lint-ignore no-explicit-any
+  const d = (dog && typeof dog === "object" ? dog : {}) as any;
+  if (typeof d.id !== "string" || !d.id) return json({ error: "dog.id is required" }, 400);
+
+  const breed = String(d.breed ?? "").trim();
+  const photoPaths = d.photoPaths ?? [];
+  if (!breed) return json({ error: "Breed is required." }, 400);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(d.dob ?? ""))) return json({ error: "Date of birth is required." }, 400);
+  if (!SPAY_NEUTER.includes(d.spayNeuter)) return json({ error: "Please answer spayed/neutered." }, 400);
+  if (!YES_NO.includes(d.aggressionHistory) || !YES_NO.includes(d.healthConcerns)) {
+    return json({ error: "Please answer the aggression and health questions." }, 400);
+  }
+  if (!Array.isArray(photoPaths) || photoPaths.length > MAX_PHOTOS_PER_DOG ||
+      !photoPaths.every((p) => typeof p === "string" && PHOTO_PATH.test(p))) {
+    return json({ error: "Those photos couldn't be saved. Please try uploading them again." }, 400);
+  }
+
+  const { data: updated, error } = await supabase.from("dogs").update({
+    breed,
+    dob: d.dob,
+    spay_neuter: d.spayNeuter,
+    aggression_history: d.aggressionHistory,
+    aggression_detail: d.aggressionHistory === "yes" ? (String(d.aggressionDetail ?? "").trim() || null) : null,
+    health_concerns: d.healthConcerns,
+    health_detail: d.healthConcerns === "yes" ? (String(d.healthDetail ?? "").trim() || null) : null,
+    photo_paths: photoPaths,
+  }).eq("id", d.id).eq("owner_id", ownerId).select("id");
+  if (error) throw error;
+  // Someone else's dog looks exactly like a missing one.
+  if (!updated?.length) return json({ error: "Dog not found." }, 404);
+  return json(await portalPayload(supabase, ownerId));
+}
+
+// Email + vet only - the phone is the login itself, and the name is what
+// each signed agreement has to match.
+async function updateOwner(supabase: Supabase, token: unknown, owner: unknown): Promise<Response> {
+  const ownerId = await sessionOwnerId(supabase, token);
+  if (!ownerId) return json({ error: "Your login has expired. Please log in again.", expired: true }, 401);
+  // deno-lint-ignore no-explicit-any
+  const o = (owner && typeof owner === "object" ? owner : {}) as any;
+  const email = String(o.email ?? "").trim().toLowerCase();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return json({ error: "Please enter a valid email address." }, 400);
+  const vetName = String(o.vetName ?? "").trim();
+
+  const { error } = await supabase.from("owners")
+    .update({ email, vet_name: vetName && vetName !== "Select a Vet" ? vetName : null })
+    .eq("id", ownerId);
+  if (error) throw error;
+  return json(await portalPayload(supabase, ownerId));
 }
 
 // A client cancelling their own stay (phase 2, Oct 29, 2026). The fee is
@@ -354,13 +474,15 @@ export async function handleRequest(req: Request): Promise<Response> {
   if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
 
   try {
-    const { action, phone, code, token, stayId, expectedFee } = await req.json();
+    const { action, phone, code, token, stayId, expectedFee, dog, owner } = await req.json();
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
     if (action === "requestCode") return await requestCode(supabase, normalizePhone(phone));
     if (action === "verifyCode") return await verifyCode(supabase, normalizePhone(phone), code);
     if (action === "stays") return await listStays(supabase, token);
     if (action === "cancel") return await cancelStay(supabase, token, stayId, expectedFee);
+    if (action === "updateDog") return await updateDog(supabase, token, dog);
+    if (action === "updateOwner") return await updateOwner(supabase, token, owner);
     if (action === "logout") {
       if (typeof token === "string" && token) {
         await supabase.from("portal_sessions").delete().eq("token_hash", await sha256Hex(token));

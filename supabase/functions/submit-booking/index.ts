@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { sessionOwnerId } from "../_shared/portalSession.ts";
 
 // Handles the booking form submission. Replaces the old client-side
 // `supabase.from('stays').insert([record])` call, which worked when a
@@ -81,6 +82,11 @@ interface BookingInput {
   // the Sept 16, 2026 migration for why this is captured verbatim rather
   // than just trusting the current src/waiver.js at read time.
   waiverSnapshot?: unknown;
+  // A date change from My Stays (Oct 30, 2026): the stay this request
+  // would replace once approved, plus the client's portal session token
+  // proving it's theirs - see checkDateChange below.
+  replacesStayId?: string | null;
+  portalToken?: string | null;
 }
 
 function validate(body: BookingInput): string[] {
@@ -114,6 +120,36 @@ function validate(body: BookingInput): string[] {
   return errors;
 }
 
+// A date-change request may only point at the submitter's OWN open stay:
+// the portal session must be valid, the booking's phone must be that
+// session's owner (the booking form's phone field is still editable), and
+// the original must still be pending/approved. Checked before anything is
+// written. Returns an error response, or null if it's fine.
+// deno-lint-ignore no-explicit-any
+async function checkDateChange(supabase: any, body: BookingInput, phone: string): Promise<Response | null> {
+  const sessionOwner = await sessionOwnerId(supabase, body.portalToken, { touch: false });
+  if (!sessionOwner) return json({ error: "Your login has expired. Please log in to My Stays again to change dates." }, 401);
+
+  const { data: owners, error: ownerErr } = await supabase.from("owners").select("id").eq("phone", phone).limit(1);
+  if (ownerErr) throw ownerErr;
+  if (owners?.[0]?.id !== sessionOwner) {
+    return json({ error: "A date change must use the phone number you log in to My Stays with." }, 400);
+  }
+
+  const { data: originals, error: stayErr } = await supabase
+    .from("stays").select("id, approval_status, replaces_stay_id")
+    .eq("id", body.replacesStayId).eq("owner_id", sessionOwner).limit(1);
+  if (stayErr) throw stayErr;
+  const original = originals?.[0];
+  // A still-pending date change can't itself be changed - approving that
+  // would retire only the change, leaving the real original booked.
+  const isPendingChange = original?.approval_status === "pending" && original?.replaces_stay_id;
+  if ((original?.approval_status !== "pending" && original?.approval_status !== "approved") || isPendingChange) {
+    return json({ error: "That stay can't be changed any more. Please submit a new request instead." }, 400);
+  }
+  return null;
+}
+
 export async function handleRequest(req: Request): Promise<Response> {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -131,6 +167,10 @@ export async function handleRequest(req: Request): Promise<Response> {
 
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
     const phone = body.owner!.phone!.trim();
+    if (body.replacesStayId) {
+      const refusal = await checkDateChange(supabase, body, phone);
+      if (refusal) return refusal;
+    }
     const ownerFields = {
       phone,
       name: body.owner!.name!.trim(),
@@ -214,6 +254,7 @@ export async function handleRequest(req: Request): Promise<Response> {
       client_timezone: body.clientTimezone || null,
       waiver_snapshot: body.waiverSnapshot,
       approval_status: "pending",
+      replaces_stay_id: body.replacesStayId || null,
     }).select("id, check_in, check_out, drop_time, pickup_time, estimated_cost, submitted_at, approval_status");
     if (stayErr) throw stayErr;
     const stay = insertedStays[0];

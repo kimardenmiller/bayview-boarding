@@ -27,7 +27,7 @@ const HERO_DOG_URL = `${process.env.PUBLIC_URL}/img/hero-dog.jpg`;
 // own module (Sept 30, 2026, code-splitting - see defaults.js) since
 // both this file and the lazy-loaded AdminPanel.js need them.
 import { DEFAULT_RATE, DEFAULT_MINIMUM_STAY, DEFAULT_MULTI_DOG_DISCOUNT, DEFAULT_HOLIDAY_UPCHARGE, DEFAULT_VETS, DEFAULT_PACKING_LIST, DEFAULT_SMS_TEMPLATES, DEFAULT_SMS_FOOTER, DEFAULT_CANCELLATION_POLICY } from './defaults';
-import { calcCostBreakdown, emptyDog } from './calc';
+import { calcCostBreakdown, emptyDog, dogIsComplete } from './calc';
 import Field from './Field';
 
 // The booking flow (Owner Info through Sign/Confirmation) and the admin
@@ -639,6 +639,11 @@ export default function App() {
   }
 
   const [form, setForm] = useState(emptyForm);
+  // Set while the booking form is a date change started from My Stays
+  // (Oct 30, 2026): {stay (the original), token (the portal session,
+  // which submit-booking checks owns that stay)}. Null for every other
+  // booking.
+  const [dateChange, setDateChange] = useState(null);
 
   function update(key, val) { setForm(f => ({ ...f, [key]: val })); }
 
@@ -676,6 +681,7 @@ export default function App() {
       // retroactively change what this client is on record as having
       // signed (Sept 16, 2026) - see the migration for the full rationale.
       waiverSnapshot: WAIVER_SECTIONS,
+      ...(dateChange && { replacesStayId: dateChange.stay.id, portalToken: dateChange.token }),
     };
     const { data: result, error } = await supabase.functions.invoke('submit-booking', { body: payload });
     setSubmitting(false);
@@ -719,13 +725,34 @@ export default function App() {
         console.error('Text send failed:', textErr);
       }
     } else {
-      alert('There was an error saving. Please try again.');
+      // A refused date change (login expired, stay no longer open) has a
+      // message worth showing as-is; anything else stays generic.
+      let message = null;
+      if (dateChange) {
+        try { message = (await error?.context?.json?.())?.error; } catch { /* generic below */ }
+      }
+      alert(message || 'There was an error saving. Please try again.');
     }
   }
 
   function reset() {
     setForm(emptyForm());
-    setStep(0); setSubmitted(false); setCurrentStay(null);
+    setStep(0); setSubmitted(false); setCurrentStay(null); setDateChange(null);
+  }
+
+  // My Stays' "Book again" / "Change dates" / "Book a Stay" (Oct 30,
+  // 2026): opens the booking form already filled in from the client's
+  // profile (see bookingFormFromPortal in calc.js). Straight to Stay Dates
+  // when every dog's profile is complete - the usual case - since owner
+  // info and dogs are already done; otherwise the owner page, so the
+  // "Needs updating" dog can be fixed first.
+  function startPrefilledBooking({ fields, dateChange: change = null }) {
+    const next = { ...emptyForm(), ...fields };
+    setForm(next);
+    setDateChange(change);
+    setSubmitted(false); setCurrentStay(null);
+    setStep(next.dogs.every(dogIsComplete) ? 1 : 0);
+    setShowLanding(false); setShowContact(false); setShowSubmitIdea(false); setShowPortal(false);
   }
 
   const adminProps = {
@@ -751,7 +778,7 @@ export default function App() {
   function goToLanding() { setShowLanding(true); setShowContact(false); setShowSubmitIdea(false); setShowPortal(false); }
   function goToContact() { setShowContact(true); setShowLanding(false); setShowSubmitIdea(false); setShowPortal(false); }
   function goToSubmitIdea() { setShowSubmitIdea(true); setShowLanding(false); setShowContact(false); setShowPortal(false); }
-  function goToBooking() { setShowLanding(false); setShowContact(false); setShowSubmitIdea(false); setShowPortal(false); }
+  function goToBooking() { setDateChange(null); setShowLanding(false); setShowContact(false); setShowSubmitIdea(false); setShowPortal(false); }
   function goToPortal() { setShowPortal(true); setShowLanding(false); setShowContact(false); setShowSubmitIdea(false); }
 
   // Scrolls to the embedded About section on the Landing page - if
@@ -799,7 +826,7 @@ export default function App() {
   if (showPortal) {
     pageContent = (
       <Suspense fallback={<LoadingFallback />}>
-        <ClientPortal onBack={goToLanding} onBookStay={goToBooking} />
+        <ClientPortal onBack={goToLanding} onStartBooking={startPrefilledBooking} vets={vets} />
       </Suspense>
     );
   } else if (showContact) {
@@ -825,6 +852,7 @@ export default function App() {
           cancellationPolicy={cancellationPolicy}
           onSubmit={handleSubmit} submitting={submitting}
           currentStay={currentStay} onNewBooking={reset}
+          dateChange={dateChange?.stay || null}
         />
       </Suspense>
     );

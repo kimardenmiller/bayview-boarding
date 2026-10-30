@@ -3912,3 +3912,140 @@ describe('Admin — cancelled stays (client portal phase 2, Oct 29, 2026)', () =
     expect(await screen.findByText(/Current: Free cancellation more than 72 hours before drop-off · 60% fee within 72 hours · 75% fee within 12 hours/)).toBeInTheDocument();
   });
 });
+
+describe('My Stays — profiles, date changes, rebooking (client portal phase 3, Oct 30, 2026)', () => {
+  const TOKEN = 'portal-session-token';
+  const OWNER = { name: 'Jane Smith', phone: '4155550199', email: 'jane@test.com', vetName: 'Marin Pet Hospital' };
+  const REX = {
+    id: 'dog-rex', name: 'Rex', breed: 'Labrador', dob: '2020-01-01', spayNeuter: 'yes',
+    aggressionHistory: 'no', aggressionDetail: '', healthConcerns: 'yes', healthDetail: 'Arthritis',
+    photos: [{ path: 'rex-1.jpg', url: 'https://signed.test/rex-1.jpg' }],
+  };
+  const base = { drop_time: '09:00:00', pickup_time: '17:00:00', estimated_cost: 210, dogNames: ['Rex'], dogIds: ['dog-rex'] };
+  const UPCOMING = { ...base, id: 'up', approval_status: 'approved', check_in: '2099-01-10', check_out: '2099-01-12', notes: 'Feed twice', canCancel: true, cancelFee: 0, cancelFeePercent: 0, canChangeDates: true };
+  const PAST = { ...base, id: 'past', approval_status: 'approved', check_in: '2020-03-01', check_out: '2020-03-04', drop_time: '08:30:00', billed_at: '2020-03-04T20:00:00Z', paid_at: '2020-03-05T20:00:00Z' };
+
+  function mockPortalProfile({ stays = [UPCOMING, PAST], dogs = [REX] } = {}) {
+    let owner = { ...OWNER };
+    let currentDogs = dogs;
+    const calls = [];
+    const payload = () => ({ data: { ownerName: owner.name, owner, dogs: currentDogs, stays }, error: null });
+    mockInvokeDefaults({
+      portal: async ({ body }) => {
+        calls.push(body);
+        if (body.action === 'updateDog') {
+          currentDogs = currentDogs.map(d => (d.id === body.dog.id ? { ...d, ...body.dog } : d));
+        }
+        if (body.action === 'updateOwner') owner = { ...owner, ...body.owner };
+        return payload();
+      },
+    });
+    return calls;
+  }
+
+  async function openPortal() {
+    localStorage.setItem('bayviewPortalToken', TOKEN);
+    window.history.pushState({}, '', '/?portal');
+    render(<App />);
+    await screen.findByText('Hi Jane!');
+  }
+
+  beforeEach(() => { localStorage.clear(); });
+
+  test("editing a dog's profile saves it (keeping its existing photo) and shows the update", async () => {
+    const calls = mockPortalProfile();
+    await openPortal();
+    fireEvent.click(screen.getByText("Edit Rex's profile"));
+    expect(screen.getByAltText("Rex's photo 1")).toHaveAttribute('src', 'https://signed.test/rex-1.jpg');
+    expect(screen.queryByPlaceholderText('Buddy')).not.toBeInTheDocument(); // name isn't editable here
+    fireEvent.change(screen.getByPlaceholderText('Golden Retriever'), { target: { value: 'Lab Mix' } });
+    fireEvent.click(screen.getByText('Save Profile'));
+    expect(await screen.findByText('Lab Mix')).toBeInTheDocument();
+    expect(calls.find(c => c.action === 'updateDog')).toEqual({
+      action: 'updateDog', token: TOKEN,
+      dog: {
+        id: 'dog-rex', breed: 'Lab Mix', dob: '2020-01-01', spayNeuter: 'yes',
+        aggressionHistory: 'no', aggressionDetail: '', healthConcerns: 'yes', healthDetail: 'Arthritis',
+        photoPaths: ['rex-1.jpg'],
+      },
+    });
+  });
+
+  test("a dog profile with a required answer cleared can't be saved", async () => {
+    const calls = mockPortalProfile();
+    await openPortal();
+    fireEvent.click(screen.getByText("Edit Rex's profile"));
+    fireEvent.change(screen.getByPlaceholderText('Golden Retriever'), { target: { value: ' ' } });
+    fireEvent.click(screen.getByText('Save Profile'));
+    expect(screen.getByText('Required')).toBeInTheDocument();
+    expect(calls.some(c => c.action === 'updateDog')).toBe(false);
+  });
+
+  test('editing your info saves the email and vet', async () => {
+    const calls = mockPortalProfile();
+    await openPortal();
+    fireEvent.click(screen.getByText('Edit info'));
+    fireEvent.change(screen.getByDisplayValue('jane@test.com'), { target: { value: 'new@test.com' } });
+    fireEvent.click(screen.getByText('Save Info'));
+    expect(await screen.findByText('4155550199 · new@test.com')).toBeInTheDocument();
+    expect(calls.find(c => c.action === 'updateOwner')).toEqual({
+      action: 'updateOwner', token: TOKEN, owner: { email: 'new@test.com', vetName: 'Marin Pet Hospital' },
+    });
+  });
+
+  test('"Book again" opens the booking form at Stay Dates with everything but the dates filled in', async () => {
+    mockPortalProfile();
+    await openPortal();
+    fireEvent.click(screen.getByText('Book again'));
+    expect(await screen.findByText('Stay Dates', { selector: 'h2' })).toBeInTheDocument();
+    expect(document.querySelectorAll('input[type="date"]')[0].value).toBe('');
+    expect(document.querySelectorAll('input[type="time"]')[0].value).toBe('08:30');
+    expect(screen.queryByText(/Changing the dates of/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByText('Back'));
+    expect(screen.getByDisplayValue('Jane Smith')).toBeInTheDocument();
+    expect(screen.getByDisplayValue('jane@test.com')).toBeInTheDocument();
+    expect(screen.getByText('Rex')).toBeInTheDocument();
+    expect(screen.queryByText('Needs updating')).not.toBeInTheDocument();
+  });
+
+  test('"Change dates" prefills the stay and submits a new request that replaces it', async () => {
+    mockPortalProfile();
+    await openPortal();
+    fireEvent.click(screen.getByText('Change dates'));
+    expect(await screen.findByText(/Changing the dates of Rex's stay \(01\/10\/2099 9:00 AM → 01\/12\/2099 5:00 PM\)/)).toBeInTheDocument();
+    expect(document.querySelectorAll('input[type="date"]')[0].value).toBe('2099-01-10');
+    expect(screen.getByDisplayValue('Feed twice')).toBeInTheDocument();
+    fireEvent.change(document.querySelectorAll('input[type="date"]')[1], { target: { value: '2099-01-14' } });
+    fireEvent.click(screen.getByText('Continue'));
+    fireEvent.click(screen.getByText('I Have Read the Agreement'));
+    fireEvent.click(screen.getByRole('checkbox'));
+    fireEvent.change(screen.getByPlaceholderText('Jane Smith'), { target: { value: 'Jane Smith' } });
+    fireEvent.click(screen.getByText('Submit Agreement'));
+    expect(await screen.findByText(/received your date change request/)).toBeInTheDocument();
+    const payload = supabase.functions.invoke.mock.calls.find(c => c[0] === 'submit-booking')[1].body;
+    expect(payload.replacesStayId).toBe('up');
+    expect(payload.portalToken).toBe(TOKEN);
+    expect(payload.checkOut).toBe('2099-01-14');
+    expect(payload.owner.phone).toBe('4155550199');
+    expect(payload.dogs[0]).toMatchObject({ name: 'Rex', breed: 'Labrador', healthConcerns: 'yes', photoPaths: ['rex-1.jpg'] });
+  });
+
+  test('a pending date change says what it replaces, and the original says a change is waiting', async () => {
+    const change = { ...base, id: 'chg', approval_status: 'pending', check_in: '2099-01-11', check_out: '2099-01-14', replaces_stay_id: 'up', canCancel: true, cancelFee: 0, canChangeDates: false };
+    mockPortalProfile({ stays: [{ ...UPCOMING, canChangeDates: false }, change] });
+    await openPortal();
+    expect(screen.getByText('Date change for your 01/10/2099 9:00 AM → 01/12/2099 5:00 PM stay, which stays booked until we confirm this.')).toBeInTheDocument();
+    expect(screen.getByText('Date change requested (01/11/2099 → 01/14/2099) - waiting for us to confirm.')).toBeInTheDocument();
+    expect(screen.queryByText('Change dates')).not.toBeInTheDocument();
+  });
+
+  test('a booking started from the nav menu after a date change is a plain new booking again', async () => {
+    mockPortalProfile();
+    await openPortal();
+    fireEvent.click(screen.getByText('Change dates'));
+    await screen.findByText(/Changing the dates of/);
+    fireEvent.click(screen.getByLabelText('Open menu'));
+    fireEvent.click(screen.getByText('Book a Stay'));
+    expect(screen.queryByText(/Changing the dates of/)).not.toBeInTheDocument();
+  });
+});

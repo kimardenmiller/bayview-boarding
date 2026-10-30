@@ -20,6 +20,7 @@ function stubSupabase() {
     dogs: [] as Record<string, unknown>[],
     stays: [] as Record<string, unknown>[],
     stayDogs: [] as Record<string, unknown>[],
+    portalSessions: [] as Record<string, unknown>[],
   };
   let ownerSeq = 0, dogSeq = 0, staySeq = 0;
   const calls: { method: string; table: string; body: unknown }[] = [];
@@ -75,6 +76,20 @@ function stubSupabase() {
         if (row) Object.assign(row, body);
         return new Response(JSON.stringify([]), { status: 200 });
       }
+    }
+
+    // A date-change request's session + original-stay checks (Oct 30, 2026).
+    if (table === 'portal_sessions' && method === 'GET') {
+      const hash = eqValue(url.searchParams, 'token_hash');
+      const now = new Date().toISOString();
+      const rows = db.portalSessions.filter((r) => r.token_hash === hash && String(r.expires_at) > now);
+      return new Response(JSON.stringify(rows.map((r) => ({ owner_id: r.owner_id }))), { status: 200 });
+    }
+    if (table === 'stays' && method === 'GET') {
+      const id = eqValue(url.searchParams, 'id');
+      const ownerId = eqValue(url.searchParams, 'owner_id');
+      const rows = db.stays.filter((r) => r.id === id && r.owner_id === ownerId);
+      return new Response(JSON.stringify(rows), { status: 200 });
     }
 
     if (table === 'stays' && method === 'POST') {
@@ -477,5 +492,54 @@ Deno.test('a new dog for an existing owner is added without touching their other
     assertEquals(stub.db.dogs.find((d) => d.name === 'Rex')?.breed, 'Labrador');
   } finally {
     stub.restore();
+  }
+});
+
+// ── Client portal phase 3: date changes (Oct 30, 2026) ──────────────────────
+
+const { sha256Hex } = await import('../_shared/portalSession.ts');
+const PORTAL_TOKEN = 'e'.repeat(64);
+
+async function withDateChangeSetup(stub: ReturnType<typeof stubSupabase>, originalStatus = 'approved', originalExtra: Record<string, unknown> = {}) {
+  stub.db.owners.push({ id: 'owner-9', phone: '4155550100', name: 'Kim Miller' });
+  stub.db.portalSessions.push({ token_hash: await sha256Hex(PORTAL_TOKEN), owner_id: 'owner-9', expires_at: new Date(Date.now() + 86400000).toISOString() });
+  stub.db.stays.push({ id: 'stay-original', owner_id: 'owner-9', approval_status: originalStatus, ...originalExtra });
+}
+
+Deno.test('a date change from My Stays is saved as a new pending request pointing at the stay it replaces', async () => {
+  const stub = stubSupabase();
+  try {
+    await withDateChangeSetup(stub);
+    const res = await handleRequest(postRequest(validBooking({ portalToken: PORTAL_TOKEN, replacesStayId: 'stay-original' })));
+    assertEquals(res.status, 200);
+    const inserted = stub.db.stays.find((s) => s.id !== 'stay-original')!;
+    assertEquals(inserted.replaces_stay_id, 'stay-original');
+    assertEquals(inserted.approval_status, 'pending');
+    // The original is untouched until admin approves the change.
+    assertEquals(stub.db.stays.find((s) => s.id === 'stay-original')!.approval_status, 'approved');
+  } finally {
+    stub.restore();
+  }
+});
+
+Deno.test('a date change is refused, writing nothing, without a valid login, for a different phone, for a stay that is not open, or for a pending change', async () => {
+  for (const [label, overrides, status, extra] of [
+    ['no login', { replacesStayId: 'stay-original' }, 'approved'],
+    ['bad token', { portalToken: 'nope', replacesStayId: 'stay-original' }, 'approved'],
+    ['other phone', { portalToken: PORTAL_TOKEN, replacesStayId: 'stay-original', owner: { name: 'Kim Miller', phone: '4155550111', email: 'kim@test.com' } }, 'approved'],
+    ['unknown stay', { portalToken: PORTAL_TOKEN, replacesStayId: 'stay-someone-elses' }, 'approved'],
+    ['cancelled stay', { portalToken: PORTAL_TOKEN, replacesStayId: 'stay-original' }, 'cancelled'],
+    ['pending change', { portalToken: PORTAL_TOKEN, replacesStayId: 'stay-original' }, 'pending', { replaces_stay_id: 'stay-older' }],
+  ] as [string, Record<string, unknown>, string, Record<string, unknown>?][]) {
+    const stub = stubSupabase();
+    try {
+      await withDateChangeSetup(stub, status, extra);
+      const res = await handleRequest(postRequest(validBooking(overrides)));
+      assert(res.status === 400 || res.status === 401, `${label}: got ${res.status}`);
+      assertEquals(stub.db.stays.length, 1, label);
+      assertEquals(stub.calls.filter((c) => c.method !== 'GET').length, 0, label);
+    } finally {
+      stub.restore();
+    }
   }
 });

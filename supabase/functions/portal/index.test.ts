@@ -57,6 +57,14 @@ function stubBackend(
       confirmations.push(JSON.parse(String(init?.body)));
       return new Response('{}', { status: confirmationOk ? 200 : 500 });
     }
+    // Signing private dog-photos paths (Oct 30, 2026) - storage-js prepends
+    // "{SUPABASE_URL}/storage/v1" to the signedURL itself.
+    if (url.pathname.startsWith('/storage/v1/object/sign/')) {
+      const { paths } = JSON.parse(String(init?.body));
+      return new Response(JSON.stringify((paths as string[]).map((path) => ({
+        path, signedURL: `/object/sign/dog-photos/${path}?token=fake`, error: null,
+      }))), { status: 200 });
+    }
     // stay_hours_until_dropoff RPC - hours left per stay id, from the test.
     if (url.pathname.endsWith('/rpc/stay_hours_until_dropoff')) {
       const { stay_ids } = JSON.parse(String(init?.body));
@@ -467,6 +475,133 @@ Deno.test('cancel: requires a valid login', async () => {
     const res = await handleRequest(post({ action: 'cancel', token: 'nope', stayId: 's1' }));
     assertEquals(res.status, 401);
     assertEquals(stub.tables.stays[0].approval_status, 'approved');
+  } finally {
+    stub.restore();
+  }
+});
+
+// ── Phase 3: profiles, date changes, rebooking (Oct 30, 2026) ───────────────
+
+const FULL_OWNER = { ...OWNER, email: 'jane@test.com', vet_name: 'Marin Pet Hospital' };
+const REX = {
+  id: 'dog-rex', owner_id: OWNER.id, name: 'Rex', breed: 'Labrador', dob: '2020-01-01', spay_neuter: 'yes',
+  aggression_history: 'yes', aggression_detail: 'Barks at bikes', health_concerns: 'no', health_detail: null,
+  photo_paths: ['rex-1.jpg'],
+};
+const NOT_MINE = { ...REX, id: 'dog-other', owner_id: 'owner-2', name: 'Other' };
+
+Deno.test("stays also returns the owner's info and every dog's full current profile, with signed photo URLs", async () => {
+  const { token, row } = await sessionFor(OWNER.id);
+  const stub = stubBackend({
+    owners: [FULL_OWNER], portal_sessions: [row], settings: [SETTINGS_ROW], dogs: [REX, NOT_MINE],
+    stays: [stayRow('s1', 'approved', { stay_dogs: [{ name: 'Rex', dog_id: 'dog-rex' }] })],
+  }, { hours: { s1: 100 } });
+  try {
+    const data = await (await handleRequest(post({ action: 'stays', token }))).json();
+    assertEquals(data.owner, { name: 'Jane Smith', phone: '4155550199', email: 'jane@test.com', vetName: 'Marin Pet Hospital' });
+    assertEquals(data.dogs.length, 1);
+    const rex = data.dogs[0];
+    assertEquals(rex.id, 'dog-rex');
+    assertEquals(rex.aggressionHistory, 'yes');
+    assertEquals(rex.aggressionDetail, 'Barks at bikes');
+    assertEquals(rex.spayNeuter, 'yes');
+    assertEquals(rex.photos.length, 1);
+    assertEquals(rex.photos[0].path, 'rex-1.jpg');
+    assert(String(rex.photos[0].url).includes('/storage/v1/object/sign/dog-photos/rex-1.jpg'));
+    assertEquals(data.stays[0].dogIds, ['dog-rex']);
+  } finally {
+    stub.restore();
+  }
+});
+
+Deno.test('stays: dates can be changed on an open stay before drop-off - not one with a change already pending, nor a pending change itself', async () => {
+  const { token, row } = await sessionFor(OWNER.id);
+  const stub = stubBackend({
+    owners: [FULL_OWNER], portal_sessions: [row], settings: [SETTINGS_ROW], dogs: [REX],
+    stays: [
+      stayRow('open', 'approved'),
+      stayRow('has-change', 'approved'),
+      stayRow('the-change', 'pending', { replaces_stay_id: 'has-change' }),
+      stayRow('started', 'approved'),
+      stayRow('done', 'cancelled'),
+    ],
+  }, { hours: { open: 100, 'has-change': 100, 'the-change': 300, started: -5 } });
+  try {
+    const data = await (await handleRequest(post({ action: 'stays', token }))).json();
+    const can = Object.fromEntries(data.stays.map((s: Row) => [s.id, s.canChangeDates]));
+    assertEquals(can, { open: true, 'has-change': false, 'the-change': false, started: false, done: false });
+  } finally {
+    stub.restore();
+  }
+});
+
+Deno.test("updateDog saves a client's own dog's profile (dogs only, never a past stay's snapshot) and returns the refreshed list", async () => {
+  const { token, row } = await sessionFor(OWNER.id);
+  const stub = stubBackend({
+    owners: [FULL_OWNER], portal_sessions: [row], settings: [SETTINGS_ROW], dogs: [{ ...REX }],
+    stays: [], stay_dogs: [{ stay_id: 's-old', dog_id: 'dog-rex', breed: 'Labrador' }],
+  });
+  try {
+    const res = await handleRequest(post({
+      action: 'updateDog', token,
+      dog: {
+        id: 'dog-rex', breed: ' Lab Mix ', dob: '2020-02-02', spayNeuter: 'yes',
+        aggressionHistory: 'no', aggressionDetail: 'stale text', healthConcerns: 'yes', healthDetail: 'Arthritis',
+        photoPaths: ['rex-2.jpg'],
+      },
+    }));
+    assertEquals(res.status, 200);
+    const saved = stub.tables.dogs[0];
+    assertEquals(saved.breed, 'Lab Mix');
+    assertEquals(saved.dob, '2020-02-02');
+    assertEquals(saved.aggression_history, 'no');
+    assertEquals(saved.aggression_detail, null); // "no" clears the old description
+    assertEquals(saved.health_detail, 'Arthritis');
+    assertEquals(saved.photo_paths, ['rex-2.jpg']);
+    assertEquals(saved.name, 'Rex'); // name isn't editable here
+    assertEquals(stub.tables.stay_dogs[0].breed, 'Labrador');
+    assertEquals((await res.json()).dogs[0].breed, 'Lab Mix');
+  } finally {
+    stub.restore();
+  }
+});
+
+Deno.test("updateDog refuses someone else's dog, a missing required answer, or bad photo paths - changing nothing", async () => {
+  const { token, row } = await sessionFor(OWNER.id);
+  const good = { id: 'dog-rex', breed: 'Lab', dob: '2020-01-01', spayNeuter: 'yes', aggressionHistory: 'no', healthConcerns: 'no', photoPaths: [] };
+  const stub = stubBackend({ owners: [FULL_OWNER], portal_sessions: [row], settings: [SETTINGS_ROW], dogs: [{ ...REX }, { ...NOT_MINE }], stays: [] });
+  try {
+    for (const dog of [
+      { ...good, id: 'dog-other' },
+      { ...good, breed: '  ' },
+      { ...good, aggressionHistory: 'maybe' },
+      { ...good, dob: '' },
+      { ...good, photoPaths: ['../../etc'] },
+      { ...good, photoPaths: 'rex.jpg' },
+    ]) {
+      const res = await handleRequest(post({ action: 'updateDog', token, dog }));
+      assert(res.status === 400 || res.status === 404, `${JSON.stringify(dog)}: ${res.status}`);
+    }
+    assertEquals(stub.tables.dogs[0].breed, 'Labrador');
+    assertEquals(stub.tables.dogs[1].breed, 'Labrador');
+  } finally {
+    stub.restore();
+  }
+});
+
+Deno.test("updateOwner saves the client's email and vet (not name or phone)", async () => {
+  const { token, row } = await sessionFor(OWNER.id);
+  const stub = stubBackend({ owners: [{ ...FULL_OWNER }], portal_sessions: [row], settings: [SETTINGS_ROW], dogs: [], stays: [] });
+  try {
+    const res = await handleRequest(post({ action: 'updateOwner', token, owner: { email: ' New@Test.com ', vetName: 'Bay Vet', name: 'Hacker', phone: '1' } }));
+    assertEquals(res.status, 200);
+    const saved = stub.tables.owners[0];
+    assertEquals(saved.email, 'new@test.com');
+    assertEquals(saved.vet_name, 'Bay Vet');
+    assertEquals(saved.name, 'Jane Smith');
+    assertEquals(saved.phone, '4155550199');
+    assertEquals((await handleRequest(post({ action: 'updateOwner', token, owner: { email: 'not-an-email', vetName: 'Bay Vet' } }))).status, 400);
+    assertEquals((await handleRequest(post({ action: 'updateOwner', token: 'bogus', owner: { email: 'a@b.co' } }))).status, 401);
   } finally {
     stub.restore();
   }

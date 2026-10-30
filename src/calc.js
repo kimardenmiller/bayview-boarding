@@ -267,6 +267,57 @@ export function dogIsComplete(dog) {
   return !!(dog.name.trim() && dog.breed.trim() && dog.dob && dog.spayNeuter && dog.aggressionHistory && dog.healthConcerns);
 }
 
+// The dog page's own per-field errors - shared by the booking form's dog
+// page and My Stays' profile editor (Oct 30, 2026), so both ask for
+// exactly the same answers. dogIsComplete above is the same rule as a
+// yes/no.
+export function dogProfileErrors(dog) {
+  const e = {};
+  if (!dog.name.trim()) e.name = 'Required';
+  if (!dog.breed.trim()) e.breed = 'Required';
+  if (!dog.dob) e.dob = 'Required';
+  if (!dog.spayNeuter) e.spayNeuter = 'Required';
+  if (!dog.aggressionHistory) e.aggressionHistory = 'Please select an answer';
+  if (!dog.healthConcerns) e.healthConcerns = 'Please select an answer';
+  return e;
+}
+
+// A dog profile as the portal function returns it -> the booking form's
+// own dog shape (emptyDog). Existing photos come with a signed URL, used
+// as their preview; they're already uploaded, so they just carry their
+// path through to the next submission.
+export function portalDogToFormDog(d) {
+  return {
+    ...emptyDog(),
+    name: d.name || '', breed: d.breed || '', dob: d.dob || '', spayNeuter: d.spayNeuter || '',
+    aggressionHistory: d.aggressionHistory || '', aggressionDetail: d.aggressionDetail || '',
+    healthConcerns: d.healthConcerns || '', healthDetail: d.healthDetail || '',
+    photos: (d.photos || []).map(p => ({ path: p.path, previewUrl: p.url, uploading: false, error: null })),
+  };
+}
+
+// The booking form's fields, prefilled from My Stays (Oct 30, 2026): the
+// owner's info plus the dogs that were on `stay` (their CURRENT profiles,
+// not that stay's snapshot). A rebook leaves the dates blank; a date
+// change starts from the stay's own dates/times/notes. Falls back to all
+// of the owner's dogs if none of the stay's are still on file.
+export function bookingFormFromPortal({ owner, dogs }, stay, { keepDates }) {
+  const onStay = (dogs || []).filter(d => (stay.dogIds || []).includes(d.id));
+  const chosen = onStay.length > 0 ? onStay : (dogs || []);
+  return {
+    ownerName: owner?.name || '',
+    ownerPhone: owner?.phone || '',
+    ownerEmail: owner?.email || '',
+    vetName: owner?.vetName || 'Select a Vet',
+    dogs: chosen.length > 0 ? chosen.map(portalDogToFormDog) : [emptyDog()],
+    checkIn: keepDates ? stay.check_in || '' : '',
+    checkOut: keepDates ? stay.check_out || '' : '',
+    dropTime: (stay.drop_time || '').slice(0, 5),
+    pickupTime: (stay.pickup_time || '').slice(0, 5),
+    notes: keepDates ? stay.notes || '' : '',
+  };
+}
+
 // "09:00" -> "9:00 AM" - the client-side twin of send-confirmation's own
 // formatTime12h (same output a client already sees in their texts), used
 // by the client portal (Oct 29, 2026). Empty in, empty out.

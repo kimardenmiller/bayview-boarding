@@ -834,6 +834,16 @@ export default function AdminView({
   });
   const pendingRequests = Array.from(pendingByStayId.values()).sort((a, b) => a.check_in.localeCompare(b.check_in));
 
+  // A client's date change from My Stays (Oct 30, 2026) is a new request
+  // carrying replaces_stay_id - approving it cancels the original (no fee)
+  // server-side. These let both cards say so.
+  const stayById = new Map();
+  const replacedByStayId = new Map();
+  dogs.forEach(d => (d.stays || []).forEach(s => {
+    stayById.set(s.id, s);
+    if (s.replaces_stay_id && s.approval_status === 'approved') replacedByStayId.set(s.replaces_stay_id, s);
+  }));
+
   // Every dog's stay history already carries billed_at - no separate
   // fetch needed, just flatten across dogs and dedupe by stay id (a
   // shared multi-dog stay otherwise appears once per dog). "Unbilled"
@@ -963,6 +973,13 @@ export default function AdminView({
           </button>
         </div>
         <div className="stay-meta">{formatDate(s.check_in)} – {formatDate(s.check_out)}</div>
+        {s.replaces_stay_id && (
+          <div className="stay-meta" style={{ color: '#B7791F' }}>
+            Date change for their {stayById.has(s.replaces_stay_id)
+              ? `${formatDate(stayById.get(s.replaces_stay_id).check_in)} – ${formatDate(stayById.get(s.replaces_stay_id).check_out)}`
+              : 'earlier'} stay - approving cancels that one (no fee)
+          </div>
+        )}
         {isExpanded && (
           <div style={{ marginTop: 8 }}>
             <div className="stay-meta">{s.ownerPhone}</div>
@@ -1170,7 +1187,9 @@ export default function AdminView({
             )}
             {s.approval_status === 'cancelled' && (
               <div className="stay-meta">
-                Cancelled by the client{s.cancelled_at ? ` on ${formatDate(s.cancelled_at.slice(0, 10))}` : ''} · {
+                {replacedByStayId.has(s.id)
+                  ? `Replaced by a date change (${formatDate(replacedByStayId.get(s.id).check_in)} – ${formatDate(replacedByStayId.get(s.id).check_out)})`
+                  : 'Cancelled by the client'}{s.cancelled_at ? ` on ${formatDate(s.cancelled_at.slice(0, 10))}` : ''} · {
                   Number(s.cancellation_fee) > 0
                     ? `Cancellation fee: $${formatMoney(s.cancellation_fee)} of a $${formatMoney(s.estimated_cost)} estimate${s.cancellation_fee_waived_at ? ' (waived)' : ''}`
                     : 'No cancellation fee'

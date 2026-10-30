@@ -1,6 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { googleAccessToken } from "../_shared/googleCalendar.ts";
+import { googleAccessToken, deleteCalendarEvent } from "../_shared/googleCalendar.ts";
 
 // The admin password lives only as a Supabase secret (see `supabase secrets
 // set ADMIN_PASSWORD=...`) — it is never shipped in the client JS bundle,
@@ -74,7 +74,7 @@ function shapeDog(d: RawDog) {
 }
 
 const DOGS_SELECT =
-  "id, name, breed, dob, spay_neuter, aggression_history, aggression_detail, health_concerns, health_detail, owner:owners(name, phone, email), stay_dogs(name, breed, dob, spay_neuter, aggression_history, aggression_detail, health_concerns, health_detail, photo_paths, stay:stays(id, check_in, check_out, drop_time, pickup_time, notes, estimated_cost, number_of_dogs, submitted_at, waiver_snapshot, billed_at, paid_at, approval_status, approved_at, denied_at, denial_reason, cancelled_at, cancellation_fee, cancellation_fee_waived_at))";
+  "id, name, breed, dob, spay_neuter, aggression_history, aggression_detail, health_concerns, health_detail, owner:owners(name, phone, email), stay_dogs(name, breed, dob, spay_neuter, aggression_history, aggression_detail, health_concerns, health_detail, photo_paths, stay:stays(id, check_in, check_out, drop_time, pickup_time, notes, estimated_cost, number_of_dogs, submitted_at, waiver_snapshot, billed_at, paid_at, approval_status, approved_at, denied_at, denial_reason, replaces_stay_id, cancelled_at, cancellation_fee, cancellation_fee_waived_at))";
 
 const DOG_PHOTOS_BUCKET = "dog-photos";
 // A dog photo's Storage bucket is private (see the Sept 21, 2026
@@ -397,6 +397,41 @@ export async function handleRequest(req: Request): Promise<Response> {
       return false;
     }
 
+    // A client's date change from My Stays (Oct 30, 2026) is a new
+    // request carrying replaces_stay_id. Approving it is what retires the
+    // original: cancelled with NO fee (a date change never incurs one),
+    // off the calendar. Only if the original is still pending/approved -
+    // if the client already cancelled it, or it was denied, leave it be.
+    // No text: the new stay's confirmation text already tells the client.
+    async function retireReplacedStay(newStayId: string) {
+      const { data: current, error: currentErr } = await supabase
+        .from("stays").select("replaces_stay_id").eq("id", newStayId).single();
+      if (currentErr) throw currentErr;
+      const originalId = (current as { replaces_stay_id: string | null }).replaces_stay_id;
+      if (!originalId) return;
+
+      const { data: retired, error: retireErr } = await supabase.from("stays")
+        .update({ approval_status: "cancelled", cancelled_at: new Date().toISOString(), cancellation_fee: 0 })
+        .eq("id", originalId).in("approval_status", ["pending", "approved"])
+        .select("id");
+      if (retireErr) throw retireErr;
+      if (!retired?.length) return;
+
+      const { data: original, error: originalErr } = await supabase.from("stays")
+        .select("calendar_allday_event_id, calendar_dropoff_event_id, calendar_pickup_event_id")
+        .eq("id", originalId).single();
+      if (originalErr) { console.error("admin-data: couldn't read replaced stay's calendar ids", originalErr); return; }
+      const cleared: Record<string, null> = {};
+      for (const column of ["calendar_allday_event_id", "calendar_dropoff_event_id", "calendar_pickup_event_id"]) {
+        const eventId = (original as Record<string, string | null>)[column];
+        if (eventId && await deleteCalendarEvent(eventId)) cleared[column] = null;
+      }
+      if (Object.keys(cleared).length > 0) {
+        const { error: clearErr } = await supabase.from("stays").update(cleared).eq("id", originalId);
+        if (clearErr) console.error("admin-data: deleted replaced stay's events but couldn't clear their ids", clearErr);
+      }
+    }
+
     // A cancelled stay's dates/cost are a closed record now, and its
     // calendar events were deleted on cancel - billStay/editStay's
     // calendar re-sync would otherwise quietly recreate them (Oct 29,
@@ -467,6 +502,7 @@ export async function handleRequest(req: Request): Promise<Response> {
       // request) - this IS the confirmed-booking moment, so always
       // create an event here, best-effort (see syncStayCalendarEvent).
       await syncStayCalendarEvent(stayId, { createIfMissing: true });
+      await retireReplacedStay(stayId);
     } else if (action === "denyStay") {
       if (!stayId) return json({ error: "stayId is required" }, 400);
       const { error: updateErr } = await supabase.from("stays")

@@ -58,6 +58,10 @@ function stubSupabase(opts: {
   dueStays?: { id: string }[];
   googleTokenStatus?: number; googleEventStatus?: number;
   googleEventPatchStatus?: number;
+  // Per-id rows for lookups that need a stay other than stayRow (a date
+  // change's original - Oct 30, 2026); the status filter on a PATCH is
+  // honored against these too.
+  staysById?: Record<string, Record<string, unknown>>;
 } = {}) {
   const dogs = opts.dogs ?? DOGS_FIXTURE;
   const totalStays = opts.totalStays ?? 2;
@@ -129,6 +133,19 @@ function stubSupabase(opts: {
     // syncStayCalendarEvent's own .single() lookup - real PostgREST
     // returns the object directly (not array-wrapped) for .single(), or
     // a 406 if no row matches.
+    const byId = opts.staysById?.[url.searchParams.get('id')?.replace('eq.', '') ?? ''];
+    if (table === 'stays' && method === 'GET' && byId) {
+      return new Response(JSON.stringify(byId), { status: 200 });
+    }
+    if (table === 'stays' && method === 'PATCH' && byId) {
+      const statusFilter = url.searchParams.get('approval_status');
+      const allowed = statusFilter?.startsWith('in.(') ? statusFilter.slice(4, -1).split(',') : null;
+      if (allowed && !allowed.includes(String(byId.approval_status))) {
+        return new Response(JSON.stringify([]), { status: 200 });
+      }
+      Object.assign(byId, body);
+      return new Response(JSON.stringify([{ id: byId.id }]), { status: 200 });
+    }
     if (table === 'stays' && method === 'GET') {
       if (stayRow === null) return new Response(JSON.stringify({ message: 'not found' }), { status: 406 });
       return new Response(JSON.stringify(stayRow), { status: 200 });
@@ -866,6 +883,68 @@ Deno.test('rejects an unknown action', async () => {
   try {
     const res = await handleRequest(postRequest({ password: ADMIN_PASSWORD, action: 'deleteEverything' }));
     assertEquals(res.status, 400);
+  } finally {
+    stub.restore();
+  }
+});
+
+// ── Client portal phase 3: date changes (Oct 30, 2026) ──────────────────────
+
+function originalStay(approval_status: string) {
+  return {
+    id: 'stay-old', approval_status,
+    calendar_allday_event_id: 'ev-old-all', calendar_dropoff_event_id: 'ev-old-drop', calendar_pickup_event_id: null,
+  };
+}
+
+Deno.test('approveStay: approving a date change cancels the original stay with no fee and takes it off the calendar', async () => {
+  const original = originalStay('approved');
+  const stub = stubSupabase({
+    stayRow: { ...DEFAULT_STAY_ROW, replaces_stay_id: 'stay-old' },
+    staysById: { 'stay-old': original },
+  });
+  try {
+    const res = await handleRequest(postRequest({ password: ADMIN_PASSWORD, action: 'approveStay', stayId: 'stay-new' }));
+    assertEquals(res.status, 200);
+    assertEquals(original.approval_status, 'cancelled');
+    assertEquals((original as Record<string, unknown>).cancellation_fee, 0);
+    assertEquals(typeof (original as Record<string, unknown>).cancelled_at, 'string');
+    const deletes = stub.calls.filter((c) => c.table === 'google-calendar-event' && c.method === 'DELETE').map((c) => c.search!.split('/').pop());
+    assertEquals(deletes.sort(), ['ev-old-all', 'ev-old-drop']);
+    assertEquals(original.calendar_allday_event_id, null);
+    assertEquals(original.calendar_dropoff_event_id, null);
+  } finally {
+    stub.restore();
+  }
+});
+
+Deno.test('approveStay: leaves an original the client already cancelled alone', async () => {
+  const original = originalStay('cancelled');
+  const stub = stubSupabase({
+    stayRow: { ...DEFAULT_STAY_ROW, replaces_stay_id: 'stay-old' },
+    staysById: { 'stay-old': original },
+  });
+  try {
+    const res = await handleRequest(postRequest({ password: ADMIN_PASSWORD, action: 'approveStay', stayId: 'stay-new' }));
+    assertEquals(res.status, 200);
+    assertEquals((original as Record<string, unknown>).cancellation_fee, undefined);
+    assertEquals(stub.calls.filter((c) => c.table === 'google-calendar-event' && c.method === 'DELETE').length, 0);
+  } finally {
+    stub.restore();
+  }
+});
+
+Deno.test('denyStay: denying a date change leaves the original untouched', async () => {
+  const original = originalStay('approved');
+  const stub = stubSupabase({
+    stayRow: { ...DEFAULT_STAY_ROW, replaces_stay_id: 'stay-old' },
+    staysById: { 'stay-old': original },
+  });
+  try {
+    const res = await handleRequest(postRequest({ password: ADMIN_PASSWORD, action: 'denyStay', stayId: 'stay-new' }));
+    assertEquals(res.status, 200);
+    assertEquals(original.approval_status, 'approved');
+    assertEquals(stub.calls.filter((c) => c.table === 'google-calendar-event').length, 0);
   } finally {
     stub.restore();
   }

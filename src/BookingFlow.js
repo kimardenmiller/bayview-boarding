@@ -1,9 +1,10 @@
 import { useState } from 'react';
 import { supabase } from './supabase';
 import { WAIVER_SECTIONS } from './waiver';
-import { formatDate, calcAge, todayISO, calcCostBreakdown, formatMoney, emptyDog, dogIsComplete, vetDropdownOptions, formatCancellationPolicy } from './calc';
+import { formatDate, todayISO, calcCostBreakdown, formatMoney, emptyDog, dogIsComplete, dogProfileErrors, vetDropdownOptions, formatCancellationPolicy, formatTime12h } from './calc';
 import CostBreakdown from './CostBreakdown';
 import Field from './Field';
+import DogProfileFields from './DogProfileFields';
 
 // The entire booking wizard (Owner Info -> Dog pages -> Stay Dates ->
 // Waiver -> Sign -> Confirmation) - split into its own lazy-loaded chunk
@@ -206,146 +207,28 @@ function StepOwner({ data, onChange, onNext, vetOptions, multiDogDiscount }) {
 
 // One page per dog, titled "Dog 1", "Dog 2", etc. - `index` picks which
 // entry of data.dogs this page edits. Vet and dog count live on the
-// owner page now (see StepOwner); only per-dog fields live here.
+// owner page now (see StepOwner); only per-dog fields live here - in
+// DogProfileFields since Oct 30, 2026, shared with My Stays.
 function StepDogPage({ data, onChange, index, onNext, onBack }) {
   const [errors, setErrors] = useState({});
   const dog = data.dogs[index];
-  const age = calcAge(dog.dob);
 
   function updateDog(field, value) {
     onChange('dogs', data.dogs.map((d, i) => i === index ? { ...d, [field]: value } : d));
   }
 
-  // Any number of photos (Sept 21, 2026, on request; multiple since
-  // Sept 22, 2026, also on request) - never blocks Continue either way,
-  // whether an upload is still in flight or fails outright (see
-  // dogIsComplete/getErrors below, deliberately unchanged). Each
-  // selected file gets an instant local preview (createObjectURL),
-  // independent of its own upload actually finishing - no need to wait
-  // on a signed URL just to show the owner their own just-picked files
-  // (the bucket is private anyway, so there's no signed URL to fetch
-  // even after upload completes), and it works even if the upload
-  // itself fails. Files upload one at a time (not in parallel) so each
-  // one's own updateDog call sees the previous one's result already
-  // applied, rather than racing on this closure's now-stale `dog.photos`.
-  async function handlePhotoChange(e) {
-    const files = Array.from(e.target.files || []);
-    e.target.value = '';
-    if (files.length === 0) return;
-
-    let photos = dog.photos.concat(files.map(file => ({
-      path: null, previewUrl: URL.createObjectURL(file), uploading: true, error: null,
-    })));
-    const startAt = dog.photos.length;
-    updateDog('photos', photos);
-
-    for (let i = 0; i < files.length; i++) {
-      const form = new FormData();
-      form.append('file', files[i]);
-      const { data: result, error: fnError } = await supabase.functions.invoke('dog-photos', { body: form });
-      const failed = fnError || result?.error;
-      photos = photos.map((p, j) => j !== startAt + i ? p : {
-        ...p, uploading: false,
-        path: failed ? null : result.path,
-        error: failed ? "Couldn't upload this photo." : null,
-      });
-      updateDog('photos', photos);
-    }
-  }
-
-  function removePhoto(i) {
-    updateDog('photos', dog.photos.filter((_, j) => j !== i));
-  }
-
-  function getErrors() {
-    const e = {};
-    if (!dog.name.trim()) e.name = 'Required';
-    if (!dog.breed.trim()) e.breed = 'Required';
-    if (!dog.dob) e.dob = 'Required';
-    if (!dog.spayNeuter) e.spayNeuter = 'Required';
-    if (!dog.aggressionHistory) e.aggressionHistory = 'Please select an answer';
-    if (!dog.healthConcerns) e.healthConcerns = 'Please select an answer';
-    return e;
-  }
-
   function validate() {
-    const e = getErrors();
+    const e = dogProfileErrors(dog);
     setErrors(e);
     return Object.keys(e).length === 0;
   }
 
-  const canContinue = Object.keys(getErrors()).length === 0;
+  const canContinue = Object.keys(dogProfileErrors(dog)).length === 0;
 
   return (
     <div className="step">
       <h2 className="step-title">Dog {index + 1}</h2>
-      <Field label="Dog's Name" error={errors.name}>
-        <input value={dog.name} onChange={e => updateDog('name', e.target.value)} placeholder="Buddy" />
-      </Field>
-      <Field label="Photos (optional)">
-        {dog.photos.length > 0 && (
-          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 8 }}>
-            {dog.photos.map((p, i) => (
-              <div key={i} style={{ position: 'relative' }}>
-                <img
-                  src={p.previewUrl}
-                  alt={`${dog.name || 'Dog'}'s photo ${i + 1}`}
-                  className="dog-photo-thumb dog-photo-thumb--lg"
-                  style={{ opacity: p.uploading ? 0.6 : 1 }}
-                />
-                <button
-                  type="button"
-                  aria-label={`Remove photo ${i + 1}`}
-                  onClick={() => removePhoto(i)}
-                  style={{ position: 'absolute', top: -7, right: -7, width: 20, height: 20, borderRadius: '50%', border: 'none', background: '#C0392B', color: '#fff', fontSize: '0.72rem', lineHeight: '20px', padding: 0, cursor: 'pointer' }}
-                >×</button>
-                {p.uploading && <div style={{ fontSize: '0.7rem', color: '#6B7A8A', marginTop: 2 }}>Uploading...</div>}
-                {p.error && <div className="field-error" style={{ fontSize: '0.72rem', marginTop: 2 }}>{p.error}</div>}
-              </div>
-            ))}
-          </div>
-        )}
-        <input type="file" accept="image/*" multiple aria-label="Photos (optional)" onChange={handlePhotoChange} />
-      </Field>
-      <Field label="Breed" error={errors.breed}>
-        <input value={dog.breed} onChange={e => updateDog('breed', e.target.value)} placeholder="Golden Retriever" />
-      </Field>
-      <Field label="Date of Birth" error={errors.dob}>
-        <input type="date" value={dog.dob} max={todayISO()} onChange={e => updateDog('dob', e.target.value)} />
-        {age && <div style={{ fontSize: '0.78rem', color: '#7D9B76', marginTop: 4 }}>Age: {age}</div>}
-      </Field>
-      <Field label="Spayed / Neutered?" error={errors.spayNeuter}>
-        <select value={dog.spayNeuter} onChange={e => updateDog('spayNeuter', e.target.value)}>
-          <option value="">Select one</option>
-          <option value="yes">Yes</option>
-          <option value="no">No (over 1 year)</option>
-          <option value="under1">Not yet (under 1 year)</option>
-        </select>
-      </Field>
-      <Field label="Any aggression history toward people or dogs?" error={errors.aggressionHistory}>
-        <select value={dog.aggressionHistory} onChange={e => updateDog('aggressionHistory', e.target.value)}>
-          <option value="">Select one</option>
-          <option value="no">No</option>
-          <option value="yes">Yes — I'll describe below</option>
-        </select>
-      </Field>
-      {dog.aggressionHistory === 'yes' && (
-        <Field label="Please describe">
-          <textarea value={dog.aggressionDetail} onChange={e => updateDog('aggressionDetail', e.target.value)} rows={3} placeholder="Describe any known triggers or incidents" />
-        </Field>
-      )}
-      <Field label="Any health conditions or heat sensitivity?" error={errors.healthConcerns}>
-        <select value={dog.healthConcerns} onChange={e => updateDog('healthConcerns', e.target.value)}>
-          <option value="">Select one</option>
-          <option value="no">No</option>
-          <option value="yes">Yes — I'll describe below</option>
-        </select>
-      </Field>
-      {dog.healthConcerns === 'yes' && (
-        <Field label="Please describe">
-          <textarea value={dog.healthDetail} onChange={e => updateDog('healthDetail', e.target.value)} rows={3} placeholder="Describe any conditions, limitations, or sensitivities" />
-        </Field>
-      )}
+      <DogProfileFields dog={dog} onField={updateDog} errors={errors} />
       <div className="step-actions">
         <button className="btn-secondary" onClick={onBack}>← Back to Dogs</button>
         <button className="btn-primary" onClick={() => validate() && onNext()} disabled={!canContinue}>Done</button>
@@ -354,7 +237,7 @@ function StepDogPage({ data, onChange, index, onNext, onBack }) {
   );
 }
 
-function StepDates({ data, onChange, onNext, onBack, rate, minimumStay, multiDogDiscount, holidayUpcharge, cancellationPolicy }) {
+function StepDates({ data, onChange, onNext, onBack, rate, minimumStay, multiDogDiscount, holidayUpcharge, cancellationPolicy, dateChange }) {
   const [errors, setErrors] = useState({});
 
   function getErrors() {
@@ -397,6 +280,13 @@ function StepDates({ data, onChange, onNext, onBack, rate, minimumStay, multiDog
   return (
     <div className="step">
       <h2 className="step-title">Stay Dates</h2>
+      {dateChange && (
+        <p className="request-notice">
+          Changing the dates of {dateChange.dogNames.join(' & ') || 'your dog'}'s stay
+          ({formatDate(dateChange.check_in)} {formatTime12h(dateChange.drop_time)} → {formatDate(dateChange.check_out)} {formatTime12h(dateChange.pickup_time)}).
+          Your current booking stays in place until we confirm the new dates, and there's no fee for a date change.
+        </p>
+      )}
       <div className="field-row">
         <Field label="Check-in Date" error={errors.checkIn}>
           <input type="date" value={data.checkIn} min={todayISO()} onChange={e => onChange('checkIn', e.target.value)} />
@@ -506,15 +396,15 @@ function StepSign({ data, onChange, onSubmit, onBack, ownerName, submitting }) {
   );
 }
 
-function Confirmation({ stay, onNewBooking }) {
+function Confirmation({ stay, onNewBooking, dateChange }) {
   return (
     <div className="step confirmation">
       <div className="confirm-icon">✓</div>
       <h2>Request received, {stay.owner_name?.split(' ')[0]}!</h2>
       <p>
-        We've received your booking request and signed agreement for <strong>{stay.dog_name}</strong>.
+        We've received your {dateChange ? 'date change request' : 'booking request'} and signed agreement for <strong>{stay.dog_name}</strong>.
         We'll review it and text you within 24 hours to confirm it - or let you know if we can't
-        accommodate it.
+        accommodate it.{dateChange && ' Until then, your original booking stays as it is.'}
       </p>
       <div className="confirm-blocks">
         <div className="confirm-block">
@@ -552,7 +442,7 @@ function Confirmation({ stay, onNewBooking }) {
 export default function BookingFlow({
   onTitleClick, step, setStep, submitted, form, onChange, vets,
   multiDogDiscount, rate, minimumStay, holidayUpcharge, cancellationPolicy,
-  onSubmit, submitting, currentStay, onNewBooking,
+  onSubmit, submitting, currentStay, onNewBooking, dateChange,
 }) {
   return (
     <>
@@ -581,13 +471,14 @@ export default function BookingFlow({
                 multiDogDiscount={multiDogDiscount}
                 holidayUpcharge={holidayUpcharge}
                 cancellationPolicy={cancellationPolicy}
+                dateChange={dateChange}
               />
             )}
             {step === 2 && <StepWaiver onNext={() => setStep(step + 1)} onBack={() => setStep(step - 1)} />}
             {step === 3 && <StepSign data={form} onChange={onChange} onSubmit={onSubmit} onBack={() => setStep(step - 1)} ownerName={form.ownerName} submitting={submitting} />}
           </>
         ) : (
-          <Confirmation stay={currentStay} onNewBooking={onNewBooking} />
+          <Confirmation stay={currentStay} onNewBooking={onNewBooking} dateChange={dateChange} />
         )}
       </main>
     </>

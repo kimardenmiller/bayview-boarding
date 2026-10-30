@@ -17,7 +17,8 @@ NEXT CHANGE LIST (v1.5)
    This item itself never gets "done" - it's a recurring habit, not a
    one-time task.
 
-2. CLIENT PORTAL (spec agreed Oct 29, 2026 - not started). Requested by
+2. CLIENT PORTAL (spec agreed Oct 29, 2026 - ALL 3 PHASES SHIPPED by Oct
+   30, 2026; kept here as the spec of record). Requested by
    Kim. Build in 3 phases, each shipped/deployed on its own.
 
    Auth:
@@ -69,7 +70,7 @@ NEXT CHANGE LIST (v1.5)
      as "Cancelled").
    - No cancelling after drop-off from the portal (contact us instead).
 
-   Phase 3 - extras:
+   Phase 3 - extras: SHIPPED Oct 30, 2026 (v1.49.0) - see COMPLETED.
    - Change dates: submits a NEW pending request (prefilled); the old
      stay stays as-is until the new one is approved, then is cancelled
      with NO fee (confirmed Oct 29 - a date change never incurs one).
@@ -91,6 +92,34 @@ DEFERRED (revisit only if it actually blocks something)
 
 COMPLETED
 ---------
+- Oct 30, 2026 (v1.49.0): Client portal phase 3 (spec: NEXT CHANGE LIST
+  item 2). My Stays now also shows "Your Info" (email + vet editable;
+  name/phone not - the phone is the login, the name is what signed
+  agreements match) and "My Dogs" (breed/DOB/spay-neuter/aggression/
+  health/photos editable; portal updateOwner/updateDog actions - `dogs`/
+  `owners` only, never a past stay_dogs snapshot). The dog fields moved
+  out of BookingFlow's dog page into a shared src/DogProfileFields.js so
+  both ask the same questions (dogProfileErrors in calc.js). The portal's
+  `stays` payload now carries the owner + every dog's full current profile
+  (signed photo URLs) - safe since the session proves who's asking, unlike
+  lookup-client - so "Book again" (Past/Declined/Cancelled stays) and the
+  portal's own "Book a Stay" open the booking form fully prefilled
+  (bookingFormFromPortal), straight to Stay Dates when every dog is
+  complete. "Change dates" (open stays, before drop-off) prefills that
+  stay's dates/times/notes too and submits a NEW pending request with
+  stays.replaces_stay_id (migration 20261030000000) - submit-booking only
+  accepts that with a valid portal session that owns the original (same
+  phone, original still pending/approved, not itself a pending change),
+  checked before anything is written (session lookup moved to _shared/
+  portalSession.ts). Admin approving the change (admin-data approveStay ->
+  retireReplacedStay) cancels the original with NO fee and deletes its 3
+  calendar events; denying leaves the original untouched. No extra text -
+  the approval's confirmation text covers it. Admin's Requests card says
+  "Date change for their X - Y stay"; the retired original shows "Replaced
+  by a date change" in Past Stays. Tests: 279 Jest (+7), Deno portal 27
+  (+5) / submit-booking 24 (+2) / admin-data 44 (+3). Live-checked:
+  column present; bogus-token updateDog and date-change submit both
+  refused (401) with nothing written.
 - Oct 29, 2026 (v1.48.0): Client portal phase 2 - cancellation (spec:
   NEXT CHANGE LIST item 2). My Stays shows "Cancel stay" (approved) /
   "Withdraw request" (pending) with the exact fee before confirming;
