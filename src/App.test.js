@@ -4049,3 +4049,73 @@ describe('My Stays — profiles, date changes, rebooking (client portal phase 3,
     expect(screen.queryByText(/Changing the dates of/)).not.toBeInTheDocument();
   });
 });
+
+// Photo uploads are shrunk in the browser first (Nov 3, 2026 - full-size
+// phone photos in the About gallery, 2-6 MB each, used up Supabase's
+// free-plan bandwidth and took the whole project offline). jsdom can't
+// decode images or draw on a canvas, so these stub just enough of both.
+describe('resizeImage (shrink photos before upload, Nov 3, 2026)', () => {
+  const { default: resizeImage, MAX_PHOTO_EDGE } = jest.requireActual('./resizeImage');
+  const RealImage = global.Image;
+  let drawn;
+
+  function stubBrowser({ width, height, outputSize, decodeFails = false }) {
+    drawn = null;
+    global.URL.revokeObjectURL = jest.fn();
+    global.Image = class {
+      constructor() { this.naturalWidth = width; this.naturalHeight = height; }
+      decode() { return decodeFails ? Promise.reject(new Error('cannot decode')) : Promise.resolve(); }
+    };
+    jest.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(function () {
+      return { fillRect: jest.fn(), drawImage: (img, x, y, w, h) => { drawn = { w, h }; }, set fillStyle(v) {} };
+    });
+    jest.spyOn(HTMLCanvasElement.prototype, 'toBlob').mockImplementation(function (cb, type) {
+      cb(new Blob([new Uint8Array(outputSize)], { type }));
+    });
+  }
+
+  afterEach(() => {
+    global.Image = RealImage;
+    jest.restoreAllMocks();
+  });
+
+  const bigFile = () => new File([new Uint8Array(5_000_000)], 'IMG_1234.jpeg', { type: 'image/jpeg' });
+
+  test('scales a large photo down to fit within the max edge, as a smaller JPEG', async () => {
+    stubBrowser({ width: 4032, height: 3024, outputSize: 300_000 });
+    const out = await resizeImage(bigFile());
+    expect(drawn).toEqual({ w: MAX_PHOTO_EDGE, h: 1200 });
+    expect(out.size).toBe(300_000);
+    expect(out.type).toBe('image/jpeg');
+    expect(out.name).toBe('IMG_1234.jpg');
+  });
+
+  test('keeps a portrait photo upright: the long edge is the one capped', async () => {
+    stubBrowser({ width: 3024, height: 4032, outputSize: 300_000 });
+    await resizeImage(bigFile());
+    expect(drawn).toEqual({ w: 1200, h: MAX_PHOTO_EDGE });
+  });
+
+  test('uploads the original if re-encoding would not make it smaller', async () => {
+    stubBrowser({ width: 4032, height: 3024, outputSize: 6_000_000 });
+    const file = bigFile();
+    expect(await resizeImage(file)).toBe(file);
+  });
+
+  test('leaves an already-small photo alone', async () => {
+    stubBrowser({ width: 800, height: 600, outputSize: 100_000 });
+    const file = new File([new Uint8Array(200_000)], 'small.jpg', { type: 'image/jpeg' });
+    expect(await resizeImage(file)).toBe(file);
+  });
+
+  test('falls back to the original if the browser cannot decode it (e.g. HEIC)', async () => {
+    stubBrowser({ width: 4032, height: 3024, outputSize: 300_000, decodeFails: true });
+    const file = bigFile();
+    expect(await resizeImage(file)).toBe(file);
+  });
+
+  test('falls back to the original where image decoding is unavailable', async () => {
+    const file = bigFile();
+    expect(await resizeImage(file)).toBe(file);
+  });
+});

@@ -930,10 +930,11 @@ visitor never reads.
 - src/calc.js — pure cost/date calculation and formatting helpers (calcCostBreakdown, formatDollars, dogIsComplete, etc.), no React dependency, shared by App.js/BookingFlow.js/AdminPanel.js and directly unit-tested by App.test.js
 - src/defaults.js — fallback default values (rate, vets, packing list, SMS templates) used before the `settings` fetch resolves, shared by App.js and AdminPanel.js
 - src/CostBreakdown.js / src/Field.js — small shared JSX components used by both BookingFlow.js and AdminPanel.js, split into their own modules so neither lazy chunk has to import the other
+- src/resizeImage.js — shrinks a photo in the browser before upload (long edge 1600px, JPEG), used by AdminPanel's About Photos upload and DogProfileFields' photo picker (Nov 3, 2026 - full-size phone photos in the About gallery used up Supabase's free-plan bandwidth and took the project offline; see FIXES.txt)
 - src/aboutPhotoSrc.js — shared helper resolving an about_photos entry to a real URL, used by App.js's AboutContent and AdminPanel.js's About Photos editor
 - src/settings.js — all configurable values (rates, vets, messages, packing list)
 - src/waiver.js — full waiver text
-- src/App.test.js — 279 passing tests (TDD), Supabase mocked via src/__mocks__/supabase.js
+- src/App.test.js — 285 passing tests (TDD), Supabase mocked via src/__mocks__/supabase.js
 - src/supabase.js — creates the Supabase client from REACT_APP_SUPABASE_URL/_KEY (falling back to production's own public values) - see Staging environment above for how the staging build overrides these
 - src/index.js — app entry point; also where Google Analytics loads (production only) and staging's noindex meta tag gets injected - see SEO & Analytics above
 - supabase/functions/send-contact/index.ts — public Contact Us form handler: relays name/email-or-phone/message to Kim & Estee by SMS (reuses KIM_PHONE/ESTEE_PHONE). Deployed normally (no --no-verify-jwt) since it's called via the Supabase JS client like settings/lookup-client/submit-booking

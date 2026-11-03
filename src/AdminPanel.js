@@ -5,6 +5,7 @@ import { DEFAULT_BROADCAST_MESSAGE, DEFAULT_SMS_FOOTER, DEFAULT_SMS_TEMPLATES, F
 import CostBreakdown from './CostBreakdown';
 import Field from './Field';
 import aboutPhotoSrc from './aboutPhotoSrc';
+import resizeImage from './resizeImage';
 
 // The entire admin panel - split into its own lazy-loaded chunk (Sept
 // 30, 2026, on request - code-splitting for mobile PageSpeed), since
@@ -355,7 +356,9 @@ export default function AdminView({
     setPhotoActionError('');
     const form = new FormData();
     form.append('password', pw);
-    form.append('file', file);
+    // Shrunk first (Nov 3, 2026) - full-size phone photos here are what
+    // used up Supabase's bandwidth quota. See resizeImage.
+    form.append('file', await resizeImage(file));
     const { data, error: fnError } = await supabase.functions.invoke('about-photos', { body: form });
     setUploadingPhoto(false);
     if (fnError || data?.error) {

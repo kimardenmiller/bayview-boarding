@@ -92,6 +92,19 @@ DEFERRED (revisit only if it actually blocks something)
 
 COMPLETED
 ---------
+- Nov 3, 2026 (v1.49.1): Supabase blocked the whole project (402 on
+  every call - site, booking, admin, reminders all down) after cached
+  egress hit 7.77 GB of the free plan's 5.5 GB. Cause: the 9 About
+  gallery photos were full-size phone uploads (2-6.4 MB each, 36.9 MB
+  total), downloaded by every visitor who scrolled to About Us - Ads
+  traffic made ~210 such visits enough. Fix part 1 (shipped): new
+  src/resizeImage.js shrinks every photo in the browser before upload
+  (long edge 1600px, JPEG 0.82; falls back to the original if the
+  browser can't decode it or re-encoding wouldn't be smaller), used by
+  both the admin About Photos upload and the dog photo picker. Verified
+  in real Chrome: 4032x3024 7.45 MB -> 1600x1200 0.18 MB. Part 2
+  (needs the project back up): re-compress the 9 existing About photos
+  and the larger dog photos in place, same paths.
 - Oct 30, 2026 (v1.49.0): Client portal phase 3 (spec: NEXT CHANGE LIST
   item 2). My Stays now also shows "Your Info" (email + vet editable;
   name/phone not - the phone is the login, the name is what signed

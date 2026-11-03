@@ -1,6 +1,7 @@
 import { supabase } from './supabase';
 import { calcAge, todayISO } from './calc';
 import Field from './Field';
+import resizeImage from './resizeImage';
 
 // A dog's profile fields (name, photos, breed, DOB, spay/neuter,
 // aggression, health) - moved out of BookingFlow's dog page (Oct 30,
@@ -37,7 +38,8 @@ export default function DogProfileFields({ dog, onField, errors, showName = true
 
     for (let i = 0; i < files.length; i++) {
       const form = new FormData();
-      form.append('file', files[i]);
+      // Shrunk first (Nov 3, 2026) - see resizeImage.
+      form.append('file', await resizeImage(files[i]));
       const { data: result, error: fnError } = await supabase.functions.invoke('dog-photos', { body: form });
       const failed = fnError || result?.error;
       photos = photos.map((p, j) => j !== startAt + i ? p : {
