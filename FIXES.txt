@@ -103,8 +103,13 @@ COMPLETED
   browser can't decode it or re-encoding wouldn't be smaller), used by
   both the admin About Photos upload and the dog photo picker. Verified
   in real Chrome: 4032x3024 7.45 MB -> 1600x1200 0.18 MB. Part 2
-  (needs the project back up): re-compress the 9 existing About photos
-  and the larger dog photos in place, same paths.
+  (done once the project came back, 6:30pm Nov 3): re-compressed every
+  photo over 600 KB in place, same paths (so no settings/stay_dogs
+  edits needed) - About photos 1200px long edge at JPEG 65 (36.9 MB ->
+  3.3 MB, max 0.56 MB; they show at 110-150px and enlarge on hover),
+  dog photos 1600px at JPEG 70 (32.9 MB -> 4.5 MB). The 2 dog .png
+  paths now hold JPEG data served as image/jpeg, which browsers handle
+  fine. Originals were backed up locally before overwriting.
 - Oct 30, 2026 (v1.49.0): Client portal phase 3 (spec: NEXT CHANGE LIST
   item 2). My Stays now also shows "Your Info" (email + vet editable;
   name/phone not - the phone is the login, the name is what signed
